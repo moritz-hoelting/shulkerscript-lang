@@ -74,6 +74,7 @@ pub enum Token {
     Punctuation(Punctuation),
     Numeric(Numeric),
     Comment(Comment),
+    LiteralCommand(LiteralCommand),
 }
 
 impl Token {
@@ -87,6 +88,7 @@ impl Token {
             Self::Punctuation(token) => &token.span,
             Self::Numeric(token) => &token.span,
             Self::Comment(token) => &token.span,
+            Self::LiteralCommand(token) => &token.span,
         }
     }
 }
@@ -100,6 +102,7 @@ impl SourceElement for Token {
             Self::Punctuation(token) => token.span(),
             Self::Numeric(token) => token.span(),
             Self::Comment(token) => token.span(),
+            Self::LiteralCommand(token) => token.span(),
         }
     }
 }
@@ -200,6 +203,26 @@ impl SourceElement for Comment {
     }
 }
 
+/// Represents a hardcoded literal command in the source code.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LiteralCommand {
+    /// Span that makes up the token.
+    pub span: Span,
+}
+
+impl SourceElement for LiteralCommand {
+    fn span(&self) -> Span {
+        self.span.clone()
+    }
+}
+impl LiteralCommand {
+    /// Returns the command without the leading slash.
+    #[must_use]
+    pub fn clean_command(&self) -> &str {
+        &self.span.str().trim()[1..]
+    }
+}
+
 /// Is an error that can occur when invoking the [`Token::tokenize`] method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, thiserror::Error, From)]
 #[allow(missing_docs)]
@@ -283,6 +306,7 @@ impl Token {
         iter: &mut SourceIterator,
         start: usize,
         character: char,
+        prev_token: Option<&Self>,
         handler: &impl Handler<Error>,
     ) -> Result<Self, TokenizeError> {
         // Single line comment
@@ -341,6 +365,10 @@ impl Token {
                 return Err(TokenizeError::FatalLexicalError);
             }
         }
+        // When there is no second slash and at the start of a line
+        else if prev_token.map_or(true, |token| token.span().str().contains('\n')) {
+            Ok(Self::handle_literal_command(iter, start))
+        }
         // Just a single slash punctuation
         else {
             Ok(Punctuation {
@@ -362,6 +390,16 @@ impl Token {
         .into()
     }
 
+    /// Handles a command that is preceeded by a slash
+    fn handle_literal_command(iter: &mut SourceIterator, start: usize) -> Self {
+        Self::walk_iter(iter, |c| !(c.is_whitespace() && c.is_ascii_control()));
+
+        LiteralCommand {
+            span: Self::create_span(start, iter),
+        }
+        .into()
+    }
+
     /// Lexes the source code from the given iterator.
     ///
     /// The tokenization starts at the current location of the iterator. The function moves the
@@ -375,6 +413,7 @@ impl Token {
     pub fn tokenize(
         iter: &mut SourceIterator,
         handler: &impl Handler<Error>,
+        prev_token: Option<&Self>,
     ) -> Result<Self, TokenizeError> {
         // Gets the first character
         let (start, character) = iter
@@ -391,7 +430,7 @@ impl Token {
         }
         // Found comment/single slash punctuation
         else if character == '/' {
-            Self::handle_comment(iter, start, character, handler)
+            Self::handle_comment(iter, start, character, prev_token, handler)
         }
         // Found numeric literal
         else if character.is_ascii_digit() {

@@ -3,25 +3,24 @@
 //! `ShulkerScript` is a simple, imperative scripting language for creating Minecraft data packs.
 
 #![deny(
-    missing_docs,
     missing_debug_implementations,
     missing_copy_implementations,
-    clippy::all,
-    clippy::pedantic,
     clippy::nursery,
     rustdoc::broken_intra_doc_links,
     clippy::missing_errors_doc
 )]
+#![warn(missing_docs, clippy::all, clippy::pedantic)]
 #![allow(clippy::missing_panics_doc, clippy::missing_const_for_fn)]
 
 pub mod base;
 pub mod lexical;
+pub mod syntax;
 
 use std::{cell::Cell, fmt::Display, path::PathBuf};
 
 use base::{source_file::SourceFile, Handler, Result};
 
-use crate::{base::Error, lexical::token_stream::TokenStream};
+use crate::{base::Error, lexical::token_stream::TokenStream, syntax::parser::Parser};
 
 /// Compiles the given source code.
 ///
@@ -34,11 +33,22 @@ pub fn compile(path: PathBuf) -> Result<()> {
 
     let tokens = TokenStream::tokenize(&source_file, &printer);
 
-    println!("{tokens:#?}");
-
     if printer.has_printed() {
         return Err(Error::Other(
             "An error occurred while tokenizing the source code.",
+        ));
+    }
+
+    let mut parser = Parser::new(&tokens);
+    let result = parser.parse_program(&printer).ok_or(Error::Other(
+        "An error occured while parsing the source code.",
+    ))?;
+
+    println!("result: {result:#?}");
+
+    if printer.has_printed() {
+        return Err(Error::Other(
+            "An error occurred while parsing the source code.",
         ));
     }
 

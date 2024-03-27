@@ -71,6 +71,7 @@ impl SourceFile {
         SourceIterator {
             source_file: self,
             iterator: self.content().char_indices().peekable(),
+            prev: None,
         }
     }
 
@@ -299,6 +300,9 @@ pub struct SourceIterator<'a> {
     #[get_copy = "pub"]
     source_file: &'a Arc<SourceFile>,
     iterator: Peekable<CharIndices<'a>>,
+    /// Get the previous character that was iterated over.
+    #[get_copy = "pub"]
+    prev: Option<(usize, char)>,
 }
 impl<'a> SourceIterator<'a> {
     /// Peek at the next character in the source file.
@@ -310,7 +314,11 @@ impl<'a> Iterator for SourceIterator<'a> {
     type Item = (usize, char);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iterator.next()
+        let item = self.iterator.next();
+        if item.is_some() {
+            self.prev = item;
+        }
+        item
     }
 }
 

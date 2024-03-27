@@ -8,6 +8,8 @@ pub enum Error {
     IoError(#[from] io::Error),
     #[error("An error occured while tokenizing the source code.")]
     TokenizeError(#[from] crate::lexical::token::TokenizeError),
+    #[error("An error occurred while parsing the source code.")]
+    ParseError(#[from] crate::syntax::error::Error),
     #[error("An error occurred")]
     Other(&'static str),
 }
