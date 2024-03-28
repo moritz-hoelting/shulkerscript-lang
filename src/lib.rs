@@ -13,12 +13,15 @@
 #![allow(clippy::missing_panics_doc, clippy::missing_const_for_fn)]
 
 pub mod base;
+pub mod compile;
 pub mod lexical;
 pub mod syntax;
 
 use std::{cell::Cell, fmt::Display, path::PathBuf};
 
 use base::{source_file::SourceFile, Handler, Result};
+use compile::compiler::Compiler;
+use shulkerbox::{util::compile::CompileOptions, virtual_fs::VFolder};
 
 use crate::{base::Error, lexical::token_stream::TokenStream, syntax::parser::Parser};
 
@@ -26,7 +29,7 @@ use crate::{base::Error, lexical::token_stream::TokenStream, syntax::parser::Par
 ///
 /// # Errors
 /// - If an error occurs while reading the file.
-pub fn compile(path: PathBuf) -> Result<()> {
+pub fn compile(path: PathBuf) -> Result<VFolder> {
     let source_file = SourceFile::load(path)?;
 
     let printer = Printer::new();
@@ -40,11 +43,14 @@ pub fn compile(path: PathBuf) -> Result<()> {
     }
 
     let mut parser = Parser::new(&tokens);
-    let result = parser.parse_program(&printer).ok_or(Error::Other(
+    let program = parser.parse_program(&printer).ok_or(Error::Other(
         "An error occured while parsing the source code.",
     ))?;
 
-    println!("result: {result:#?}");
+    // println!("result: {result:#?}");
+
+    let mut compiler = Compiler::new();
+    let datapack = compiler.compile(&program, &printer)?;
 
     if printer.has_printed() {
         return Err(Error::Other(
@@ -52,7 +58,7 @@ pub fn compile(path: PathBuf) -> Result<()> {
         ));
     }
 
-    Ok(())
+    Ok(datapack.compile(&CompileOptions::default()))
 }
 
 struct Printer {
