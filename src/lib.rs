@@ -36,6 +36,8 @@ pub fn compile(path: PathBuf) -> Result<VFolder> {
 
     let tokens = TokenStream::tokenize(&source_file, &printer);
 
+    // println!("tokens: {tokens:#?}");
+
     if printer.has_printed() {
         return Err(Error::Other(
             "An error occurred while tokenizing the source code.",
@@ -47,7 +49,7 @@ pub fn compile(path: PathBuf) -> Result<VFolder> {
         "An error occured while parsing the source code.",
     ))?;
 
-    // println!("result: {result:#?}");
+    // println!("program: {program:#?}");
 
     let mut compiler = Compiler::new();
     let datapack = compiler.compile(&program, &printer)?;

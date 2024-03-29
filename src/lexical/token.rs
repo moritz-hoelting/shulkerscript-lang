@@ -74,7 +74,8 @@ pub enum Token {
     Punctuation(Punctuation),
     Numeric(Numeric),
     Comment(Comment),
-    LiteralCommand(LiteralCommand),
+    CommandLiteral(CommandLiteral),
+    StringLiteral(StringLiteral),
 }
 
 impl Token {
@@ -88,7 +89,8 @@ impl Token {
             Self::Punctuation(token) => &token.span,
             Self::Numeric(token) => &token.span,
             Self::Comment(token) => &token.span,
-            Self::LiteralCommand(token) => &token.span,
+            Self::CommandLiteral(token) => &token.span,
+            Self::StringLiteral(token) => &token.span,
         }
     }
 }
@@ -102,7 +104,8 @@ impl SourceElement for Token {
             Self::Punctuation(token) => token.span(),
             Self::Numeric(token) => token.span(),
             Self::Comment(token) => token.span(),
-            Self::LiteralCommand(token) => token.span(),
+            Self::CommandLiteral(token) => token.span(),
+            Self::StringLiteral(token) => token.span(),
         }
     }
 }
@@ -177,6 +180,28 @@ impl SourceElement for Numeric {
     }
 }
 
+/// Represents a hardcoded string literal value in the source code.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StringLiteral {
+    /// Is the span that makes up the token.
+    pub span: Span,
+}
+
+impl StringLiteral {
+    /// Returns the string without the leading and trailing double quotes.
+    #[must_use]
+    pub fn string_content(&self) -> &str {
+        let string = self.span.str();
+        &string[1..string.len() - 1]
+    }
+}
+
+impl SourceElement for StringLiteral {
+    fn span(&self) -> Span {
+        self.span.clone()
+    }
+}
+
 /// Is an enumeration representing the two kinds of comments in the Flux programming language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CommentKind {
@@ -205,17 +230,17 @@ impl SourceElement for Comment {
 
 /// Represents a hardcoded literal command in the source code.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct LiteralCommand {
+pub struct CommandLiteral {
     /// Span that makes up the token.
     pub span: Span,
 }
 
-impl SourceElement for LiteralCommand {
+impl SourceElement for CommandLiteral {
     fn span(&self) -> Span {
         self.span.clone()
     }
 }
-impl LiteralCommand {
+impl CommandLiteral {
     /// Returns the command without the leading slash.
     #[must_use]
     pub fn clean_command(&self) -> &str {
@@ -367,7 +392,7 @@ impl Token {
         }
         // When there is no second slash and at the start of a line
         else if prev_token.map_or(true, |token| token.span().str().contains('\n')) {
-            Ok(Self::handle_literal_command(iter, start))
+            Ok(Self::handle_command_literal(iter, start))
         }
         // Just a single slash punctuation
         else {
@@ -390,11 +415,31 @@ impl Token {
         .into()
     }
 
+    /// Handles a sequence of characters that are enclosed in double quotes
+    fn handle_string_literal(iter: &mut SourceIterator, start: usize) -> Self {
+        let mut is_escaped = false;
+
+        for (_, character) in iter.by_ref() {
+            if character == '\\' {
+                is_escaped = !is_escaped;
+            } else if character == '"' && !is_escaped {
+                break;
+            } else {
+                is_escaped = false;
+            }
+        }
+
+        StringLiteral {
+            span: Self::create_span(start, iter),
+        }
+        .into()
+    }
+
     /// Handles a command that is preceeded by a slash
-    fn handle_literal_command(iter: &mut SourceIterator, start: usize) -> Self {
+    fn handle_command_literal(iter: &mut SourceIterator, start: usize) -> Self {
         Self::walk_iter(iter, |c| !(c.is_whitespace() && c.is_ascii_control()));
 
-        LiteralCommand {
+        CommandLiteral {
             span: Self::create_span(start, iter),
         }
         .into()
@@ -431,6 +476,8 @@ impl Token {
         // Found comment/single slash punctuation
         else if character == '/' {
             Self::handle_comment(iter, start, character, prev_token, handler)
+        } else if character == '"' {
+            Ok(Self::handle_string_literal(iter, start))
         }
         // Found numeric literal
         else if character.is_ascii_digit() {

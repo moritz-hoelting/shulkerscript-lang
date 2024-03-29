@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use shulkerbox::datapack::{Command, Datapack};
+use shulkerbox::datapack::{Command, Datapack, Execute};
 
 use crate::{
     base::{source_file::SourceElement, Handler},
@@ -63,14 +63,61 @@ impl Compiler {
 fn compile_function(statements: &[Statement]) -> Vec<Command> {
     let mut commands = Vec::new();
     for statement in statements {
-        match statement {
-            Statement::LiteralCommand(literal_command) => {
-                commands.push(literal_command.clean_command().into());
-            }
-            Statement::Block(_) => {
-                unreachable!("Only literal commands are allowed in functions at this time.")
+        commands.extend(compile_statement(statement));
+    }
+    commands
+}
+
+fn compile_statement(statement: &Statement) -> Option<Command> {
+    match statement {
+        Statement::LiteralCommand(literal_command) => Some(literal_command.clean_command().into()),
+        Statement::Block(_) => {
+            unreachable!("Only literal commands are allowed in functions at this time.")
+        }
+        Statement::Conditional(cond) => {
+            let (_, cond, block, el) = cond.clone().dissolve();
+            let (_, cond, _) = cond.dissolve();
+            let statements = block.statements();
+
+            let el = el
+                .and_then(|el| {
+                    let (_, block) = el.dissolve();
+                    let statements = block.statements();
+                    if statements.is_empty() {
+                        None
+                    } else if statements.len() == 1 {
+                        compile_statement(&statements[0]).map(|cmd| Execute::Run(Box::new(cmd)))
+                    } else {
+                        let commands = statements.iter().filter_map(compile_statement).collect();
+                        Some(Execute::Runs(commands))
+                    }
+                })
+                .map(Box::new);
+
+            if statements.is_empty() {
+                if el.is_none() {
+                    None
+                } else {
+                    Some(Command::Execute(Execute::If(
+                        cond.value().string_content().into(),
+                        Box::new(Execute::Runs(Vec::new())),
+                        el,
+                    )))
+                }
+            } else {
+                let run = if statements.len() > 1 {
+                    let commands = statements.iter().filter_map(compile_statement).collect();
+                    Execute::Runs(commands)
+                } else {
+                    Execute::Run(Box::new(compile_statement(&statements[0])?))
+                };
+
+                Some(Command::Execute(Execute::If(
+                    cond.value().string_content().into(),
+                    Box::new(run),
+                    el,
+                )))
             }
         }
     }
-    commands
 }

@@ -16,6 +16,7 @@ pub enum SyntaxKind {
     Identifier,
     Declaration,
     Numeric,
+    StringLiteral,
     Statement,
     Expression,
     Type,
@@ -39,6 +40,7 @@ impl Display for UnexpectedSyntax {
             SyntaxKind::Keyword(keyword) => format!("a keyword token `{}`", keyword.as_str()),
             SyntaxKind::Declaration => "a declaration token".to_string(),
             SyntaxKind::Numeric => "a numeric token".to_string(),
+            SyntaxKind::StringLiteral => "a string literal".to_string(),
             SyntaxKind::Statement => "a statement syntax".to_string(),
             SyntaxKind::Expression => "an expression syntax".to_string(),
             SyntaxKind::Type => "a type syntax".to_string(),
@@ -54,7 +56,8 @@ impl Display for UnexpectedSyntax {
                 format!("a punctuation token `{}`", punctuation.punctuation)
             }
             Some(Token::Numeric(..)) => "a numeric token".to_string(),
-            Some(Token::LiteralCommand(..)) => "a literal command token".to_string(),
+            Some(Token::CommandLiteral(..)) => "a literal command token".to_string(),
+            Some(Token::StringLiteral(..)) => "a string literal token".to_string(),
 
             None => "EOF".to_string(),
         };

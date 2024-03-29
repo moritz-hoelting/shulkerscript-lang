@@ -38,7 +38,7 @@ impl SourceElement for Declaration {
 ///
 /// ``` ebnf
 /// Function:
-///     'function' Identifier '(' ParameterList? ')' Block
+///     'fn' Identifier '(' ParameterList? ')' Block
 ///     ;
 ///
 /// ParameterList:

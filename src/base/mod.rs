@@ -7,6 +7,6 @@ mod error;
 pub use error::{Error, Result};
 
 mod diagnostic;
-pub use diagnostic::Handler;
+pub use diagnostic::{Dummy, Handler};
 
 pub mod log;
