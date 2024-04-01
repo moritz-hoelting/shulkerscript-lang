@@ -10,7 +10,7 @@ use crate::{
         Handler,
     },
     lexical::{
-        token::{Identifier, Keyword, KeywordKind, Punctuation, Token},
+        token::{Identifier, Keyword, KeywordKind, Punctuation, StringLiteral, Token},
         token_stream::Delimiter,
     },
     syntax::{
@@ -33,12 +33,62 @@ impl SourceElement for Declaration {
         }
     }
 }
+/// Syntax Synopsis:
+///
+/// ``` ebnf
+/// Annotation:
+///     '#[' Identifier ('=' StringLiteral)? ']'
+///     ;
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct Annotation {
+    #[get = "pub"]
+    pound_sign: Punctuation,
+    #[get = "pub"]
+    open_bracket: Punctuation,
+    #[get = "pub"]
+    identifier: Identifier,
+    #[get = "pub"]
+    value: Option<(Punctuation, StringLiteral)>,
+    #[get = "pub"]
+    close_bracket: Punctuation,
+}
+
+impl Annotation {
+    /// Dissolves the [`Annotation`] into its components.
+    #[must_use]
+    pub fn dissolve(
+        self,
+    ) -> (
+        Punctuation,
+        Punctuation,
+        Identifier,
+        Option<(Punctuation, StringLiteral)>,
+        Punctuation,
+    ) {
+        (
+            self.pound_sign,
+            self.open_bracket,
+            self.identifier,
+            self.value,
+            self.close_bracket,
+        )
+    }
+}
+impl SourceElement for Annotation {
+    fn span(&self) -> Span {
+        self.pound_sign
+            .span
+            .join(&self.close_bracket.span())
+            .unwrap()
+    }
+}
 
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
 /// Function:
-///     'fn' Identifier '(' ParameterList? ')' Block
+///     Annotation* 'fn' Identifier '(' ParameterList? ')' Block
 ///     ;
 ///
 /// ParameterList:
@@ -47,6 +97,8 @@ impl SourceElement for Declaration {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct Function {
+    #[get = "pub"]
+    annotations: Vec<Annotation>,
     #[get = "pub"]
     function_keyword: Keyword,
     #[get = "pub"]
@@ -64,9 +116,11 @@ pub struct Function {
 impl Function {
     /// Dissolves the [`Function`] into its components.
     #[must_use]
+    #[allow(clippy::type_complexity)]
     pub fn dissolve(
         self,
     ) -> (
+        Vec<Annotation>,
         Keyword,
         Identifier,
         Punctuation,
@@ -75,6 +129,7 @@ impl Function {
         Block,
     ) {
         (
+            self.annotations,
             self.function_keyword,
             self.identifier,
             self.open_paren,
@@ -92,6 +147,59 @@ impl SourceElement for Function {
 }
 
 impl<'a> Parser<'a> {
+    pub fn parse_annotation(&mut self, handler: &impl Handler<Error>) -> Option<Annotation> {
+        match self.stop_at_significant() {
+            Reading::Atomic(Token::Punctuation(punctuation)) if punctuation.punctuation == '#' => {
+                // eat the pound sign
+                self.forward();
+
+                // step into the brackets
+                let content = self.step_into(
+                    Delimiter::Bracket,
+                    |parser| {
+                        let identifier = parser.parse_identifier(handler)?;
+
+                        let value = if let Reading::Atomic(Token::Punctuation(punctuation)) =
+                            parser.stop_at_significant()
+                        {
+                            if punctuation.punctuation == '=' {
+                                // eat the equals sign
+                                parser.forward();
+
+                                // parse the string literal
+                                let string_literal = parser
+                                    .next_significant_token()
+                                    .into_token()?
+                                    .into_string_literal()
+                                    .ok()?;
+
+                                Some((punctuation, string_literal))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
+                        Some((identifier, value))
+                    },
+                    handler,
+                )?;
+
+                let (identifier, value) = content.tree?;
+
+                Some(Annotation {
+                    pound_sign: punctuation,
+                    open_bracket: content.open,
+                    identifier,
+                    value,
+                    close_bracket: content.close,
+                })
+            }
+            _ => None,
+        }
+    }
+
     pub fn parse_declaration(&mut self, handler: &impl Handler<Error>) -> Option<Declaration> {
         match self.stop_at_significant() {
             Reading::Atomic(Token::Keyword(function_keyword))
@@ -113,6 +221,7 @@ impl<'a> Parser<'a> {
                 let block = self.parse_block(handler)?;
 
                 Some(Declaration::Function(Function {
+                    annotations: Vec::new(),
                     function_keyword,
                     identifier,
                     open_paren: delimited_tree.open,
@@ -120,6 +229,27 @@ impl<'a> Parser<'a> {
                     close_paren: delimited_tree.close,
                     block,
                 }))
+            }
+
+            // parse annotations
+            Reading::Atomic(Token::Punctuation(punctuation)) if punctuation.punctuation == '#' => {
+                // parse the annotation
+                let mut annotations = Vec::new();
+
+                while let Some(annotation) =
+                    self.try_parse(|parser| parser.parse_annotation(handler))
+                {
+                    annotations.push(annotation);
+                }
+
+                // parse the function
+                self.parse_declaration(handler)
+                    .map(|declaration| match declaration {
+                        Declaration::Function(mut function) => {
+                            function.annotations.extend(annotations);
+                            Declaration::Function(function)
+                        }
+                    })
             }
 
             unexpected => {

@@ -6,7 +6,7 @@ use std::{
     fs,
     iter::{Iterator, Peekable},
     ops::Range,
-    path::PathBuf,
+    path::{Path, PathBuf},
     str::CharIndices,
     sync::Arc,
 };
@@ -85,9 +85,9 @@ impl SourceFile {
     ///
     /// # Errors
     /// - [`Error::IoError`]: Error occurred when reading the file contents.
-    pub fn load(path: PathBuf) -> Result<Arc<Self>, Error> {
-        let source = fs::read_to_string(&path).map_err(Error::IoError)?;
-        Ok(Self::new(path, source))
+    pub fn load(path: &Path) -> Result<Arc<Self>, Error> {
+        let source = fs::read_to_string(path).map_err(Error::IoError)?;
+        Ok(Self::new(path.to_path_buf(), source))
     }
 
     /// Get the [`Location`] of a given byte index

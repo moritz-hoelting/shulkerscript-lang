@@ -7,6 +7,7 @@ use crate::base::{
     Handler,
 };
 use derive_more::From;
+use enum_as_inner::EnumAsInner;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
@@ -64,8 +65,8 @@ impl KeywordKind {
     }
 }
 
-/// Is an enumeration containing all kinds of tokens in the Flux programming language.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, From)]
+/// Is an enumeration containing all kinds of tokens in the Shulkerscript programming language.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, From, EnumAsInner)]
 #[allow(missing_docs)]
 pub enum Token {
     WhiteSpaces(WhiteSpaces),
@@ -202,7 +203,7 @@ impl SourceElement for StringLiteral {
     }
 }
 
-/// Is an enumeration representing the two kinds of comments in the Flux programming language.
+/// Is an enumeration representing the two kinds of comments in the Shulkerscript programming language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CommentKind {
     /// A comment that starts with `//` and ends at the end of the line.

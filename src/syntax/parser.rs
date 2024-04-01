@@ -142,6 +142,20 @@ impl<'a> Parser<'a> {
             close: close_punctuation,
         })
     }
+
+    /// Tries to parse the given function, and if it fails, resets the current index to the
+    /// `current_index` before the function call.
+    pub fn try_parse<T>(&mut self, f: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
+        let current_index = self.current_frame.current_index;
+
+        let result = f(self);
+
+        if result.is_none() {
+            self.current_frame.current_index = current_index;
+        }
+
+        result
+    }
 }
 
 /// Represents a result of [`Parser::step_into()`] function.
@@ -408,20 +422,6 @@ impl<'a> Frame<'a> {
                 None
             }
         }
-    }
-
-    /// Tries to parse the given function, and if it fails, resets the current index to the
-    /// `current_index` before the function call.
-    pub fn try_parse<T>(&mut self, f: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
-        let current_index = self.current_index;
-
-        let result = f(self);
-
-        if result.is_none() {
-            self.current_index = current_index;
-        }
-
-        result
     }
 }
 

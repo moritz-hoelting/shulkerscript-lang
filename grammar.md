@@ -15,11 +15,16 @@ Declaration: FunctionDeclaration;
 ### FunctionDeclaration
 ```ebnf
 Function:
-    'fn' Identifier '(' ParameterList? ')' Block
+    Annotation* 'fn' Identifier '(' ParameterList? ')' Block
     ;
 ParameterList:
     Identifier (',' Identifier)* ','?  
     ;
+```
+
+### Annotation
+```ebnf
+Annotation: '#[' Identifier ('=' StringLiteral)? ']';
 ```
 
 ### Statement

@@ -173,8 +173,11 @@ pub enum TokenTree {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(missing_docs)]
 pub enum Delimiter {
+    /// ()
     Parenthesis,
+    /// {}
     Brace,
+    /// []
     Bracket,
 }
 

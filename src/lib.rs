@@ -17,19 +17,58 @@ pub mod compile;
 pub mod lexical;
 pub mod syntax;
 
-use std::{cell::Cell, fmt::Display, path::PathBuf};
+use std::{cell::Cell, fmt::Display, path::Path};
 
 use base::{source_file::SourceFile, Handler, Result};
 use compile::compiler::Compiler;
 use shulkerbox::{util::compile::CompileOptions, virtual_fs::VFolder};
+use syntax::syntax_tree::program::Program;
 
 use crate::{base::Error, lexical::token_stream::TokenStream, syntax::parser::Parser};
+
+/// Converts the given source code to tokens.
+///
+/// # Errors
+/// - If an error occurs while reading the file.
+pub fn tokenize(path: &Path) -> Result<TokenStream> {
+    let source_file = SourceFile::load(path)?;
+
+    let printer = Printer::new();
+
+    Ok(TokenStream::tokenize(&source_file, &printer))
+}
+
+/// Parses the given source code.
+///
+/// # Errors
+/// - If an error occurs while reading the file.
+/// - If an error occurs while parsing the source code.
+pub fn parse(path: &Path) -> Result<Program> {
+    let source_file = SourceFile::load(path)?;
+
+    let printer = Printer::new();
+
+    let tokens = TokenStream::tokenize(&source_file, &printer);
+
+    if printer.has_printed() {
+        return Err(Error::Other(
+            "An error occurred while tokenizing the source code.",
+        ));
+    }
+
+    let mut parser = Parser::new(&tokens);
+    let program = parser.parse_program(&printer).ok_or(Error::Other(
+        "An error occured while parsing the source code.",
+    ))?;
+
+    Ok(program)
+}
 
 /// Compiles the given source code.
 ///
 /// # Errors
 /// - If an error occurs while reading the file.
-pub fn compile(path: PathBuf) -> Result<VFolder> {
+pub fn compile(path: &Path) -> Result<VFolder> {
     let source_file = SourceFile::load(path)?;
 
     let printer = Printer::new();
