@@ -11,7 +11,7 @@ pub enum Error {
     #[error("An error occurred while parsing the source code.")]
     ParseError(#[from] crate::syntax::error::Error),
     #[error("An error occurred while compiling the source code.")]
-    CompileError(#[from] crate::compile::error::CompileError),
+    CompileError(#[from] crate::transpile::error::TranspileError),
     #[error("An error occurred")]
     Other(&'static str),
 }

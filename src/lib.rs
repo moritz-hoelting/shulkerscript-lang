@@ -13,15 +13,15 @@
 #![allow(clippy::missing_panics_doc, clippy::missing_const_for_fn)]
 
 pub mod base;
-pub mod compile;
 pub mod lexical;
 pub mod syntax;
+pub mod transpile;
 
 use std::{cell::Cell, fmt::Display, path::Path};
 
 use base::{source_file::SourceFile, Handler, Result};
-use compile::compiler::Compiler;
 use syntax::syntax_tree::program::Program;
+use transpile::transpiler::Transpiler;
 
 #[cfg(feature = "shulkerbox")]
 use shulkerbox::{datapack::Datapack, util::compile::CompileOptions, virtual_fs::VFolder};
@@ -103,8 +103,8 @@ pub fn transpile(path: &Path) -> Result<Datapack> {
         ));
     }
 
-    let mut compiler = Compiler::new();
-    let datapack = compiler.compile(&program, &printer)?;
+    let mut transpiler = Transpiler::new();
+    let datapack = transpiler.transpile(&program, &printer)?;
 
     Ok(datapack)
 }
@@ -144,8 +144,8 @@ pub fn compile(path: &Path) -> Result<VFolder> {
 
     // println!("program: {program:#?}");
 
-    let mut compiler = Compiler::new();
-    let datapack = compiler.compile(&program, &printer)?;
+    let mut transpiler = Transpiler::new();
+    let datapack = transpiler.transpile(&program, &printer)?;
 
     // println!("datapack: {datapack:#?}");
 

@@ -9,15 +9,16 @@ use crate::{
     syntax::syntax_tree::{declaration::Declaration, program::Program, statement::Statement},
 };
 
-use super::error::{self, CompileError};
+use super::error::{self, TranspileError};
 
-/// A compiler for `ShulkerScript`.
+/// A transpiler for `ShulkerScript`.
 #[derive(Debug, Clone, Default)]
-pub struct Compiler {
-    functions: HashMap<String, Vec<Statement>>,
+pub struct Transpiler {
+    functions: HashMap<String, (Vec<Statement>, AnnotationMap)>,
 }
+type AnnotationMap = HashMap<String, Option<String>>;
 
-impl Compiler {
+impl Transpiler {
     /// Creates a new compiler.
     #[must_use]
     pub fn new() -> Self {
@@ -29,24 +30,39 @@ impl Compiler {
     /// Compiles the given program.
     ///
     /// # Errors
-    /// - [`CompileError::MissingMainFunction`] If the main function is missing.
-    pub fn compile(
+    /// - [`TranspileError::MissingMainFunction`] If the main function is missing.
+    pub fn transpile(
         &mut self,
         program: &Program,
-        handler: &impl Handler<error::CompileError>,
-    ) -> Result<Datapack, CompileError> {
+        handler: &impl Handler<error::TranspileError>,
+    ) -> Result<Datapack, TranspileError> {
         for declaration in program.declarations() {
             match declaration {
-                Declaration::Function(function) => self.functions.insert(
-                    function.identifier().span().str().to_string(),
-                    function.block().statements().clone(),
-                ),
+                Declaration::Function(function) => {
+                    let name = function.identifier().span().str().to_string();
+                    let statements = function.block().statements().clone();
+                    let annotations = function
+                        .annotations()
+                        .iter()
+                        .map(|annotation| {
+                            let key = annotation.identifier();
+                            let value = annotation.value();
+                            (
+                                key.span().str().to_string(),
+                                value
+                                    .as_ref()
+                                    .map(|(_, ref v)| v.string_content().to_string()),
+                            )
+                        })
+                        .collect();
+                    self.functions.insert(name, (statements, annotations))
+                }
             };
         }
 
-        let Some(main_function) = self.functions.get("main") else {
-            handler.receive(CompileError::MissingMainFunction);
-            return Err(CompileError::MissingMainFunction);
+        let Some((main_function, main_annotations)) = self.functions.get("main") else {
+            handler.receive(TranspileError::MissingMainFunction);
+            return Err(TranspileError::MissingMainFunction);
         };
 
         let main_commands = compile_function(main_function);
@@ -55,6 +71,13 @@ impl Compiler {
         let namespace = datapack.namespace_mut("shulkerscript");
         let main_function = namespace.function_mut("main");
         main_function.get_commands_mut().extend(main_commands);
+
+        if main_annotations.contains_key("tick") {
+            datapack.add_tick("shulkerscript:main");
+        }
+        if main_annotations.contains_key("load") {
+            datapack.add_load("shulkerscript:main");
+        }
 
         Ok(datapack)
     }
