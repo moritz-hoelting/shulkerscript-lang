@@ -75,6 +75,7 @@ pub enum Token {
     Punctuation(Punctuation),
     Numeric(Numeric),
     Comment(Comment),
+    DocComment(DocComment),
     CommandLiteral(CommandLiteral),
     StringLiteral(StringLiteral),
 }
@@ -90,6 +91,7 @@ impl Token {
             Self::Punctuation(token) => &token.span,
             Self::Numeric(token) => &token.span,
             Self::Comment(token) => &token.span,
+            Self::DocComment(token) => &token.span,
             Self::CommandLiteral(token) => &token.span,
             Self::StringLiteral(token) => &token.span,
         }
@@ -105,6 +107,7 @@ impl SourceElement for Token {
             Self::Punctuation(token) => token.span(),
             Self::Numeric(token) => token.span(),
             Self::Comment(token) => token.span(),
+            Self::DocComment(token) => token.span(),
             Self::CommandLiteral(token) => token.span(),
             Self::StringLiteral(token) => token.span(),
         }
@@ -229,6 +232,27 @@ impl SourceElement for Comment {
     }
 }
 
+/// Represents a documentation comment in the source code.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DocComment {
+    /// Is the span that makes up the token.
+    pub span: Span,
+}
+
+impl SourceElement for DocComment {
+    fn span(&self) -> Span {
+        self.span.clone()
+    }
+}
+
+impl DocComment {
+    /// Returns the content of the doc comment without the leading `///`.
+    #[must_use]
+    pub fn content(&self) -> &str {
+        &self.span.str().trim()[3..]
+    }
+}
+
 /// Represents a hardcoded literal command in the source code.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CommandLiteral {
@@ -339,22 +363,37 @@ impl Token {
         if let Some((_, '/')) = iter.peek() {
             iter.next();
 
+            let is_doccomment = if let Some((_, '/')) = iter.peek() {
+                iter.next();
+                true
+            } else {
+                false
+            };
+
             Self::walk_iter(iter, |character| !(character == '\n' || character == '\r'));
 
             let is_cr = iter
                 .peek()
                 .map_or(false, |(_, character)| character == '\r');
 
+            let span = Self::create_span(start, iter);
+
             if let (true, Some((_, '\n'))) = (is_cr, iter.next()) {
                 // skips the crlf
                 iter.next();
             }
 
-            Ok(Comment {
-                span: Self::create_span(start, iter),
-                kind: CommentKind::Line,
-            }
-            .into())
+            let comment = if is_doccomment {
+                DocComment { span }.into()
+            } else {
+                Comment {
+                    span,
+                    kind: CommentKind::Line,
+                }
+                .into()
+            };
+
+            Ok(comment)
         }
         // Delimited comment
         else if let Some((_, '*')) = iter.peek() {

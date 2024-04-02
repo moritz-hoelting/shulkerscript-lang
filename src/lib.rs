@@ -21,8 +21,10 @@ use std::{cell::Cell, fmt::Display, path::Path};
 
 use base::{source_file::SourceFile, Handler, Result};
 use compile::compiler::Compiler;
-use shulkerbox::{util::compile::CompileOptions, virtual_fs::VFolder};
 use syntax::syntax_tree::program::Program;
+
+#[cfg(feature = "shulkerbox")]
+use shulkerbox::{datapack::Datapack, util::compile::CompileOptions, virtual_fs::VFolder};
 
 use crate::{base::Error, lexical::token_stream::TokenStream, syntax::parser::Parser};
 
@@ -61,13 +63,59 @@ pub fn parse(path: &Path) -> Result<Program> {
         "An error occured while parsing the source code.",
     ))?;
 
+    if printer.has_printed() {
+        return Err(Error::Other(
+            "An error occurred while parsing the source code.",
+        ));
+    }
+
     Ok(program)
+}
+
+/// Transpiles the given source code into a shulkerbox [`Datapack`].
+///
+/// # Errors
+/// - If an error occurs while reading the file.
+/// - If an error occurs while parsing the source code.
+/// - If an error occurs while transpiling the source code.
+#[cfg(feature = "shulkerbox")]
+pub fn transpile(path: &Path) -> Result<Datapack> {
+    let source_file = SourceFile::load(path)?;
+
+    let printer = Printer::new();
+
+    let tokens = TokenStream::tokenize(&source_file, &printer);
+
+    if printer.has_printed() {
+        return Err(Error::Other(
+            "An error occurred while tokenizing the source code.",
+        ));
+    }
+
+    let mut parser = Parser::new(&tokens);
+    let program = parser.parse_program(&printer).ok_or(Error::Other(
+        "An error occured while parsing the source code.",
+    ))?;
+
+    if printer.has_printed() {
+        return Err(Error::Other(
+            "An error occurred while parsing the source code.",
+        ));
+    }
+
+    let mut compiler = Compiler::new();
+    let datapack = compiler.compile(&program, &printer)?;
+
+    Ok(datapack)
 }
 
 /// Compiles the given source code.
 ///
 /// # Errors
 /// - If an error occurs while reading the file.
+/// - If an error occurs while parsing the source code.
+/// - If an error occurs while transpiling the source code.
+#[cfg(feature = "shulkerbox")]
 pub fn compile(path: &Path) -> Result<VFolder> {
     let source_file = SourceFile::load(path)?;
 
@@ -88,14 +136,22 @@ pub fn compile(path: &Path) -> Result<VFolder> {
         "An error occured while parsing the source code.",
     ))?;
 
+    if printer.has_printed() {
+        return Err(Error::Other(
+            "An error occurred while parsing the source code.",
+        ));
+    }
+
     // println!("program: {program:#?}");
 
     let mut compiler = Compiler::new();
     let datapack = compiler.compile(&program, &printer)?;
 
+    // println!("datapack: {datapack:#?}");
+
     if printer.has_printed() {
         return Err(Error::Other(
-            "An error occurred while parsing the source code.",
+            "An error occurred while transpiling the source code.",
         ));
     }
 

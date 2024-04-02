@@ -119,5 +119,9 @@ fn compile_statement(statement: &Statement) -> Option<Command> {
                 )))
             }
         }
+        Statement::DocComment(doccomment) => {
+            let content = doccomment.content();
+            Some(Command::Comment(content.to_string()))
+        }
     }
 }

@@ -47,6 +47,7 @@ impl Display for UnexpectedSyntax {
         };
         let found_binding = match self.found.clone() {
             Some(Token::Comment(..)) => "a comment token".to_string(),
+            Some(Token::DocComment(..)) => "a doc comment token".to_string(),
             Some(Token::Identifier(..)) => "an identifier token".to_string(),
             Some(Token::Keyword(keyword)) => {
                 format!("a keyword token `{}`", keyword.keyword.as_str())

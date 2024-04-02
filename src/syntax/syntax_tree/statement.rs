@@ -8,7 +8,7 @@ use crate::{
         Handler,
     },
     lexical::{
-        token::{CommandLiteral, Keyword, KeywordKind, Punctuation, Token},
+        token::{CommandLiteral, DocComment, Keyword, KeywordKind, Punctuation, Token},
         token_stream::Delimiter,
     },
     syntax::{
@@ -25,6 +25,8 @@ use super::expression::ParenthesizedCondition;
 /// Statement:
 ///     Block
 ///     | LiteralCommand
+///     | Conditional
+///     | DocComment
 ///     ;
 /// ```
 #[allow(missing_docs)]
@@ -33,6 +35,7 @@ pub enum Statement {
     Block(Block),
     LiteralCommand(CommandLiteral),
     Conditional(Conditional),
+    DocComment(DocComment),
 }
 
 impl SourceElement for Statement {
@@ -41,6 +44,7 @@ impl SourceElement for Statement {
             Self::Block(block) => block.span(),
             Self::LiteralCommand(literal_command) => literal_command.span(),
             Self::Conditional(conditional) => conditional.span(),
+            Self::DocComment(doc_comment) => doc_comment.span(),
         }
     }
 }
@@ -257,6 +261,12 @@ impl<'a> Parser<'a> {
                     })),
                 }
             }
+
+            Reading::Atomic(Token::DocComment(doc_comment)) => {
+                self.forward();
+                Some(Statement::DocComment(doc_comment))
+            }
+
             // other
             unexpected => {
                 handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
