@@ -26,6 +26,7 @@ use super::expression::ParenthesizedCondition;
 ///     Block
 ///     | LiteralCommand
 ///     | Conditional
+///     | Grouping
 ///     | DocComment
 ///     ;
 /// ```
@@ -35,6 +36,7 @@ pub enum Statement {
     Block(Block),
     LiteralCommand(CommandLiteral),
     Conditional(Conditional),
+    Grouping(Grouping),
     DocComment(DocComment),
 }
 
@@ -44,6 +46,7 @@ impl SourceElement for Statement {
             Self::Block(block) => block.span(),
             Self::LiteralCommand(literal_command) => literal_command.span(),
             Self::Conditional(conditional) => conditional.span(),
+            Self::Grouping(grouping) => grouping.span(),
             Self::DocComment(doc_comment) => doc_comment.span(),
         }
     }
@@ -133,6 +136,40 @@ impl SourceElement for Conditional {
                     .expect("The span of the else conditional is invalid.")
             },
         )
+    }
+}
+
+/// Syntax Synopsis:
+///
+/// ``` ebnf
+/// Grouping:
+/// 'group' Block
+/// ;
+/// ````
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct Grouping {
+    /// The `group` keyword.
+    #[get = "pub"]
+    group_keyword: Keyword,
+    /// The block of the conditional.
+    #[get = "pub"]
+    block: Block,
+}
+
+impl Grouping {
+    /// Dissolves the [`Grouping`] into its components.
+    #[must_use]
+    pub fn dissolve(self) -> (Keyword, Block) {
+        (self.group_keyword, self.block)
+    }
+}
+
+impl SourceElement for Grouping {
+    fn span(&self) -> Span {
+        self.group_keyword
+            .span()
+            .join(&self.block.span())
+            .expect("The span of the grouping is invalid.")
     }
 }
 
@@ -262,9 +299,25 @@ impl<'a> Parser<'a> {
                 }
             }
 
+            // doc comment
             Reading::Atomic(Token::DocComment(doc_comment)) => {
                 self.forward();
                 Some(Statement::DocComment(doc_comment))
+            }
+
+            // grouping statement
+            Reading::Atomic(Token::Keyword(group_keyword))
+                if group_keyword.keyword == KeywordKind::Group =>
+            {
+                // eat the group keyword
+                self.forward();
+
+                let block = self.parse_block(handler)?;
+
+                Some(Statement::Grouping(Grouping {
+                    group_keyword,
+                    block,
+                }))
             }
 
             // other

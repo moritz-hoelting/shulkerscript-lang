@@ -123,5 +123,17 @@ fn compile_statement(statement: &Statement) -> Option<Command> {
             let content = doccomment.content();
             Some(Command::Comment(content.to_string()))
         }
+        Statement::Grouping(group) => {
+            let statements = group.block().statements();
+            let commands = statements
+                .iter()
+                .filter_map(compile_statement)
+                .collect::<Vec<_>>();
+            if commands.is_empty() {
+                None
+            } else {
+                Some(Command::Group(commands))
+            }
+        }
     }
 }
