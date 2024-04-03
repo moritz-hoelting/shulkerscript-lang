@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use shulkerbox::datapack::{Command, Datapack, Execute};
+use shulkerbox::datapack::{self, Command, Datapack, Execute};
 
 use crate::{
     base::{source_file::SourceElement, Handler},
@@ -19,7 +19,7 @@ pub struct Transpiler {
 type AnnotationMap = HashMap<String, Option<String>>;
 
 impl Transpiler {
-    /// Creates a new compiler.
+    /// Creates a new transpiler.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -27,7 +27,7 @@ impl Transpiler {
         }
     }
 
-    /// Compiles the given program.
+    /// Transpiles the given program.
     ///
     /// # Errors
     /// - [`TranspileError::MissingMainFunction`] If the main function is missing.
@@ -49,9 +49,7 @@ impl Transpiler {
                             let value = annotation.value();
                             (
                                 key.span().str().to_string(),
-                                value
-                                    .as_ref()
-                                    .map(|(_, ref v)| v.string_content().to_string()),
+                                value.as_ref().map(|(_, ref v)| v.str_content().to_string()),
                             )
                         })
                         .collect();
@@ -122,7 +120,7 @@ fn compile_statement(statement: &Statement) -> Option<Command> {
                     None
                 } else {
                     Some(Command::Execute(Execute::If(
-                        cond.value().string_content().into(),
+                        datapack::Condition::from(cond),
                         Box::new(Execute::Runs(Vec::new())),
                         el,
                     )))
@@ -136,7 +134,7 @@ fn compile_statement(statement: &Statement) -> Option<Command> {
                 };
 
                 Some(Command::Execute(Execute::If(
-                    cond.value().string_content().into(),
+                    datapack::Condition::from(cond),
                     Box::new(run),
                     el,
                 )))

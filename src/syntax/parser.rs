@@ -247,6 +247,30 @@ impl<'a> Frame<'a> {
         self.get_reading(self.token_provider.token_stream().get(self.current_index))
     }
 
+    /// Returns the next significant [`Token`] after the `current_index` of the [`Frame`].
+    #[must_use]
+    pub fn peek_significant(&self) -> Reading {
+        let mut index = self.current_index;
+        let token_stream = self.token_provider.token_stream();
+        while index < self.token_provider.token_stream().len() {
+            let token = self.get_reading(token_stream.get(index));
+
+            if !matches!(
+                token,
+                Reading::Atomic(Token::WhiteSpaces(..) | Token::Comment(..))
+            ) {
+                return token;
+            }
+
+            index += 1;
+        }
+
+        match self.token_provider {
+            TokenProvider::TokenStream(..) => Reading::Eof,
+            TokenProvider::Delimited(delimited) => Reading::DelimitedEnd(delimited.close.clone()),
+        }
+    }
+
     /// Returns a [`Token`] pointing by the `current_index` with the given index offset of the
     /// [`Frame`].
     ///

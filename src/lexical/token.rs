@@ -196,7 +196,7 @@ pub struct StringLiteral {
 impl StringLiteral {
     /// Returns the string without the leading and trailing double quotes.
     #[must_use]
-    pub fn string_content(&self) -> &str {
+    pub fn str_content(&self) -> &str {
         let string = self.span.str();
         &string[1..string.len() - 1]
     }
