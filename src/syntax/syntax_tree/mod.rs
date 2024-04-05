@@ -16,6 +16,7 @@ use crate::{
 
 use super::{error::Error, parser::Parser};
 
+pub mod condition;
 pub mod declaration;
 pub mod expression;
 pub mod program;

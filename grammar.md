@@ -33,6 +33,8 @@ Statement:
     Block
     | LiteralCommand
     | Conditional
+    | Grouping
+    | DocComment
     ;
 ```
 
@@ -59,4 +61,30 @@ ParenthizedCondition:
 ```ebnf
 Condition:
     StringLiteral
+```
+
+### Grouping
+``` ebnf
+Grouping:
+    'group' Block
+;
+```
+
+### Expression
+```ebnf
+Expression:
+    Primary
+```
+
+### Primary
+``` ebnf
+Primary:
+    FunctionCall
+```
+
+### FunctionCall
+``` ebnf
+FunctionCall:
+    Identifier '(' (Expression (',' Expression)*)? ')'
+    ;
 ```

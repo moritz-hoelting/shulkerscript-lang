@@ -2,7 +2,7 @@
 
 use shulkerbox::datapack::Condition as DpCondition;
 
-use crate::syntax::syntax_tree::expression::{
+use crate::syntax::syntax_tree::condition::{
     BinaryCondition, Condition, ConditionalBinaryOperator, ConditionalPrefixOperator,
     PrimaryCondition,
 };

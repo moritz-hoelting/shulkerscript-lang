@@ -12,12 +12,12 @@ use crate::{
         token_stream::Delimiter,
     },
     syntax::{
-        error::{Error, SyntaxKind, UnexpectedSyntax},
+        error::Error,
         parser::{Parser, Reading},
     },
 };
 
-use super::expression::ParenthesizedCondition;
+use super::{condition::ParenthesizedCondition, expression::Expression};
 
 /// Syntax Synopsis:
 ///
@@ -38,6 +38,7 @@ pub enum Statement {
     Conditional(Conditional),
     Grouping(Grouping),
     DocComment(DocComment),
+    Semicolon(Semicolon),
 }
 
 impl SourceElement for Statement {
@@ -48,6 +49,7 @@ impl SourceElement for Statement {
             Self::Conditional(conditional) => conditional.span(),
             Self::Grouping(grouping) => grouping.span(),
             Self::DocComment(doc_comment) => doc_comment.span(),
+            Self::Semicolon(semi) => semi.span(),
         }
     }
 }
@@ -142,6 +144,37 @@ impl SourceElement for Conditional {
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
+/// Else:
+///     'else' Block
+///     ;
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct Else {
+    /// The `else` keyword.
+    #[get = "pub"]
+    else_keyword: Keyword,
+    /// The block of the else statement.
+    #[get = "pub"]
+    block: Box<Block>,
+}
+
+impl Else {
+    /// Dissolves the [`Else`] into its components.
+    #[must_use]
+    pub fn dissolve(self) -> (Keyword, Box<Block>) {
+        (self.else_keyword, self.block)
+    }
+}
+
+impl SourceElement for Else {
+    fn span(&self) -> Span {
+        self.else_keyword.span().join(&self.block.span()).unwrap()
+    }
+}
+
+/// Syntax Synopsis:
+///
+/// ``` ebnf
 /// Grouping:
 /// 'group' Block
 /// ;
@@ -174,33 +207,35 @@ impl SourceElement for Grouping {
 }
 
 /// Syntax Synopsis:
-///
 /// ``` ebnf
-/// Else:
-///     'else' Block
-///     ;
+/// Semicolon:
+///    Expression ';'
+///   ;
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
-pub struct Else {
-    /// The `else` keyword.
+pub struct Semicolon {
+    /// The expression of the semicolon statement.
     #[get = "pub"]
-    else_keyword: Keyword,
-    /// The block of the else statement.
+    expression: Expression,
+    /// The semicolon of the semicolon statement.
     #[get = "pub"]
-    block: Box<Block>,
+    semicolon: Punctuation,
 }
 
-impl Else {
-    /// Dissolves the [`Else`] into its components.
-    #[must_use]
-    pub fn dissolve(self) -> (Keyword, Box<Block>) {
-        (self.else_keyword, self.block)
+impl SourceElement for Semicolon {
+    fn span(&self) -> Span {
+        self.expression
+            .span()
+            .join(&self.semicolon.span())
+            .expect("The span of the semicolon statement is invalid.")
     }
 }
 
-impl SourceElement for Else {
-    fn span(&self) -> Span {
-        self.else_keyword.span().join(&self.block.span()).unwrap()
+impl Semicolon {
+    /// Dissolves the [`Semicolon`] into its components.
+    #[must_use]
+    pub fn dissolve(self) -> (Expression, Punctuation) {
+        (self.expression, self.semicolon)
     }
 }
 
@@ -320,14 +355,15 @@ impl<'a> Parser<'a> {
                 }))
             }
 
-            // other
-            unexpected => {
-                handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
-                    expected: SyntaxKind::Statement,
-                    found: unexpected.into_token(),
-                }));
+            // semicolon statement
+            _ => {
+                let expression = self.parse_expression(handler)?;
+                let semicolon = self.parse_punctuation(';', true, handler)?;
 
-                None
+                Some(Statement::Semicolon(Semicolon {
+                    expression,
+                    semicolon,
+                }))
             }
         }
     }
