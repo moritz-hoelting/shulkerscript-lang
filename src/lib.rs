@@ -21,6 +21,8 @@ use std::{cell::Cell, fmt::Display, path::Path};
 
 use base::{source_file::SourceFile, Handler, Result};
 use syntax::syntax_tree::program::Program;
+
+#[cfg(feature = "shulkerbox")]
 use transpile::transpiler::Transpiler;
 
 #[cfg(feature = "shulkerbox")]
@@ -103,8 +105,9 @@ pub fn transpile(path: &Path) -> Result<Datapack> {
         ));
     }
 
-    let mut transpiler = Transpiler::new();
-    let datapack = transpiler.transpile(&program, &printer)?;
+    let mut transpiler = Transpiler::new("shulkerscript-pack", 27);
+    transpiler.transpile(&program, &printer)?;
+    let datapack = transpiler.into_datapack();
 
     Ok(datapack)
 }
@@ -144,8 +147,9 @@ pub fn compile(path: &Path) -> Result<VFolder> {
 
     // println!("program: {program:#?}");
 
-    let mut transpiler = Transpiler::new();
-    let datapack = transpiler.transpile(&program, &printer)?;
+    let mut transpiler = Transpiler::new("shulkerscript-pack", 27);
+    transpiler.transpile(&program, &printer)?;
+    let datapack = transpiler.into_datapack();
 
     // println!("datapack: {datapack:#?}");
 

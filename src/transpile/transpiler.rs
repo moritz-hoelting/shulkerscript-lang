@@ -12,19 +12,35 @@ use crate::{
 use super::error::{self, TranspileError};
 
 /// A transpiler for `ShulkerScript`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Transpiler {
-    functions: HashMap<String, (Vec<Statement>, AnnotationMap)>,
+    datapack: shulkerbox::datapack::Datapack,
+    functions: HashMap<String, FunctionData>,
+    function_locations: HashMap<String, String>,
 }
-type AnnotationMap = HashMap<String, Option<String>>;
+
+#[derive(Debug, Clone)]
+struct FunctionData {
+    namespace: String,
+    statements: Vec<Statement>,
+    annotations: HashMap<String, Option<String>>,
+}
 
 impl Transpiler {
     /// Creates a new transpiler.
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(pack_name: &str, pack_format: u8) -> Self {
         Self {
+            datapack: shulkerbox::datapack::Datapack::new(pack_name, pack_format),
             functions: HashMap::new(),
+            function_locations: HashMap::new(),
         }
+    }
+
+    /// Consumes the transpiler and returns the resulting datapack.
+    #[must_use]
+    pub fn into_datapack(self) -> Datapack {
+        self.datapack
     }
 
     /// Transpiles the given program.
@@ -35,49 +51,77 @@ impl Transpiler {
         &mut self,
         program: &Program,
         handler: &impl Handler<error::TranspileError>,
-    ) -> Result<Datapack, TranspileError> {
+    ) -> Result<(), TranspileError> {
         for declaration in program.declarations() {
-            match declaration {
-                Declaration::Function(function) => {
-                    let name = function.identifier().span().str().to_string();
-                    let statements = function.block().statements().clone();
-                    let annotations = function
-                        .annotations()
-                        .iter()
-                        .map(|annotation| {
-                            let key = annotation.identifier();
-                            let value = annotation.value();
-                            (
-                                key.span().str().to_string(),
-                                value.as_ref().map(|(_, ref v)| v.str_content().to_string()),
-                            )
-                        })
-                        .collect();
-                    self.functions.insert(name, (statements, annotations))
-                }
-            };
+            self.transpile_declaration(declaration);
         }
 
-        let Some((main_function, main_annotations)) = self.functions.get("main") else {
+        self.get_or_transpile_function("main").ok_or_else(|| {
             handler.receive(TranspileError::MissingMainFunction);
-            return Err(TranspileError::MissingMainFunction);
+            TranspileError::MissingMainFunction
+        })?;
+
+        Ok(())
+    }
+
+    /// Transpiles the given declaration.
+    fn transpile_declaration(&mut self, declaration: &Declaration) {
+        match declaration {
+            Declaration::Function(function) => {
+                let name = function.identifier().span().str().to_string();
+                let statements = function.block().statements().clone();
+                let annotations = function
+                    .annotations()
+                    .iter()
+                    .map(|annotation| {
+                        let key = annotation.identifier();
+                        let value = annotation.value();
+                        (
+                            key.span().str().to_string(),
+                            value.as_ref().map(|(_, ref v)| v.str_content().to_string()),
+                        )
+                    })
+                    .collect();
+                self.functions.insert(
+                    name,
+                    FunctionData {
+                        namespace: "shulkerscript".to_string(),
+                        statements,
+                        annotations,
+                    },
+                );
+            }
         };
+    }
 
-        let main_commands = compile_function(main_function);
-        // TODO: change this
-        let mut datapack = shulkerbox::datapack::Datapack::new("shulkerscript-pack", 27);
-        let namespace = datapack.namespace_mut("shulkerscript");
-        let main_function = namespace.function_mut("main");
-        main_function.get_commands_mut().extend(main_commands);
+    /// Gets the function at the given path, or transpiles it if it hasn't been transpiled yet.
+    fn get_or_transpile_function(&mut self, path: &str) -> Option<&str> {
+        let already_transpiled = self.function_locations.get(path);
+        if already_transpiled.is_none() {
+            let function_data = self.functions.get(path)?;
+            let commands = compile_function(&function_data.statements);
 
-        if main_annotations.contains_key("tick") {
-            datapack.add_tick("shulkerscript:main");
+            let function = self
+                .datapack
+                .namespace_mut(&function_data.namespace)
+                .function_mut(path);
+            function.get_commands_mut().extend(commands);
+
+            let function_location =
+                format!("{namespace}:{path}", namespace = function_data.namespace);
+
+            if function_data.annotations.contains_key("tick") {
+                self.datapack.add_tick(&function_location);
+            }
+            if function_data.annotations.contains_key("load") {
+                self.datapack.add_load(&function_location);
+            }
+
+            self.function_locations
+                .insert(path.to_string(), function_location);
         }
-        if main_annotations.contains_key("load") {
-            datapack.add_load("shulkerscript:main");
-        }
 
-        Ok(datapack)
+        self.function_locations.get(path).map(String::as_str)
     }
 }
 
