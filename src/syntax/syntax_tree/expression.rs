@@ -26,8 +26,9 @@ use super::ConnectedList;
 /// Expression:
 ///     Primary
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
 #[allow(missing_docs)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
 pub enum Expression {
     Primary(Primary),
 }
@@ -46,8 +47,9 @@ impl SourceElement for Expression {
 /// Primary:
 ///     FunctionCall
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
 #[allow(missing_docs)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
 pub enum Primary {
     FunctionCall(FunctionCall),
 }
@@ -67,6 +69,7 @@ impl SourceElement for Primary {
 ///     Identifier '(' (Expression (',' Expression)*)? ')'
 ///     ;
 /// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct FunctionCall {
     /// The identifier of the function.

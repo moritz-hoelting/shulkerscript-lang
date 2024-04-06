@@ -16,6 +16,7 @@ use getset::{CopyGetters, Getters};
 use super::Error;
 
 /// Represents a source file that contains the source code.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone)]
 pub struct SourceFile {
     path: PathBuf,
@@ -129,6 +130,7 @@ impl SourceFile {
 }
 
 /// Represents a range of characters in a source file.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Getters, CopyGetters)]
 pub struct Span {
     /// Get the start byte index of the span.

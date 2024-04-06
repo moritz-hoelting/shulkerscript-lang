@@ -31,6 +31,7 @@ use super::{condition::ParenthesizedCondition, expression::Expression};
 ///     ;
 /// ```
 #[allow(missing_docs)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Statement {
     Block(Block),
@@ -61,6 +62,7 @@ impl SourceElement for Statement {
 ///     '{' Statement* '}'
 ///     ;
 /// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct Block {
     /// The opening brace of the block.
@@ -98,6 +100,7 @@ impl SourceElement for Block {
 /// 'if' ParenthizedCondition Block ('else' Block)?
 /// ;
 /// ````
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct Conditional {
     /// The `if` keyword.
@@ -148,6 +151,7 @@ impl SourceElement for Conditional {
 ///     'else' Block
 ///     ;
 /// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct Else {
     /// The `else` keyword.
@@ -179,6 +183,7 @@ impl SourceElement for Else {
 /// 'group' Block
 /// ;
 /// ````
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct Grouping {
     /// The `group` keyword.
@@ -212,6 +217,7 @@ impl SourceElement for Grouping {
 ///    Expression ';'
 ///   ;
 /// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct Semicolon {
     /// The expression of the semicolon statement.

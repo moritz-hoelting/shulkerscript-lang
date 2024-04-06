@@ -8,6 +8,7 @@ edition = "2021"
 [features]
 default = ["shulkerbox"]
 shulkerbox = ["dep:shulkerbox"]
+serde = ["dep:serde"]
 
 [dependencies]
 chksum-md5 = "0.0.0"
@@ -15,6 +16,7 @@ colored = "2.1.0"
 derive_more = { version = "0.99.17", default-features = false, features = ["deref", "from", "deref_mut"] }
 enum-as-inner = "0.6.0"
 getset = "0.1.2"
+serde = { version = "1.0.197", features = ["derive", "rc"], optional = true }
 shulkerbox = { path = "../shulkerbox", optional = true}
 strum = { version = "0.26.2", features = ["derive"] }
 strum_macros = "0.26.2"

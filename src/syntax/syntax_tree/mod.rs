@@ -27,6 +27,7 @@ pub mod statement;
 /// This struct is useful for representing syntax tree nodes that are separated by a separator.
 /// For example, a comma separated list of expressions such as `1, 2, 3` can be represented by a
 /// [`ConnectedList`] with the separator being a comma token and the elements being the expressions.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct ConnectedList<Element, Separator> {
     /// The first element of the list.

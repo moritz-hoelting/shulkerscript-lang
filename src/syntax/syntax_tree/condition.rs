@@ -29,6 +29,7 @@ use crate::{
 ///     | StringLiteral
 /// ```
 #[allow(missing_docs)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
 pub enum PrimaryCondition {
     Prefix(ConditionalPrefix),
@@ -53,6 +54,7 @@ impl SourceElement for PrimaryCondition {
 ///     Condition ConditionalBinaryOperator Condition
 ///     ;
 /// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct BinaryCondition {
     /// The left operand of the binary condition.
@@ -91,8 +93,9 @@ impl BinaryCondition {
 ///     | '||'
 ///     ;
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
 #[allow(missing_docs)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
 pub enum ConditionalBinaryOperator {
     LogicalAnd(Punctuation, Punctuation),
     LogicalOr(Punctuation, Punctuation),
@@ -128,6 +131,7 @@ impl SourceElement for ConditionalBinaryOperator {
 /// ParenthesizedCondition:
 ///    '(' Condition ')';
 /// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct ParenthesizedCondition {
     /// The opening parenthesis.
@@ -164,6 +168,7 @@ impl SourceElement for ParenthesizedCondition {
 /// PrefixOperator: '!';
 /// ```
 #[allow(missing_docs)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
 pub enum ConditionalPrefixOperator {
     LogicalNot(Punctuation),
@@ -184,6 +189,7 @@ impl SourceElement for ConditionalPrefixOperator {
 ///     ConditionalPrefixOperator StringLiteral
 ///     ;
 /// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct ConditionalPrefix {
     /// The operator of the prefix.
@@ -213,6 +219,7 @@ impl ConditionalPrefix {
 /// Condition: PrimaryCondition;
 /// ```
 #[allow(missing_docs)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
 pub enum Condition {
     Primary(PrimaryCondition),

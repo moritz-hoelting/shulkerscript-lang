@@ -14,6 +14,7 @@ use strum_macros::EnumIter;
 use super::{error::UnterminatedDelimitedComment, Error};
 
 /// Is an enumeration representing keywords in shulkerscript.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumIter)]
 #[allow(missing_docs)]
 pub enum KeywordKind {
@@ -68,6 +69,7 @@ impl KeywordKind {
 }
 
 /// Is an enumeration containing all kinds of tokens in the Shulkerscript programming language.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, From, EnumAsInner)]
 #[allow(missing_docs)]
 pub enum Token {
@@ -117,6 +119,7 @@ impl SourceElement for Token {
 }
 
 /// Represents a contiguous sequence of whitespace characters.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WhiteSpaces {
     /// Is the span that makes up the token.
@@ -129,6 +132,7 @@ impl SourceElement for WhiteSpaces {
     }
 }
 /// Represents a contiguous sequence of characters that are valid in an identifier.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Identifier {
     /// Is the span that makes up the token.
@@ -142,6 +146,7 @@ impl SourceElement for Identifier {
 }
 
 /// Represents a contiguous sequence of characters that are reserved for a keyword.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Keyword {
     /// Is the span that makes up the token.
@@ -158,6 +163,7 @@ impl SourceElement for Keyword {
 }
 
 /// Represents a single ASCII punctuation character.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Punctuation {
     /// Is the span that makes up the token.
@@ -174,6 +180,7 @@ impl SourceElement for Punctuation {
 }
 
 /// Represents a hardcoded numeric literal value in the source code.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Numeric {
     /// Is the span that makes up the token.
@@ -187,6 +194,7 @@ impl SourceElement for Numeric {
 }
 
 /// Represents a hardcoded string literal value in the source code.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StringLiteral {
     /// Is the span that makes up the token.
@@ -209,6 +217,7 @@ impl SourceElement for StringLiteral {
 }
 
 /// Is an enumeration representing the two kinds of comments in the Shulkerscript programming language.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CommentKind {
     /// A comment that starts with `//` and ends at the end of the line.
@@ -219,6 +228,7 @@ pub enum CommentKind {
 }
 
 /// Represents a portion of the source code that is ignored by the interpreter.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Comment {
     /// Is the span that makes up the token.
@@ -235,6 +245,7 @@ impl SourceElement for Comment {
 }
 
 /// Represents a documentation comment in the source code.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DocComment {
     /// Is the span that makes up the token.
@@ -256,6 +267,7 @@ impl DocComment {
 }
 
 /// Represents a hardcoded literal command in the source code.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CommandLiteral {
     /// Span that makes up the token.

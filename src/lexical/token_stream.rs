@@ -15,6 +15,7 @@ use super::{
 ///
 /// This struct is the final output of the lexical analysis phase and is meant to be used by the
 /// next stage of the compilation process.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deref)]
 pub struct TokenStream {
     #[deref]
@@ -162,6 +163,7 @@ impl TokenStream {
 }
 
 /// Is an enumeration of either a [`Token`] or a [`Delimited`].
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, From)]
 #[allow(missing_docs)]
 pub enum TokenTree {
@@ -170,8 +172,8 @@ pub enum TokenTree {
 }
 
 /// Is an enumeration of the different types of delimiters in the [`Delimited`].
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[allow(missing_docs)]
 pub enum Delimiter {
     /// ()
     Parenthesis,
@@ -182,6 +184,7 @@ pub enum Delimiter {
 }
 
 /// Represents a list of tokens enclosed by a pair of delimiters.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Delimited {
     /// The opening delimiter.

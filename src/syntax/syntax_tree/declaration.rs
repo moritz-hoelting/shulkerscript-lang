@@ -21,6 +21,7 @@ use crate::{
 
 use super::{statement::Block, ConnectedList};
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Declaration {
     Function(Function),
@@ -40,6 +41,7 @@ impl SourceElement for Declaration {
 ///     '#[' Identifier ('=' StringLiteral)? ']'
 ///     ;
 /// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct Annotation {
     #[get = "pub"]
@@ -95,6 +97,7 @@ impl SourceElement for Annotation {
 ///     Identifier (',' Identifier)* ','?  
 ///     ;
 /// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct Function {
     #[get = "pub"]
