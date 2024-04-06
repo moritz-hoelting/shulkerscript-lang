@@ -1,5 +1,6 @@
 //! Compiler for `ShulkerScript`
 
+use chksum_md5 as md5;
 use std::{collections::HashMap, sync::RwLock};
 
 use shulkerbox::datapack::{self, Command, Datapack, Execute};
@@ -14,7 +15,7 @@ use crate::{
     },
 };
 
-use super::error::{self, TranspileError};
+use super::error::TranspileError;
 
 /// A transpiler for `ShulkerScript`.
 #[derive(Debug)]
@@ -55,16 +56,30 @@ impl Transpiler {
     pub fn transpile(
         &mut self,
         program: &Program,
-        handler: &impl Handler<error::TranspileError>,
+        _handler: &impl Handler<TranspileError>,
     ) -> Result<(), TranspileError> {
         for declaration in program.declarations() {
             self.transpile_declaration(declaration);
         }
 
-        self.get_or_transpile_function("main").ok_or_else(|| {
-            handler.receive(TranspileError::MissingMainFunction);
-            TranspileError::MissingMainFunction
-        })?;
+        let mut always_transpile_functions = Vec::new();
+
+        #[allow(clippy::significant_drop_in_scrutinee)]
+        {
+            let functions = self.functions.read().unwrap();
+            for (name, data) in functions.iter() {
+                let always_transpile_function = data.annotations.contains_key("tick")
+                    || data.annotations.contains_key("load")
+                    || data.annotations.contains_key("deobfuscate");
+                if always_transpile_function {
+                    always_transpile_functions.push(name.clone());
+                };
+            }
+        }
+
+        for name in always_transpile_functions {
+            self.get_or_transpile_function(&name);
+        }
 
         Ok(())
     }
@@ -87,7 +102,7 @@ impl Transpiler {
                         )
                     })
                     .collect();
-                self.add_function_data(
+                self.functions.write().unwrap().insert(
                     name,
                     FunctionData {
                         namespace: "shulkerscript".to_string(),
@@ -99,45 +114,44 @@ impl Transpiler {
         };
     }
 
-    /// Adds the given function data to the transpiler.
-    /// If the function has the `tick` or `load` annotation, it will be transpiled immediately.
-    fn add_function_data(&mut self, name: String, function: FunctionData) {
-        let always_transpile_function =
-            function.annotations.contains_key("tick") || function.annotations.contains_key("load");
-        let cloned_name = always_transpile_function.then(|| name.clone());
-        self.functions.write().unwrap().insert(name, function);
-        if let Some(name) = cloned_name {
-            self.get_or_transpile_function(&name);
-        };
-    }
-
     /// Gets the function at the given path, or transpiles it if it hasn't been transpiled yet.
     /// Returns the location of the function or None if the function does not exist.
     #[allow(clippy::significant_drop_tightening)]
-    fn get_or_transpile_function(&mut self, path: &str) -> Option<String> {
+    fn get_or_transpile_function(&mut self, name: &str) -> Option<String> {
         let already_transpiled = {
             let locations = self.function_locations.read().unwrap();
-            locations.get(path).is_some()
+            locations.get(name).is_some()
         };
         if !already_transpiled {
             let statements = {
                 let functions = self.functions.read().unwrap();
-                let function_data = functions.get(path)?;
+                let function_data = functions.get(name)?;
                 function_data.statements.clone()
             };
             let commands = self.transpile_function(&statements);
 
             let functions = self.functions.read().unwrap();
-            let function_data = functions.get(path)?;
+            let function_data = functions.get(name)?;
+
+            let modified_name = function_data
+                .annotations
+                .get("deobfuscate")
+                .map_or_else(
+                    || Some("shu/".to_string() + &md5::hash(name).to_hex_lowercase()[..16]),
+                    Clone::clone,
+                )
+                .unwrap_or_else(|| name.to_string());
 
             let function = self
                 .datapack
                 .namespace_mut(&function_data.namespace)
-                .function_mut(path);
+                .function_mut(&modified_name);
             function.get_commands_mut().extend(commands);
 
-            let function_location =
-                format!("{namespace}:{path}", namespace = function_data.namespace);
+            let function_location = format!(
+                "{namespace}:{modified_name}",
+                namespace = function_data.namespace
+            );
 
             if function_data.annotations.contains_key("tick") {
                 self.datapack.add_tick(&function_location);
@@ -149,11 +163,11 @@ impl Transpiler {
             self.function_locations
                 .write()
                 .unwrap()
-                .insert(path.to_string(), function_location);
+                .insert(name.to_string(), function_location);
         }
 
         let locations = self.function_locations.read().unwrap();
-        locations.get(path).map(String::to_owned)
+        locations.get(name).map(String::to_owned)
     }
 
     fn transpile_function(&mut self, statements: &[Statement]) -> Vec<Command> {
