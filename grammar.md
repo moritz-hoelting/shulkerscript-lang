@@ -35,12 +35,21 @@ Statement:
     | Conditional
     | Grouping
     | DocComment
+    | Semicolon
+    | Run
     ;
 ```
 
 ### Block
 ```ebnf	
 Block: '{' Statement* '}';
+```
+
+### Run
+```ebnf
+Run:
+    'run' Expression ';'
+    ;
 ```
 
 ### Conditional

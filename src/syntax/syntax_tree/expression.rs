@@ -9,7 +9,7 @@ use crate::{
         Handler,
     },
     lexical::{
-        token::{Identifier, Punctuation, Token},
+        token::{Identifier, Punctuation, StringLiteral, Token},
         token_stream::Delimiter,
     },
     syntax::{
@@ -52,12 +52,14 @@ impl SourceElement for Expression {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
 pub enum Primary {
     FunctionCall(FunctionCall),
+    StringLiteral(StringLiteral),
 }
 
 impl SourceElement for Primary {
     fn span(&self) -> Span {
         match self {
             Self::FunctionCall(function_call) => function_call.span(),
+            Self::StringLiteral(string_literal) => string_literal.span(),
         }
     }
 }
@@ -129,6 +131,14 @@ impl<'a> Parser<'a> {
                     // insert parser for regular identifier here
                     None
                 }
+            }
+
+            // string literal expression
+            Reading::Atomic(Token::StringLiteral(literal)) => {
+                // eat the string literal
+                self.forward();
+
+                Some(Primary::StringLiteral(literal))
             }
 
             unexpected => {

@@ -22,6 +22,7 @@ pub enum KeywordKind {
     If,
     Else,
     Group,
+    Run,
 }
 
 impl ToString for KeywordKind {
@@ -64,6 +65,7 @@ impl KeywordKind {
             Self::If => "if",
             Self::Else => "else",
             Self::Group => "group",
+            Self::Run => "run",
         }
     }
 }

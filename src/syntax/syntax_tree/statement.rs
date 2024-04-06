@@ -28,6 +28,8 @@ use super::{condition::ParenthesizedCondition, expression::Expression};
 ///     | Conditional
 ///     | Grouping
 ///     | DocComment
+///     | Semicolon
+///     | Run
 ///     ;
 /// ```
 #[allow(missing_docs)]
@@ -40,6 +42,7 @@ pub enum Statement {
     Grouping(Grouping),
     DocComment(DocComment),
     Semicolon(Semicolon),
+    Run(Run),
 }
 
 impl SourceElement for Statement {
@@ -51,6 +54,7 @@ impl SourceElement for Statement {
             Self::Grouping(grouping) => grouping.span(),
             Self::DocComment(doc_comment) => doc_comment.span(),
             Self::Semicolon(semi) => semi.span(),
+            Self::Run(run) => run.span(),
         }
     }
 }
@@ -96,10 +100,48 @@ impl SourceElement for Block {
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
+/// Run:
+/// 'run' Expression ';'
+/// ;
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct Run {
+    /// The `run` keyword.
+    #[get = "pub"]
+    run_keyword: Keyword,
+    /// The expression of the run statement.
+    #[get = "pub"]
+    expression: Expression,
+    /// The semicolon of the run statement.
+    #[get = "pub"]
+    semicolon: Punctuation,
+}
+
+impl SourceElement for Run {
+    fn span(&self) -> Span {
+        self.run_keyword
+            .span()
+            .join(&self.semicolon.span())
+            .expect("The span of the run statement is invalid.")
+    }
+}
+
+impl Run {
+    /// Dissolves the [`Run`] into its components.
+    #[must_use]
+    pub fn dissolve(self) -> (Keyword, Expression, Punctuation) {
+        (self.run_keyword, self.expression, self.semicolon)
+    }
+}
+
+/// Syntax Synopsis:
+///
+/// ``` ebnf
 /// Conditional:
 /// 'if' ParenthizedCondition Block ('else' Block)?
 /// ;
-/// ````
+/// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct Conditional {
@@ -358,6 +400,23 @@ impl<'a> Parser<'a> {
                 Some(Statement::Grouping(Grouping {
                     group_keyword,
                     block,
+                }))
+            }
+
+            // run statement
+            Reading::Atomic(Token::Keyword(run_keyword))
+                if run_keyword.keyword == KeywordKind::Run =>
+            {
+                // eat the run keyword
+                self.forward();
+
+                let expression = self.parse_expression(handler)?;
+                let semicolon = self.parse_punctuation(';', true, handler)?;
+
+                Some(Statement::Run(Run {
+                    run_keyword,
+                    expression,
+                    semicolon,
                 }))
             }
 

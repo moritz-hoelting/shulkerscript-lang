@@ -9,7 +9,7 @@ use crate::{
     base::{source_file::SourceElement, Handler},
     syntax::syntax_tree::{
         declaration::Declaration,
-        expression::{Expression, Primary},
+        expression::{Expression, FunctionCall, Primary},
         program::Program,
         statement::{Conditional, Statement},
     },
@@ -226,6 +226,14 @@ impl Transpiler {
             Statement::LiteralCommand(literal_command) => {
                 Ok(Some(literal_command.clean_command().into()))
             }
+            Statement::Run(run) => match run.expression() {
+                Expression::Primary(Primary::FunctionCall(func)) => {
+                    self.transpile_function_call(func, handler).map(Some)
+                }
+                Expression::Primary(Primary::StringLiteral(string)) => {
+                    Ok(Some(Command::Raw(string.str_content().to_string())))
+                }
+            },
             Statement::Block(_) => {
                 unreachable!("Only literal commands are allowed in functions at this time.")
             }
@@ -256,12 +264,29 @@ impl Transpiler {
                     Ok(Some(Command::Group(commands)))
                 }
             }
+            #[allow(clippy::match_wildcard_for_single_variants)]
             Statement::Semicolon(semi) => match semi.expression() {
-                Expression::Primary(primary) => self
-                    .transpile_primary_expression(primary, handler)
-                    .map(Some),
+                Expression::Primary(Primary::FunctionCall(func)) => {
+                    self.transpile_function_call(func, handler).map(Some)
+                }
+                unexpected => {
+                    let error = TranspileError::UnexpectedExpression(unexpected.clone());
+                    handler.receive(error.clone());
+                    Err(error)
+                }
             },
         }
+    }
+
+    fn transpile_function_call(
+        &mut self,
+        func: &FunctionCall,
+        handler: &impl Handler<TranspileError>,
+    ) -> TranspileResult<Command> {
+        let identifier = func.identifier().span();
+        let identifier_name = identifier.str();
+        let location = self.get_or_transpile_function(identifier_name, handler)?;
+        Ok(Command::Raw(format!("function {location}")))
     }
 
     fn transpile_conditional(
@@ -342,21 +367,6 @@ impl Transpiler {
                     el,
                 ))
             }))
-        }
-    }
-
-    fn transpile_primary_expression(
-        &mut self,
-        primary: &Primary,
-        handler: &impl Handler<TranspileError>,
-    ) -> TranspileResult<Command> {
-        match primary {
-            Primary::FunctionCall(func) => {
-                let identifier = func.identifier().span();
-                let identifier_name = identifier.str();
-                let location = self.get_or_transpile_function(identifier_name, handler)?;
-                Ok(Command::Raw(format!("function {location}")))
-            }
         }
     }
 }
