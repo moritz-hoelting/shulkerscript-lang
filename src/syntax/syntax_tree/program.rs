@@ -3,27 +3,128 @@
 use getset::Getters;
 
 use crate::{
-    base::Handler,
+    base::{
+        source_file::{SourceElement, Span},
+        Handler,
+    },
+    lexical::token::{Keyword, KeywordKind, Punctuation, StringLiteral, Token},
     syntax::{
-        error::Error,
+        error::{Error, SyntaxKind, UnexpectedSyntax},
         parser::{Parser, Reading},
     },
 };
 
 use super::declaration::Declaration;
 
-/// Program is a collection of declarations.
+/// Program is a collection of declarations preceeded by a namespace selector.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
-pub struct Program {
+pub struct ProgramFile {
+    /// The namespace selector.
+    #[get = "pub"]
+    namespace: Namespace,
     /// The declarations within the program.
     #[get = "pub"]
     declarations: Vec<Declaration>,
 }
 
+/// Namespace is a namespace selector.
+///
+/// Syntax Synopsis:
+///
+/// ```ebnf
+/// Namespace:
+///    'namespace' StringLiteral ';' ;
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+#[allow(missing_docs)]
+pub struct Namespace {
+    /// The `namespace` keyword.
+    #[get = "pub"]
+    namespace_keyword: Keyword,
+    /// The name of the namespace.
+    #[get = "pub"]
+    namespace_name: StringLiteral,
+    /// The semicolon.
+    #[get = "pub"]
+    semicolon: Punctuation,
+}
+
+impl SourceElement for Namespace {
+    fn span(&self) -> Span {
+        self.namespace_keyword
+            .span()
+            .join(&self.semicolon.span())
+            .expect("Invalid span")
+    }
+}
+
+impl Namespace {
+    /// Dissolves the namespace into its components.
+    #[must_use]
+    pub fn dissolve(self) -> (Keyword, StringLiteral, Punctuation) {
+        (self.namespace_keyword, self.namespace_name, self.semicolon)
+    }
+
+    /// Validates a namespace string.
+    #[must_use]
+    pub fn validate_str(namespace: &str) -> bool {
+        const VALID_CHARS: &str = "0123456789abcdefghijklmnopqrstuvwxyz_-.";
+
+        namespace.chars().all(|c| VALID_CHARS.contains(c))
+    }
+}
+
 impl<'a> Parser<'a> {
-    /// Parses a [`Program`].
-    pub fn parse_program(&mut self, handler: &impl Handler<Error>) -> Option<Program> {
+    /// Parses a [`ProgramFile`].
+    pub fn parse_program(&mut self, handler: &impl Handler<Error>) -> Option<ProgramFile> {
+        let namespace = match self.stop_at_significant() {
+            Reading::Atomic(Token::Keyword(namespace_keyword))
+                if namespace_keyword.keyword == KeywordKind::Namespace =>
+            {
+                // eat the keyword
+                self.forward();
+
+                let namespace_name = match self.stop_at_significant() {
+                    Reading::Atomic(Token::StringLiteral(name)) => {
+                        self.forward();
+                        Some(name)
+                    }
+                    unexpected => {
+                        self.forward();
+                        handler.receive(
+                            UnexpectedSyntax {
+                                expected: SyntaxKind::StringLiteral,
+                                found: unexpected.into_token(),
+                            }
+                            .into(),
+                        );
+                        None
+                    }
+                }
+                .and_then(|name| Namespace::validate_str(name.str_content()).then_some(name))?;
+
+                let semicolon = self.parse_punctuation(';', true, handler)?;
+
+                Some(Namespace {
+                    namespace_keyword,
+                    namespace_name,
+                    semicolon,
+                })
+            }
+            unexpected => {
+                handler.receive(
+                    UnexpectedSyntax {
+                        expected: SyntaxKind::Keyword(KeywordKind::Namespace),
+                        found: unexpected.into_token(),
+                    }
+                    .into(),
+                );
+                None
+            }
+        }?;
+
         let mut declarations = Vec::new();
 
         while !self.is_exhausted() {
@@ -44,6 +145,9 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Some(Program { declarations })
+        Some(ProgramFile {
+            namespace,
+            declarations,
+        })
     }
 }

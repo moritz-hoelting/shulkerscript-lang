@@ -21,6 +21,13 @@ use crate::{
 
 use super::{statement::Block, ConnectedList};
 
+/// Syntax Synopsis:
+///
+/// ``` ebnf
+/// Declaration:
+///    Function
+///   ;
+/// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Declaration {

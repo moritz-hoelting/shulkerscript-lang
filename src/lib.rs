@@ -22,7 +22,7 @@ pub mod transpile;
 use std::{cell::Cell, fmt::Display, path::Path};
 
 use base::{source_file::SourceFile, Handler, Result};
-use syntax::syntax_tree::program::Program;
+use syntax::syntax_tree::program::ProgramFile;
 
 #[cfg(feature = "shulkerbox")]
 use transpile::transpiler::Transpiler;
@@ -49,7 +49,7 @@ pub fn tokenize(path: &Path) -> Result<TokenStream> {
 /// # Errors
 /// - If an error occurs while reading the file.
 /// - If an error occurs while parsing the source code.
-pub fn parse(path: &Path) -> Result<Program> {
+pub fn parse(path: &Path) -> Result<ProgramFile> {
     let source_file = SourceFile::load(path)?;
 
     let printer = Printer::new();

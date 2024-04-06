@@ -1,4 +1,4 @@
-# Grammar of the shulkerscript language
+# Grammar of the ShulkerScript language
 
 ## Table of contents
 
@@ -126,14 +126,14 @@ Expression:
 ```
 
 ### Primary
-``` ebnf
+```ebnf
 Primary:
     FunctionCall
     ;
 ```
 
 ### FunctionCall
-``` ebnf
+```ebnf
 FunctionCall:
     Identifier '(' (Expression (',' Expression)*)? ')'
     ;

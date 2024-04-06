@@ -10,7 +10,7 @@ use crate::{
     syntax::syntax_tree::{
         declaration::Declaration,
         expression::{Expression, FunctionCall, Primary},
-        program::Program,
+        program::{Namespace, ProgramFile},
         statement::{Conditional, Statement},
     },
 };
@@ -55,11 +55,13 @@ impl Transpiler {
     /// - [`TranspileError::MissingFunctionDeclaration`] If a called function is missing
     pub fn transpile(
         &mut self,
-        program: &Program,
+        program: &ProgramFile,
         handler: &impl Handler<TranspileError>,
     ) -> Result<(), TranspileError> {
+        let namespace = program.namespace();
+
         for declaration in program.declarations() {
-            self.transpile_declaration(declaration, handler);
+            self.transpile_declaration(declaration, namespace, handler);
         }
 
         let mut always_transpile_functions = Vec::new();
@@ -88,6 +90,7 @@ impl Transpiler {
     fn transpile_declaration(
         &mut self,
         declaration: &Declaration,
+        namespace: &Namespace,
         _handler: &impl Handler<TranspileError>,
     ) {
         match declaration {
@@ -109,7 +112,7 @@ impl Transpiler {
                 self.functions.write().unwrap().insert(
                     name,
                     FunctionData {
-                        namespace: "shulkerscript".to_string(),
+                        namespace: namespace.namespace_name().str_content().to_string(),
                         statements,
                         annotations,
                     },
