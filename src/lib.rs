@@ -12,6 +12,8 @@
 #![warn(missing_docs, clippy::all, clippy::pedantic)]
 #![allow(clippy::missing_panics_doc, clippy::missing_const_for_fn)]
 
+pub use shulkerbox;
+
 pub mod base;
 pub mod lexical;
 pub mod syntax;

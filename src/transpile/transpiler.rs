@@ -52,7 +52,7 @@ impl Transpiler {
     /// Transpiles the given program.
     ///
     /// # Errors
-    /// - [`TranspileError::MissingMainFunction`] If the main function is missing.
+    /// - [`TranspileError::MissingFunctionDeclaration`] If a called function is missing
     pub fn transpile(
         &mut self,
         program: &Program,
