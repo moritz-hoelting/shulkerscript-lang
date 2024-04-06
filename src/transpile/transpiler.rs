@@ -87,7 +87,7 @@ impl Transpiler {
                         )
                     })
                     .collect();
-                self.functions.write().unwrap().insert(
+                self.add_function_data(
                     name,
                     FunctionData {
                         namespace: "shulkerscript".to_string(),
@@ -96,6 +96,18 @@ impl Transpiler {
                     },
                 );
             }
+        };
+    }
+
+    /// Adds the given function data to the transpiler.
+    /// If the function has the `tick` or `load` annotation, it will be transpiled immediately.
+    fn add_function_data(&mut self, name: String, function: FunctionData) {
+        let always_transpile_function =
+            function.annotations.contains_key("tick") || function.annotations.contains_key("load");
+        let cloned_name = always_transpile_function.then(|| name.clone());
+        self.functions.write().unwrap().insert(name, function);
+        if let Some(name) = cloned_name {
+            self.get_or_transpile_function(&name);
         };
     }
 
