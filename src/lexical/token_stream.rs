@@ -3,8 +3,12 @@
 use std::{fmt::Debug, sync::Arc};
 
 use derive_more::{Deref, From};
+use enum_as_inner::EnumAsInner;
 
-use crate::base::{source_file::SourceFile, Handler};
+use crate::base::{
+    source_file::{SourceElement, SourceFile, Span},
+    Handler,
+};
 
 use super::{
     error::{self, UndelimitedDelimiter},
@@ -164,11 +168,24 @@ impl TokenStream {
 
 /// Is an enumeration of either a [`Token`] or a [`Delimited`].
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, From)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, From, EnumAsInner)]
 #[allow(missing_docs)]
 pub enum TokenTree {
     Token(Token),
     Delimited(Delimited),
+}
+
+impl SourceElement for TokenTree {
+    fn span(&self) -> Span {
+        match self {
+            Self::Token(token) => token.span().to_owned(),
+            Self::Delimited(delimited) => delimited
+                .open
+                .span()
+                .join(&delimited.close.span)
+                .expect("Invalid delimited span"),
+        }
+    }
 }
 
 /// Is an enumeration of the different types of delimiters in the [`Delimited`].

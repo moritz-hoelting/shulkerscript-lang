@@ -247,6 +247,12 @@ impl<'a> Frame<'a> {
         self.get_reading(self.token_provider.token_stream().get(self.current_index))
     }
 
+    /// Returns a raw [`Token`] pointing by the `current_index` of the [`Frame`].
+    #[must_use]
+    pub fn peek_raw(&self) -> Option<&TokenTree> {
+        self.token_provider.token_stream().get(self.current_index)
+    }
+
     /// Returns the next significant [`Token`] after the `current_index` of the [`Frame`].
     #[must_use]
     pub fn peek_significant(&self) -> Reading {

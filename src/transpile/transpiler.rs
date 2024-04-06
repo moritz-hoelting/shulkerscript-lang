@@ -233,6 +233,9 @@ impl Transpiler {
                 Expression::Primary(Primary::StringLiteral(string)) => {
                     Ok(Some(Command::Raw(string.str_content().to_string())))
                 }
+                Expression::Primary(Primary::Lua(code)) => {
+                    Ok(Some(Command::Raw(code.eval_string(handler)?)))
+                }
             },
             Statement::Block(_) => {
                 unreachable!("Only literal commands are allowed in functions at this time.")

@@ -4,5 +4,7 @@
 #[cfg(feature = "shulkerbox")]
 pub mod conversions;
 pub mod error;
+#[doc(hidden)]
+pub mod lua;
 #[cfg(feature = "shulkerbox")]
 pub mod transpiler;

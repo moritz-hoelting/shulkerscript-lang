@@ -59,41 +59,89 @@ Conditional:
     ;
 ```
 
-### ParenthizedCondition
+### Condition
+```ebnf
+Condition:
+    PrimaryCondition
+    BinaryCondition
+    ;
+```
+
+#### PrimaryCondition
+```ebnf
+PrimaryCondition:
+    ConditionalPrefix
+    | ParenthesizedCondition
+    | StringLiteral
+    ;
+```
+
+#### ConditionalPrefix
+```ebnf
+ConditionalPrefix:
+    ConditionalPrefixOperator PrimaryCondition
+    ;
+```
+
+#### ConditionalPrefixOperator
+``` ebnf
+ConditionalPrefixOperator: '!';
+```
+
+#### BinaryCondition
+``` ebnf
+BinaryCondition:
+    Condition ConditionalBinaryOperator Condition
+    ;
+```
+
+#### ConditionalBinaryOperator
+``` ebnf
+ConditionalBinaryOperator:
+    '&&'
+    | '||'
+    ;
+```
+
+#### ParenthizedCondition
 ```ebnf
 ParenthizedCondition:
     '(' Condition ')'
     ;
 ```
 
-### Condition
-```ebnf
-Condition:
-    StringLiteral
-```
 
 ### Grouping
 ``` ebnf
 Grouping:
     'group' Block
-;
+    ;
 ```
 
 ### Expression
 ```ebnf
 Expression:
     Primary
+    ;
 ```
 
 ### Primary
 ``` ebnf
 Primary:
     FunctionCall
+    ;
 ```
 
 ### FunctionCall
 ``` ebnf
 FunctionCall:
     Identifier '(' (Expression (',' Expression)*)? ')'
+    ;
+```
+
+### LuaCode
+```ebnf
+LuaCode:
+    'lua' '(' (Expression (',' Expression)*)? ')' '{' (.*?)* '}'
     ;
 ```

@@ -9,7 +9,7 @@ use crate::{
         Handler,
     },
     lexical::{
-        token::{Identifier, Punctuation, StringLiteral, Token},
+        token::{Identifier, Keyword, KeywordKind, Punctuation, StringLiteral, Token},
         token_stream::Delimiter,
     },
     syntax::{
@@ -47,12 +47,13 @@ impl SourceElement for Expression {
 /// Primary:
 ///     FunctionCall
 /// ```
-#[allow(missing_docs)]
+#[allow(missing_docs, clippy::large_enum_variant)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
 pub enum Primary {
     FunctionCall(FunctionCall),
     StringLiteral(StringLiteral),
+    Lua(LuaCode),
 }
 
 impl SourceElement for Primary {
@@ -60,6 +61,7 @@ impl SourceElement for Primary {
         match self {
             Self::FunctionCall(function_call) => function_call.span(),
             Self::StringLiteral(string_literal) => string_literal.span(),
+            Self::Lua(lua_code) => lua_code.span(),
         }
     }
 }
@@ -94,6 +96,60 @@ impl SourceElement for FunctionCall {
             .span()
             .join(&self.right_parenthesis.span)
             .unwrap()
+    }
+}
+
+/// Syntax Synopsis:
+///
+/// ```ebnf
+/// LuaCode:
+///     'lua' '(' (Expression (',' Expression)*)? ')' '{' (.*?)* '}'
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct LuaCode {
+    /// The `lua` keyword.
+    #[get = "pub"]
+    lua_keyword: Keyword,
+    /// The left parenthesis of the lua code.
+    #[get = "pub"]
+    left_parenthesis: Punctuation,
+    /// The arguments of the lua code.
+    #[get = "pub"]
+    variables: Option<ConnectedList<Identifier, Punctuation>>,
+    /// The right parenthesis of the lua code.
+    #[get = "pub"]
+    right_parenthesis: Punctuation,
+    /// The left brace of the lua code.
+    #[get = "pub"]
+    left_brace: Punctuation,
+    /// The lua code contents.
+    #[get = "pub"]
+    code: String,
+    /// The right brace of the lua code.
+    #[get = "pub"]
+    right_brace: Punctuation,
+}
+
+impl SourceElement for LuaCode {
+    fn span(&self) -> Span {
+        self.lua_keyword
+            .span()
+            .join(&self.right_brace.span)
+            .expect("Invalid lua code span")
+    }
+}
+
+impl LuaCode {
+    /// Dissolves the [`LuaCode`] into its components.
+    #[must_use]
+    pub fn dissolve(self) -> (Keyword, Punctuation, String, Punctuation) {
+        (
+            self.lua_keyword,
+            self.left_brace,
+            self.code,
+            self.right_brace,
+        )
     }
 }
 
@@ -139,6 +195,65 @@ impl<'a> Parser<'a> {
                 self.forward();
 
                 Some(Primary::StringLiteral(literal))
+            }
+
+            // lua code expression
+            Reading::Atomic(Token::Keyword(lua_keyword))
+                if lua_keyword.keyword == KeywordKind::Lua =>
+            {
+                // eat the lua keyword
+                self.forward();
+
+                // parse the variable list
+                let variables = self.parse_enclosed_list(
+                    Delimiter::Parenthesis,
+                    ',',
+                    |parser| match parser.next_significant_token() {
+                        Reading::Atomic(Token::Identifier(identifier)) => {
+                            parser.forward();
+                            Some(identifier)
+                        }
+                        _ => None,
+                    },
+                    handler,
+                )?;
+
+                self.stop_at_significant();
+
+                let tree = self.step_into(
+                    Delimiter::Brace,
+                    |parser| {
+                        let first = parser.next_token();
+                        let mut last = parser.next_token();
+
+                        while !parser.is_end() {
+                            last = parser.next_token();
+                        }
+
+                        let combined = first
+                            .into_token()
+                            .and_then(|first| {
+                                first.span().join(&last.into_token().map_or_else(
+                                    || first.span().to_owned(),
+                                    |last| last.span().to_owned(),
+                                ))
+                            })
+                            .expect("Invalid lua code span");
+
+                        Some(combined.str().trim().to_owned())
+                    },
+                    handler,
+                )?;
+
+                Some(Primary::Lua(LuaCode {
+                    lua_keyword,
+                    left_parenthesis: variables.open,
+                    variables: variables.list,
+                    right_parenthesis: variables.close,
+                    left_brace: tree.open,
+                    code: tree.tree?,
+                    right_brace: tree.close,
+                }))
             }
 
             unexpected => {

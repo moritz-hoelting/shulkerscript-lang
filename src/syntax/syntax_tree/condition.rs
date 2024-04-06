@@ -23,9 +23,9 @@ use crate::{
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
-/// Expression:
-///     Prefix
-///     | Parenthesized
+/// PrimaryCondition:
+///     ConditionalPrefix
+///     | ParenthesizedCondition
 ///     | StringLiteral
 /// ```
 #[allow(missing_docs)]
@@ -88,7 +88,7 @@ impl BinaryCondition {
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
-/// BinaryOperator:
+/// ConditionalBinaryOperator:
 ///     '&&'
 ///     | '||'
 ///     ;
@@ -165,7 +165,7 @@ impl SourceElement for ParenthesizedCondition {
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
-/// PrefixOperator: '!';
+/// ConditionalPrefixOperator: '!';
 /// ```
 #[allow(missing_docs)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -185,8 +185,8 @@ impl SourceElement for ConditionalPrefixOperator {
 /// Syntax Synopsis:
 ///
 /// ```ebnf
-/// Prefix:
-///     ConditionalPrefixOperator StringLiteral
+/// ConditionalPrefix:
+///     ConditionalPrefixOperator PrimaryCondition
 ///     ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -216,7 +216,10 @@ impl ConditionalPrefix {
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
-/// Condition: PrimaryCondition;
+/// Condition:
+///     PrimaryCondition
+///     | BinaryCondition
+///     ;
 /// ```
 #[allow(missing_docs)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

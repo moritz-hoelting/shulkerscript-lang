@@ -23,6 +23,7 @@ pub enum KeywordKind {
     Else,
     Group,
     Run,
+    Lua,
 }
 
 impl ToString for KeywordKind {
@@ -66,6 +67,7 @@ impl KeywordKind {
             Self::Else => "else",
             Self::Group => "group",
             Self::Run => "run",
+            Self::Lua => "lua",
         }
     }
 }

@@ -51,6 +51,12 @@ impl SourceFile {
         &self.content
     }
 
+    /// Get the path of the source file.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     /// Get the line of the source file at the given line number.
     ///
     /// Numbering starts at 1.
@@ -95,8 +101,6 @@ impl SourceFile {
     #[must_use]
     pub fn get_location(&self, byte_index: usize) -> Option<Location> {
         if self.content.is_char_boundary(byte_index) {
-            None
-        } else {
             // get the line number by binary searching the line ranges
             let line = self
                 .lines
@@ -125,6 +129,8 @@ impl SourceFile {
                 line: line + 1,
                 column,
             })
+        } else {
+            None
         }
     }
 }

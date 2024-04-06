@@ -10,6 +10,10 @@ pub enum TranspileError {
     MissingFunctionDeclaration(String),
     #[error("Unexpected expression: {}", .0.span().str())]
     UnexpectedExpression(Expression),
+    #[error("Lua code evaluation is disabled.")]
+    LuaDisabled,
+    #[error("Lua runtime error: {}", .0)]
+    LuaRuntimeError(String),
 }
 
 /// The result of a transpilation operation.
