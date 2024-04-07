@@ -47,13 +47,13 @@ impl SourceElement for Expression {
 /// Primary:
 ///     FunctionCall
 /// ```
-#[allow(missing_docs, clippy::large_enum_variant)]
+#[allow(missing_docs)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
 pub enum Primary {
     FunctionCall(FunctionCall),
     StringLiteral(StringLiteral),
-    Lua(LuaCode),
+    Lua(Box<LuaCode>),
 }
 
 impl SourceElement for Primary {
@@ -245,7 +245,7 @@ impl<'a> Parser<'a> {
                     handler,
                 )?;
 
-                Some(Primary::Lua(LuaCode {
+                Some(Primary::Lua(Box::new(LuaCode {
                     lua_keyword,
                     left_parenthesis: variables.open,
                     variables: variables.list,
@@ -253,7 +253,7 @@ impl<'a> Parser<'a> {
                     left_brace: tree.open,
                     code: tree.tree?,
                     right_brace: tree.close,
-                }))
+                })))
             }
 
             unexpected => {
