@@ -17,9 +17,13 @@ use super::Error;
 
 /// Represents a source file that contains the source code.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Clone)]
+#[derive(Clone, Getters)]
 pub struct SourceFile {
+    /// Get the path of the source file.
+    #[get = "pub"]
     path: PathBuf,
+    /// Get the content of the source file
+    #[get = "pub"]
     content: String,
     lines: Vec<Range<usize>>,
 }
@@ -43,18 +47,6 @@ impl SourceFile {
             content,
             lines,
         })
-    }
-
-    /// Get the content of the source file
-    #[must_use]
-    pub fn content(&self) -> &str {
-        &self.content
-    }
-
-    /// Get the path of the source file.
-    #[must_use]
-    pub fn path(&self) -> &Path {
-        &self.path
     }
 
     /// Get the line of the source file at the given line number.
