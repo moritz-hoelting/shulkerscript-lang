@@ -341,21 +341,8 @@ impl Transpiler {
                         self.transpile_execute_block_internal(execute_block, handler)
                     }
                 }?;
-                let combined = match head {
-                    ExecuteBlockHead::Conditional(cond) => {
-                        if let Some(tail) = tail {
-                            self.transpile_conditional(cond, tail, None, handler)?
-                        } else {
-                            None
-                        }
-                    }
-                    ExecuteBlockHead::As(as_) => {
-                        let selector = as_.as_selector().str_content();
-                        tail.map(|tail| Execute::As(selector.to_string(), Box::new(tail)))
-                    }
-                };
 
-                Ok(combined)
+                self.combine_execute_head_tail(head, tail, handler)
             }
             ExecuteBlock::IfElse(cond, block, el) => {
                 let statements = block.statements();
@@ -439,5 +426,70 @@ impl Transpiler {
             Box::new(then),
             el,
         )))
+    }
+
+    fn combine_execute_head_tail(
+        &mut self,
+        head: &ExecuteBlockHead,
+        tail: Option<Execute>,
+        handler: &impl Handler<TranspileError>,
+    ) -> TranspileResult<Option<Execute>> {
+        Ok(match head {
+            ExecuteBlockHead::Conditional(cond) => {
+                if let Some(tail) = tail {
+                    self.transpile_conditional(cond, tail, None, handler)?
+                } else {
+                    None
+                }
+            }
+            ExecuteBlockHead::As(as_) => {
+                let selector = as_.as_selector().str_content();
+                tail.map(|tail| Execute::As(selector.to_string(), Box::new(tail)))
+            }
+            ExecuteBlockHead::At(at) => {
+                let selector = at.at_selector().str_content();
+                tail.map(|tail| Execute::At(selector.to_string(), Box::new(tail)))
+            }
+            ExecuteBlockHead::Align(align) => {
+                let align = align.align_selector().str_content();
+                tail.map(|tail| Execute::Align(align.to_string(), Box::new(tail)))
+            }
+            ExecuteBlockHead::Anchored(anchored) => {
+                let anchor = anchored.anchored_selector().str_content();
+                tail.map(|tail| Execute::Anchored(anchor.to_string(), Box::new(tail)))
+            }
+            ExecuteBlockHead::In(in_) => {
+                let dimension = in_.in_selector().str_content();
+                tail.map(|tail| Execute::In(dimension.to_string(), Box::new(tail)))
+            }
+            ExecuteBlockHead::Positioned(positioned) => {
+                let position = positioned.positioned_selector().str_content();
+                tail.map(|tail| Execute::Positioned(position.to_string(), Box::new(tail)))
+            }
+            ExecuteBlockHead::Rotated(rotated) => {
+                let rotation = rotated.rotated_selector().str_content();
+                tail.map(|tail| Execute::Rotated(rotation.to_string(), Box::new(tail)))
+            }
+            ExecuteBlockHead::Facing(facing) => {
+                let facing = facing.facing_selector().str_content();
+                tail.map(|tail| Execute::Facing(facing.to_string(), Box::new(tail)))
+            }
+            ExecuteBlockHead::AsAt(as_at) => {
+                let selector = as_at.asat_selector().str_content();
+                tail.map(|tail| Execute::AsAt(selector.to_string(), Box::new(tail)))
+            }
+            ExecuteBlockHead::On(on) => {
+                let dimension = on.on_selector().str_content();
+                tail.map(|tail| Execute::On(dimension.to_string(), Box::new(tail)))
+            }
+            ExecuteBlockHead::Store(store) => {
+                let store = store.store_selector().str_content();
+                tail.map(|tail| Execute::Store(store.to_string(), Box::new(tail)))
+            }
+            ExecuteBlockHead::Summon(summon) => {
+                let entity = summon.summon_selector().str_content();
+                tail.map(|tail| Execute::Summon(entity.to_string(), Box::new(tail)))
+            }
+        })
     }
 }

@@ -21,7 +21,18 @@ pub enum KeywordKind {
     Function,
     If,
     Else,
+    Align,
+    Anchored,
     As,
+    AsAt,
+    At,
+    Facing,
+    In,
+    On,
+    Positioned,
+    Rotated,
+    Store,
+    Summon,
     Group,
     Run,
     Lua,
@@ -67,7 +78,18 @@ impl KeywordKind {
             Self::Function => "fn",
             Self::If => "if",
             Self::Else => "else",
+            Self::Align => "align",
+            Self::Anchored => "anchored",
             Self::As => "as",
+            Self::AsAt => "asat",
+            Self::At => "at",
+            Self::Facing => "facing",
+            Self::In => "in",
+            Self::On => "on",
+            Self::Positioned => "positioned",
+            Self::Rotated => "rotated",
+            Self::Store => "store",
+            Self::Summon => "summon",
             Self::Group => "group",
             Self::Run => "run",
             Self::Lua => "lua",
@@ -78,7 +100,22 @@ impl KeywordKind {
     /// Whether the keyword starts an execute block.
     #[must_use]
     pub fn starts_execute_block(&self) -> bool {
-        matches!(self, Self::If | Self::As)
+        matches!(
+            self,
+            Self::If
+                | Self::Align
+                | Self::Anchored
+                | Self::As
+                | Self::AsAt
+                | Self::At
+                | Self::Facing
+                | Self::In
+                | Self::On
+                | Self::Positioned
+                | Self::Rotated
+                | Self::Store
+                | Self::Summon
+        )
     }
 }
 
