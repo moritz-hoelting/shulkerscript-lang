@@ -86,24 +86,9 @@ impl<'a> Parser<'a> {
                 // eat the keyword
                 self.forward();
 
-                let namespace_name = match self.stop_at_significant() {
-                    Reading::Atomic(Token::StringLiteral(name)) => {
-                        self.forward();
-                        Some(name)
-                    }
-                    unexpected => {
-                        self.forward();
-                        handler.receive(
-                            UnexpectedSyntax {
-                                expected: SyntaxKind::StringLiteral,
-                                found: unexpected.into_token(),
-                            }
-                            .into(),
-                        );
-                        None
-                    }
-                }
-                .and_then(|name| Namespace::validate_str(name.str_content()).then_some(name))?;
+                let namespace_name = self
+                    .parse_string_literal(handler)
+                    .and_then(|name| Namespace::validate_str(name.str_content()).then_some(name))?;
 
                 let semicolon = self.parse_punctuation(';', true, handler)?;
 

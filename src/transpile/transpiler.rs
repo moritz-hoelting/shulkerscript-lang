@@ -11,7 +11,10 @@ use crate::{
         declaration::Declaration,
         expression::{Expression, FunctionCall, Primary},
         program::{Namespace, ProgramFile},
-        statement::{Conditional, Statement},
+        statement::{
+            execute_block::{Conditional, Else, ExecuteBlock, ExecuteBlockHead, ExecuteBlockTail},
+            Statement,
+        },
     },
 };
 
@@ -243,7 +246,7 @@ impl Transpiler {
             Statement::Block(_) => {
                 unreachable!("Only literal commands are allowed in functions at this time.")
             }
-            Statement::Conditional(cond) => self.transpile_conditional(cond, handler),
+            Statement::ExecuteBlock(execute) => self.transpile_execute_block(execute, handler),
             Statement::DocComment(doccomment) => {
                 let content = doccomment.content();
                 Ok(Some(Command::Comment(content.to_string())))
@@ -295,19 +298,112 @@ impl Transpiler {
         Ok(Command::Raw(format!("function {location}")))
     }
 
+    fn transpile_execute_block(
+        &mut self,
+        execute: &ExecuteBlock,
+        handler: &impl Handler<TranspileError>,
+    ) -> TranspileResult<Option<Command>> {
+        self.transpile_execute_block_internal(execute, handler)
+            .map(|ex| ex.map(Command::Execute))
+    }
+
+    fn transpile_execute_block_internal(
+        &mut self,
+        execute: &ExecuteBlock,
+        handler: &impl Handler<TranspileError>,
+    ) -> TranspileResult<Option<Execute>> {
+        match execute {
+            ExecuteBlock::HeadTail(head, tail) => {
+                let tail = match tail {
+                    ExecuteBlockTail::Block(block) => {
+                        let mut errors = Vec::new();
+                        let commands = block
+                            .statements()
+                            .iter()
+                            .filter_map(|s| {
+                                self.transpile_statement(s, handler).unwrap_or_else(|err| {
+                                    errors.push(err);
+                                    None
+                                })
+                            })
+                            .collect::<Vec<_>>();
+
+                        if !errors.is_empty() {
+                            return Err(errors.remove(0));
+                        }
+                        if commands.is_empty() {
+                            Ok(None)
+                        } else {
+                            Ok(Some(Execute::Runs(commands)))
+                        }
+                    }
+                    ExecuteBlockTail::ExecuteBlock(_, execute_block) => {
+                        self.transpile_execute_block_internal(execute_block, handler)
+                    }
+                }?;
+                let combined = match head {
+                    ExecuteBlockHead::Conditional(cond) => {
+                        if let Some(tail) = tail {
+                            self.transpile_conditional(cond, tail, None, handler)?
+                        } else {
+                            None
+                        }
+                    }
+                    ExecuteBlockHead::As(as_) => {
+                        let selector = as_.as_selector().str_content();
+                        tail.map(|tail| Execute::As(selector.to_string(), Box::new(tail)))
+                    }
+                };
+
+                Ok(combined)
+            }
+            ExecuteBlock::IfElse(cond, block, el) => {
+                let statements = block.statements();
+                let then = if statements.is_empty() {
+                    Some(Execute::Runs(Vec::new()))
+                } else if statements.len() > 1 {
+                    let mut errors = Vec::new();
+                    let commands = statements
+                        .iter()
+                        .filter_map(|statement| {
+                            self.transpile_statement(statement, handler)
+                                .unwrap_or_else(|err| {
+                                    errors.push(err);
+                                    None
+                                })
+                        })
+                        .collect();
+                    if !errors.is_empty() {
+                        return Err(errors.remove(0));
+                    }
+                    Some(Execute::Runs(commands))
+                } else {
+                    self.transpile_statement(&statements[0], handler)?
+                        .map(|cmd| Execute::Run(Box::new(cmd)))
+                };
+
+                then.map_or_else(
+                    || Ok(None),
+                    |then| self.transpile_conditional(cond, then, Some(el), handler),
+                )
+            }
+        }
+    }
+
     fn transpile_conditional(
         &mut self,
         cond: &Conditional,
+        then: Execute,
+        el: Option<&Else>,
         handler: &impl Handler<TranspileError>,
-    ) -> TranspileResult<Option<Command>> {
-        let (_, cond, block, el) = cond.clone().dissolve();
+    ) -> TranspileResult<Option<Execute>> {
+        let (_, cond) = cond.clone().dissolve();
         let (_, cond, _) = cond.dissolve();
-        let statements = block.statements();
         let mut errors = Vec::new();
 
         let el = el
             .and_then(|el| {
-                let (_, block) = el.dissolve();
+                let (_, block) = el.clone().dissolve();
                 let statements = block.statements();
                 if statements.is_empty() {
                     None
@@ -338,41 +434,10 @@ impl Transpiler {
             return Err(errors.remove(0));
         }
 
-        if statements.is_empty() {
-            if el.is_none() {
-                Ok(None)
-            } else {
-                Ok(Some(Command::Execute(Execute::If(
-                    datapack::Condition::from(cond),
-                    Box::new(Execute::Runs(Vec::new())),
-                    el,
-                ))))
-            }
-        } else {
-            let run = if statements.len() > 1 {
-                let commands = statements
-                    .iter()
-                    .filter_map(|statement| {
-                        self.transpile_statement(statement, handler)
-                            .unwrap_or_else(|err| {
-                                errors.push(err);
-                                None
-                            })
-                    })
-                    .collect();
-                Some(Execute::Runs(commands))
-            } else {
-                self.transpile_statement(&statements[0], handler)?
-                    .map(|cmd| Execute::Run(Box::new(cmd)))
-            };
-
-            Ok(run.map(|run| {
-                Command::Execute(Execute::If(
-                    datapack::Condition::from(cond),
-                    Box::new(run),
-                    el,
-                ))
-            }))
-        }
+        Ok(Some(Execute::If(
+            datapack::Condition::from(cond),
+            Box::new(then),
+            el,
+        )))
     }
 }

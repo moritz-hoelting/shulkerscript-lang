@@ -6,7 +6,7 @@ use enum_as_inner::EnumAsInner;
 use crate::{
     base::Handler,
     lexical::{
-        token::{Identifier, Keyword, KeywordKind, Numeric, Punctuation, Token},
+        token::{Identifier, Keyword, KeywordKind, Numeric, Punctuation, StringLiteral, Token},
         token_stream::{Delimited, Delimiter, TokenStream, TokenTree},
     },
 };
@@ -388,12 +388,29 @@ impl<'a> Frame<'a> {
     ///
     /// # Errors
     /// If the next [`Token`] is not an [`Identifier`].
-    pub fn parse_numeric(&mut self, handler: &dyn Handler<Error>) -> Option<Numeric> {
+    pub fn parse_numeric(&mut self, handler: &impl Handler<Error>) -> Option<Numeric> {
         match self.next_significant_token() {
             Reading::Atomic(Token::Numeric(ident)) => Some(ident),
             found => {
                 handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
                     expected: SyntaxKind::Numeric,
+                    found: found.into_token(),
+                }));
+                None
+            }
+        }
+    }
+
+    /// Expects the next [`Token`] to be an [`StringLiteral`], and returns it.
+    ///
+    /// # Errors
+    /// If the next [`Token`] is not an [`StringLiteral`].
+    pub fn parse_string_literal(&mut self, handler: &impl Handler<Error>) -> Option<StringLiteral> {
+        match self.next_significant_token() {
+            Reading::Atomic(Token::StringLiteral(literal)) => Some(literal),
+            found => {
+                handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
+                    expected: SyntaxKind::StringLiteral,
                     found: found.into_token(),
                 }));
                 None
@@ -408,7 +425,7 @@ impl<'a> Frame<'a> {
     pub fn parse_keyword(
         &mut self,
         expected: KeywordKind,
-        handler: &dyn Handler<Error>,
+        handler: &impl Handler<Error>,
     ) -> Option<Keyword> {
         match self.next_significant_token() {
             Reading::Atomic(Token::Keyword(keyword_token)) if keyword_token.keyword == expected => {
@@ -432,7 +449,7 @@ impl<'a> Frame<'a> {
         &mut self,
         expected: char,
         skip_insignificant: bool,
-        handler: &dyn Handler<Error>,
+        handler: &impl Handler<Error>,
     ) -> Option<Punctuation> {
         match if skip_insignificant {
             self.next_significant_token()

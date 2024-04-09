@@ -21,6 +21,7 @@ pub enum KeywordKind {
     Function,
     If,
     Else,
+    As,
     Group,
     Run,
     Lua,
@@ -66,11 +67,18 @@ impl KeywordKind {
             Self::Function => "fn",
             Self::If => "if",
             Self::Else => "else",
+            Self::As => "as",
             Self::Group => "group",
             Self::Run => "run",
             Self::Lua => "lua",
             Self::Namespace => "namespace",
         }
+    }
+
+    /// Whether the keyword starts an execute block.
+    #[must_use]
+    pub fn starts_execute_block(&self) -> bool {
+        matches!(self, Self::If | Self::As)
     }
 }
 

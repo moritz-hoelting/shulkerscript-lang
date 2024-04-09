@@ -1,5 +1,8 @@
 //! Syntax tree nodes for statements.
 
+pub mod execute_block;
+
+use derive_more::From;
 use getset::Getters;
 
 use crate::{
@@ -17,7 +20,9 @@ use crate::{
     },
 };
 
-use super::{condition::ParenthesizedCondition, expression::Expression};
+use self::execute_block::ExecuteBlock;
+
+use super::expression::Expression;
 
 /// Syntax Synopsis:
 ///
@@ -34,11 +39,11 @@ use super::{condition::ParenthesizedCondition, expression::Expression};
 /// ```
 #[allow(missing_docs)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, From)]
 pub enum Statement {
     Block(Block),
     LiteralCommand(CommandLiteral),
-    Conditional(Conditional),
+    ExecuteBlock(ExecuteBlock),
     Grouping(Grouping),
     DocComment(DocComment),
     Semicolon(Semicolon),
@@ -50,7 +55,7 @@ impl SourceElement for Statement {
         match self {
             Self::Block(block) => block.span(),
             Self::LiteralCommand(literal_command) => literal_command.span(),
-            Self::Conditional(conditional) => conditional.span(),
+            Self::ExecuteBlock(execute_block) => execute_block.span(),
             Self::Grouping(grouping) => grouping.span(),
             Self::DocComment(doc_comment) => doc_comment.span(),
             Self::Semicolon(semi) => semi.span(),
@@ -132,89 +137,6 @@ impl Run {
     #[must_use]
     pub fn dissolve(self) -> (Keyword, Expression, Punctuation) {
         (self.run_keyword, self.expression, self.semicolon)
-    }
-}
-
-/// Syntax Synopsis:
-///
-/// ``` ebnf
-/// Conditional:
-/// 'if' ParenthizedCondition Block ('else' Block)?
-/// ;
-/// ```
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
-pub struct Conditional {
-    /// The `if` keyword.
-    #[get = "pub"]
-    if_keyword: Keyword,
-    /// The condition of the conditional.
-    #[get = "pub"]
-    condition: ParenthesizedCondition,
-    /// The block of the conditional.
-    #[get = "pub"]
-    block: Block,
-    /// The `else` statement.
-    #[get = "pub"]
-    r#else: Option<Else>,
-}
-
-impl Conditional {
-    /// Dissolves the [`Conditional`] into its components.
-    #[must_use]
-    pub fn dissolve(self) -> (Keyword, ParenthesizedCondition, Block, Option<Else>) {
-        (self.if_keyword, self.condition, self.block, self.r#else)
-    }
-}
-
-impl SourceElement for Conditional {
-    fn span(&self) -> Span {
-        self.r#else.as_ref().map_or_else(
-            || {
-                self.if_keyword
-                    .span()
-                    .join(&self.block.span())
-                    .expect("The span of the conditional is invalid.")
-            },
-            |r#else| {
-                self.if_keyword
-                    .span()
-                    .join(&r#else.span())
-                    .expect("The span of the else conditional is invalid.")
-            },
-        )
-    }
-}
-
-/// Syntax Synopsis:
-///
-/// ``` ebnf
-/// Else:
-///     'else' Block
-///     ;
-/// ```
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
-pub struct Else {
-    /// The `else` keyword.
-    #[get = "pub"]
-    else_keyword: Keyword,
-    /// The block of the else statement.
-    #[get = "pub"]
-    block: Box<Block>,
-}
-
-impl Else {
-    /// Dissolves the [`Else`] into its components.
-    #[must_use]
-    pub fn dissolve(self) -> (Keyword, Box<Block>) {
-        (self.else_keyword, self.block)
-    }
-}
-
-impl SourceElement for Else {
-    fn span(&self) -> Span {
-        self.else_keyword.span().join(&self.block.span()).unwrap()
     }
 }
 
@@ -341,45 +263,12 @@ impl<'a> Parser<'a> {
                 Some(Statement::Block(block))
             }
 
-            // conditional statement
-            Reading::Atomic(Token::Keyword(if_keyword))
-                if if_keyword.keyword == KeywordKind::If =>
+            // execute block
+            Reading::Atomic(Token::Keyword(execute_keyword))
+                if execute_keyword.keyword.starts_execute_block() =>
             {
-                // eat the if keyword
-                self.forward();
-
-                let condition = self.parse_parenthesized_condition(handler)?;
-
-                let block = self.parse_block(handler)?;
-
-                match self.stop_at_significant() {
-                    // else statement
-                    Reading::Atomic(Token::Keyword(else_keyword))
-                        if else_keyword.keyword == KeywordKind::Else =>
-                    {
-                        // eat the else keyword
-                        self.forward();
-
-                        let else_block = self.parse_block(handler)?;
-
-                        Some(Statement::Conditional(Conditional {
-                            if_keyword,
-                            condition,
-                            block,
-                            r#else: Some(Else {
-                                else_keyword,
-                                block: Box::new(else_block),
-                            }),
-                        }))
-                    }
-                    // no else statement
-                    _ => Some(Statement::Conditional(Conditional {
-                        if_keyword,
-                        condition,
-                        block,
-                        r#else: None,
-                    })),
-                }
+                self.parse_execute_block_statement(handler)
+                    .map(Statement::ExecuteBlock)
             }
 
             // doc comment

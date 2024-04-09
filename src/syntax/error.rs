@@ -20,6 +20,8 @@ pub enum SyntaxKind {
     Statement,
     Expression,
     Type,
+    ExecuteBlock,
+    ExecuteBlockTail,
 }
 
 /// A syntax/token is expected but found an other invalid token.
@@ -44,6 +46,8 @@ impl Display for UnexpectedSyntax {
             SyntaxKind::Statement => "a statement syntax".to_string(),
             SyntaxKind::Expression => "an expression syntax".to_string(),
             SyntaxKind::Type => "a type syntax".to_string(),
+            SyntaxKind::ExecuteBlock => "an execute block syntax".to_string(),
+            SyntaxKind::ExecuteBlockTail => "an execute block tail syntax".to_string(),
         };
         let found_binding = match self.found.clone() {
             Some(Token::Comment(..)) => "a comment token".to_string(),

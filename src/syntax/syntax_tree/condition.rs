@@ -8,7 +8,7 @@ use getset::Getters;
 use crate::{
     base::{
         source_file::{SourceElement, Span},
-        Dummy, Handler,
+        DummyHandler, Handler,
     },
     lexical::{
         token::{Punctuation, StringLiteral, Token},
@@ -373,11 +373,11 @@ impl<'a> Parser<'a> {
         self.try_parse(|parser| match parser.next_significant_token() {
             Reading::Atomic(Token::Punctuation(punc)) => match punc.punctuation {
                 '&' => {
-                    let b = parser.parse_punctuation('&', false, &Dummy)?;
+                    let b = parser.parse_punctuation('&', false, &DummyHandler)?;
                     Some(ConditionalBinaryOperator::LogicalAnd(punc, b))
                 }
                 '|' => {
-                    let b = parser.parse_punctuation('|', false, &Dummy)?;
+                    let b = parser.parse_punctuation('|', false, &DummyHandler)?;
                     Some(ConditionalBinaryOperator::LogicalOr(punc, b))
                 }
                 _ => None,
