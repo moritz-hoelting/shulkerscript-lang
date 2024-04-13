@@ -54,11 +54,7 @@ impl<'a> Parser<'a> {
         // move after the whole delimited list
         self.current_frame.forward();
 
-        let expected = match delimiter {
-            Delimiter::Parenthesis => '(',
-            Delimiter::Brace => '{',
-            Delimiter::Bracket => '[',
-        };
+        let expected = delimiter.opening_char();
 
         let delimited_stream = if let Some(token_tree) = raw_token_tree {
             match token_tree {
@@ -107,17 +103,13 @@ impl<'a> Parser<'a> {
 
         // the current frame must be at the end
         if !self.current_frame.is_exhausted() {
-            let expected = match self
+            let expected = self
                 .current_frame
                 .token_provider
                 .as_delimited()
                 .unwrap()
                 .delimiter
-            {
-                Delimiter::Parenthesis => ')',
-                Delimiter::Brace => '}',
-                Delimiter::Bracket => ']',
-            };
+                .closing_char();
 
             handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
                 expected: SyntaxKind::Punctuation(expected),

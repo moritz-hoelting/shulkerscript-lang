@@ -358,7 +358,11 @@ impl<'a> Parser<'a> {
     ) -> Option<ParenthesizedCondition> {
         let token_tree = self.step_into(
             Delimiter::Parenthesis,
-            |parser| parser.parse_condition(handler),
+            |parser| {
+                let cond = parser.parse_condition(handler)?;
+                parser.stop_at_significant();
+                Some(cond)
+            },
             handler,
         )?;
 

@@ -200,6 +200,28 @@ pub enum Delimiter {
     Bracket,
 }
 
+impl Delimiter {
+    /// Returns the opening delimiter.
+    #[must_use]
+    pub fn opening_char(&self) -> char {
+        match self {
+            Self::Parenthesis => '(',
+            Self::Brace => '{',
+            Self::Bracket => '[',
+        }
+    }
+
+    /// Returns the closing delimiter.
+    #[must_use]
+    pub fn closing_char(&self) -> char {
+        match self {
+            Self::Parenthesis => ')',
+            Self::Brace => '}',
+            Self::Bracket => ']',
+        }
+    }
+}
+
 /// Represents a list of tokens enclosed by a pair of delimiters.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
