@@ -97,7 +97,7 @@ impl SourceElement for Annotation {
 ///
 /// ``` ebnf
 /// Function:
-///     Annotation* 'fn' Identifier '(' ParameterList? ')' Block
+///     Annotation* 'pub'? 'fn' Identifier '(' ParameterList? ')' Block
 ///     ;
 ///
 /// ParameterList:
@@ -107,6 +107,8 @@ impl SourceElement for Annotation {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct Function {
+    #[get = "pub"]
+    public_keyword: Option<Keyword>,
     #[get = "pub"]
     annotations: Vec<Annotation>,
     #[get = "pub"]
@@ -130,6 +132,7 @@ impl Function {
     pub fn dissolve(
         self,
     ) -> (
+        Option<Keyword>,
         Vec<Annotation>,
         Keyword,
         Identifier,
@@ -139,6 +142,7 @@ impl Function {
         Block,
     ) {
         (
+            self.public_keyword,
             self.annotations,
             self.function_keyword,
             self.identifier,
@@ -148,11 +152,21 @@ impl Function {
             self.block,
         )
     }
+
+    /// Returns `true` if the function is public.
+    #[must_use]
+    pub fn is_public(&self) -> bool {
+        self.public_keyword.is_some()
+    }
 }
 
 impl SourceElement for Function {
     fn span(&self) -> Span {
-        self.function_keyword.span.join(&self.block.span()).unwrap()
+        self.public_keyword
+            .as_ref()
+            .map_or_else(|| self.function_keyword.span(), SourceElement::span)
+            .join(&self.block.span())
+            .unwrap()
     }
 }
 
@@ -231,6 +245,7 @@ impl<'a> Parser<'a> {
                 let block = self.parse_block(handler)?;
 
                 Some(Declaration::Function(Function {
+                    public_keyword: None,
                     annotations: Vec::new(),
                     function_keyword,
                     identifier,
@@ -239,6 +254,55 @@ impl<'a> Parser<'a> {
                     close_paren: delimited_tree.close,
                     block,
                 }))
+            }
+
+            Reading::Atomic(Token::Keyword(pub_keyword))
+                if pub_keyword.keyword == KeywordKind::Pub =>
+            {
+                // eat the public keyword
+                self.forward();
+
+                // parse the function keyword
+                let function_keyword_reading = self.next_significant_token();
+
+                match function_keyword_reading {
+                    Reading::Atomic(Token::Keyword(function_keyword))
+                        if function_keyword.keyword == KeywordKind::Function =>
+                    {
+                        // eat the function keyword
+                        self.forward();
+
+                        // parse the identifier
+                        let identifier = self.parse_identifier(handler)?;
+                        let delimited_tree = self.parse_enclosed_list(
+                            Delimiter::Parenthesis,
+                            ',',
+                            |parser: &mut Parser<'_>| parser.parse_identifier(handler),
+                            handler,
+                        )?;
+
+                        // parse the block
+                        let block = self.parse_block(handler)?;
+
+                        Some(Declaration::Function(Function {
+                            public_keyword: Some(pub_keyword),
+                            annotations: Vec::new(),
+                            function_keyword,
+                            identifier,
+                            open_paren: delimited_tree.open,
+                            parameters: delimited_tree.list,
+                            close_paren: delimited_tree.close,
+                            block,
+                        }))
+                    }
+                    unexpected => {
+                        handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
+                            expected: SyntaxKind::Keyword(KeywordKind::Function),
+                            found: unexpected.into_token(),
+                        }));
+                        None
+                    }
+                }
             }
 
             // parse annotations

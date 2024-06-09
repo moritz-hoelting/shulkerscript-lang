@@ -7,9 +7,12 @@ edition = "2021"
 
 [features]
 default = ["lua", "shulkerbox"]
+serde = ["dep:serde", "shulkerbox?/serde"]
 shulkerbox = ["dep:shulkerbox"]
-serde = ["dep:serde"]
 lua = ["dep:mlua"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+path-absolutize = { version = "3.1.1", features = ["use_unix_paths_on_wasm"] }
 
 [dependencies]
 chksum-md5 = "0.0.0"

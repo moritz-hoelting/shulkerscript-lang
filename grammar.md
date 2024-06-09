@@ -4,7 +4,12 @@
 
 ### Program
 ```ebnf
-Program: Declaration*;
+Program: Namespace Declaration*;
+```
+
+### Namespace
+```ebnf
+Namespace: 'namespace' StringLiteral;
 ```
 
 ### Declaration
@@ -15,7 +20,7 @@ Declaration: FunctionDeclaration;
 ### FunctionDeclaration
 ```ebnf
 Function:
-    Annotation* 'fn' Identifier '(' ParameterList? ')' Block
+    Annotation* 'pub'? 'fn' Identifier '(' ParameterList? ')' Block
     ;
 ParameterList:
     Identifier (',' Identifier)* ','?  

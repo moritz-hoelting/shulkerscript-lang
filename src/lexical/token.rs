@@ -19,6 +19,7 @@ use super::{error::UnterminatedDelimitedComment, Error};
 #[allow(missing_docs)]
 pub enum KeywordKind {
     Function,
+    Pub,
     If,
     Else,
     Align,
@@ -76,6 +77,7 @@ impl KeywordKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Function => "fn",
+            Self::Pub => "pub",
             Self::If => "if",
             Self::Else => "else",
             Self::Align => "align",
