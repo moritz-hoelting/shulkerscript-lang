@@ -83,33 +83,61 @@ pub fn parse(path: &Path) -> Result<ProgramFile> {
 /// - If an error occurs while parsing the source code.
 /// - If an error occurs while transpiling the source code.
 #[cfg(feature = "shulkerbox")]
-pub fn transpile(path: &Path) -> Result<Datapack> {
-    let source_file = SourceFile::load(path)?;
-
+pub fn transpile<P>(script_paths: &[(String, P)]) -> Result<Datapack>
+where
+    P: AsRef<Path>,
+{
     let printer = Printer::new();
 
-    let tokens = TokenStream::tokenize(&source_file, &printer);
+    let programs = script_paths
+        .iter()
+        .map(|(program_identifier, path)| {
+            let source_file = SourceFile::load(path.as_ref())?;
 
-    if printer.has_printed() {
-        return Err(Error::Other(
-            "An error occurred while tokenizing the source code.",
-        ));
+            let tokens = TokenStream::tokenize(&source_file, &printer);
+
+            // println!("tokens: {tokens:#?}");
+
+            if printer.has_printed() {
+                return Err(Error::Other(
+                    "An error occurred while tokenizing the source code.",
+                ));
+            }
+
+            let mut parser = Parser::new(&tokens);
+            let program = parser.parse_program(&printer).ok_or(Error::Other(
+                "An error occured while parsing the source code.",
+            ))?;
+
+            if printer.has_printed() {
+                return Err(Error::Other(
+                    "An error occurred while parsing the source code.",
+                ));
+            }
+
+            Ok((program_identifier, program))
+        })
+        .collect::<Vec<_>>();
+
+    if programs.iter().any(Result::is_err) {
+        return Err(programs.into_iter().find_map(Result::err).unwrap());
     }
+    let programs = programs
+        .into_iter()
+        .filter_map(Result::ok)
+        .collect::<Vec<_>>();
 
-    let mut parser = Parser::new(&tokens);
-    let program = parser.parse_program(&printer).ok_or(Error::Other(
-        "An error occured while parsing the source code.",
-    ))?;
-
-    if printer.has_printed() {
-        return Err(Error::Other(
-            "An error occurred while parsing the source code.",
-        ));
-    }
-
-    let mut transpiler = Transpiler::new("shulkerscript-pack", 27);
-    transpiler.transpile(&program, &printer)?;
+    let mut transpiler = Transpiler::new(27);
+    transpiler.transpile(&programs, &printer)?;
     let datapack = transpiler.into_datapack();
+
+    // println!("datapack: {datapack:#?}");
+
+    if printer.has_printed() {
+        return Err(Error::Other(
+            "An error occurred while transpiling the source code.",
+        ));
+    }
 
     Ok(datapack)
 }
@@ -121,36 +149,52 @@ pub fn transpile(path: &Path) -> Result<Datapack> {
 /// - If an error occurs while parsing the source code.
 /// - If an error occurs while transpiling the source code.
 #[cfg(feature = "shulkerbox")]
-pub fn compile(path: &Path) -> Result<VFolder> {
-    let source_file = SourceFile::load(path)?;
-
+pub fn compile<P>(script_paths: &[(String, P)]) -> Result<VFolder>
+where
+    P: AsRef<Path>,
+{
     let printer = Printer::new();
 
-    let tokens = TokenStream::tokenize(&source_file, &printer);
+    let programs = script_paths
+        .iter()
+        .map(|(program_identifier, path)| {
+            let source_file = SourceFile::load(path.as_ref())?;
 
-    // println!("tokens: {tokens:#?}");
+            let tokens = TokenStream::tokenize(&source_file, &printer);
 
-    if printer.has_printed() {
-        return Err(Error::Other(
-            "An error occurred while tokenizing the source code.",
-        ));
+            // println!("tokens: {tokens:#?}");
+
+            if printer.has_printed() {
+                return Err(Error::Other(
+                    "An error occurred while tokenizing the source code.",
+                ));
+            }
+
+            let mut parser = Parser::new(&tokens);
+            let program = parser.parse_program(&printer).ok_or(Error::Other(
+                "An error occured while parsing the source code.",
+            ))?;
+
+            if printer.has_printed() {
+                return Err(Error::Other(
+                    "An error occurred while parsing the source code.",
+                ));
+            }
+
+            Ok((program_identifier, program))
+        })
+        .collect::<Vec<_>>();
+
+    if programs.iter().any(Result::is_err) {
+        return Err(programs.into_iter().find_map(Result::err).unwrap());
     }
+    let programs = programs
+        .into_iter()
+        .filter_map(Result::ok)
+        .collect::<Vec<_>>();
 
-    let mut parser = Parser::new(&tokens);
-    let program = parser.parse_program(&printer).ok_or(Error::Other(
-        "An error occured while parsing the source code.",
-    ))?;
-
-    if printer.has_printed() {
-        return Err(Error::Other(
-            "An error occurred while parsing the source code.",
-        ));
-    }
-
-    // println!("program: {program:#?}");
-
-    let mut transpiler = Transpiler::new("shulkerscript-pack", 27);
-    transpiler.transpile(&program, &printer)?;
+    let mut transpiler = Transpiler::new(27);
+    transpiler.transpile(&programs, &printer)?;
     let datapack = transpiler.into_datapack();
 
     // println!("datapack: {datapack:#?}");

@@ -24,7 +24,8 @@ use super::error::{TranspileError, TranspileResult};
 #[derive(Debug)]
 pub struct Transpiler {
     datapack: shulkerbox::datapack::Datapack,
-    functions: RwLock<HashMap<String, FunctionData>>,
+    /// Key: (program identifier, function name)
+    functions: RwLock<HashMap<(String, String), FunctionData>>,
     function_locations: RwLock<HashMap<String, String>>,
 }
 
@@ -38,9 +39,9 @@ struct FunctionData {
 impl Transpiler {
     /// Creates a new transpiler.
     #[must_use]
-    pub fn new(pack_name: &str, pack_format: u8) -> Self {
+    pub fn new(pack_format: u8) -> Self {
         Self {
-            datapack: shulkerbox::datapack::Datapack::new(pack_name, pack_format),
+            datapack: shulkerbox::datapack::Datapack::new(pack_format),
             functions: RwLock::new(HashMap::new()),
             function_locations: RwLock::new(HashMap::new()),
         }
@@ -52,19 +53,36 @@ impl Transpiler {
         self.datapack
     }
 
-    /// Transpiles the given program.
+    /// Transpiles the given programs.
     ///
     /// # Errors
     /// - [`TranspileError::MissingFunctionDeclaration`] If a called function is missing
-    pub fn transpile(
+    pub fn transpile<Ident>(
+        &mut self,
+        programs: &[(Ident, ProgramFile)],
+        handler: &impl Handler<TranspileError>,
+    ) -> Result<(), TranspileError>
+    where
+        Ident: AsRef<str>,
+    {
+        for (identifier, program) in programs {
+            self.transpile_program(program, identifier.as_ref(), handler)?;
+        }
+
+        Ok(())
+    }
+
+    /// Transpiles the given program.
+    fn transpile_program(
         &mut self,
         program: &ProgramFile,
+        identifier: &str,
         handler: &impl Handler<TranspileError>,
-    ) -> Result<(), TranspileError> {
+    ) -> TranspileResult<()> {
         let namespace = program.namespace();
 
         for declaration in program.declarations() {
-            self.transpile_declaration(declaration, namespace, handler);
+            self.transpile_declaration(declaration, namespace, identifier, handler);
         }
 
         let mut always_transpile_functions = Vec::new();
@@ -72,18 +90,18 @@ impl Transpiler {
         #[allow(clippy::significant_drop_in_scrutinee)]
         {
             let functions = self.functions.read().unwrap();
-            for (name, data) in functions.iter() {
+            for (function_identifier, data) in functions.iter() {
                 let always_transpile_function = data.annotations.contains_key("tick")
                     || data.annotations.contains_key("load")
                     || data.annotations.contains_key("deobfuscate");
                 if always_transpile_function {
-                    always_transpile_functions.push(name.clone());
+                    always_transpile_functions.push(function_identifier.to_owned());
                 };
             }
         }
 
-        for name in always_transpile_functions {
-            self.get_or_transpile_function(&name, handler)?;
+        for (program_identifier, name) in always_transpile_functions {
+            self.get_or_transpile_function(&name, &program_identifier, handler)?;
         }
 
         Ok(())
@@ -94,6 +112,7 @@ impl Transpiler {
         &mut self,
         declaration: &Declaration,
         namespace: &Namespace,
+        program_identifier: &str,
         _handler: &impl Handler<TranspileError>,
     ) {
         match declaration {
@@ -113,7 +132,7 @@ impl Transpiler {
                     })
                     .collect();
                 self.functions.write().unwrap().insert(
-                    name,
+                    (program_identifier.to_string(), name),
                     FunctionData {
                         namespace: namespace.namespace_name().str_content().to_string(),
                         statements,
@@ -130,6 +149,7 @@ impl Transpiler {
     fn get_or_transpile_function(
         &mut self,
         name: &str,
+        program_identifier: &str,
         handler: &impl Handler<TranspileError>,
     ) -> TranspileResult<String> {
         let already_transpiled = {
@@ -139,27 +159,34 @@ impl Transpiler {
         if !already_transpiled {
             let statements = {
                 let functions = self.functions.read().unwrap();
-                let function_data = functions.get(name).ok_or_else(|| {
+                let function_data = functions
+                    .get(&(program_identifier.to_string(), name.to_string()))
+                    .ok_or_else(|| {
+                        let error = TranspileError::MissingFunctionDeclaration(name.to_string());
+                        handler.receive(error.clone());
+                        error
+                    })?;
+                function_data.statements.clone()
+            };
+            let commands = self.transpile_function(&statements, program_identifier, handler)?;
+
+            let functions = self.functions.read().unwrap();
+            let function_data = functions
+                .get(&(program_identifier.to_string(), name.to_string()))
+                .ok_or_else(|| {
                     let error = TranspileError::MissingFunctionDeclaration(name.to_string());
                     handler.receive(error.clone());
                     error
                 })?;
-                function_data.statements.clone()
-            };
-            let commands = self.transpile_function(&statements, handler)?;
-
-            let functions = self.functions.read().unwrap();
-            let function_data = functions.get(name).ok_or_else(|| {
-                let error = TranspileError::MissingFunctionDeclaration(name.to_string());
-                handler.receive(error.clone());
-                error
-            })?;
 
             let modified_name = function_data
                 .annotations
                 .get("deobfuscate")
                 .map_or_else(
-                    || Some("shu/".to_string() + &md5::hash(name).to_hex_lowercase()[..16]),
+                    || {
+                        let hash_data = program_identifier.to_string() + "\0" + name;
+                        Some("shu/".to_string() + &md5::hash(hash_data).to_hex_lowercase()[..16])
+                    },
                     Clone::clone,
                 )
                 .unwrap_or_else(|| name.to_string());
@@ -202,13 +229,14 @@ impl Transpiler {
     fn transpile_function(
         &mut self,
         statements: &[Statement],
+        program_identifier: &str,
         handler: &impl Handler<TranspileError>,
     ) -> TranspileResult<Vec<Command>> {
         let mut errors = Vec::new();
         let commands = statements
             .iter()
             .filter_map(|statement| {
-                self.transpile_statement(statement, handler)
+                self.transpile_statement(statement, program_identifier, handler)
                     .unwrap_or_else(|err| {
                         errors.push(err);
                         None
@@ -226,6 +254,7 @@ impl Transpiler {
     fn transpile_statement(
         &mut self,
         statement: &Statement,
+        program_identifier: &str,
         handler: &impl Handler<TranspileError>,
     ) -> TranspileResult<Option<Command>> {
         match statement {
@@ -233,9 +262,9 @@ impl Transpiler {
                 Ok(Some(literal_command.clean_command().into()))
             }
             Statement::Run(run) => match run.expression() {
-                Expression::Primary(Primary::FunctionCall(func)) => {
-                    self.transpile_function_call(func, handler).map(Some)
-                }
+                Expression::Primary(Primary::FunctionCall(func)) => self
+                    .transpile_function_call(func, program_identifier, handler)
+                    .map(Some),
                 Expression::Primary(Primary::StringLiteral(string)) => {
                     Ok(Some(Command::Raw(string.str_content().to_string())))
                 }
@@ -246,7 +275,9 @@ impl Transpiler {
             Statement::Block(_) => {
                 unreachable!("Only literal commands are allowed in functions at this time.")
             }
-            Statement::ExecuteBlock(execute) => self.transpile_execute_block(execute, handler),
+            Statement::ExecuteBlock(execute) => {
+                self.transpile_execute_block(execute, program_identifier, handler)
+            }
             Statement::DocComment(doccomment) => {
                 let content = doccomment.content();
                 Ok(Some(Command::Comment(content.to_string())))
@@ -257,7 +288,7 @@ impl Transpiler {
                 let commands = statements
                     .iter()
                     .filter_map(|statement| {
-                        self.transpile_statement(statement, handler)
+                        self.transpile_statement(statement, program_identifier, handler)
                             .unwrap_or_else(|err| {
                                 errors.push(err);
                                 None
@@ -275,9 +306,9 @@ impl Transpiler {
             }
             #[allow(clippy::match_wildcard_for_single_variants)]
             Statement::Semicolon(semi) => match semi.expression() {
-                Expression::Primary(Primary::FunctionCall(func)) => {
-                    self.transpile_function_call(func, handler).map(Some)
-                }
+                Expression::Primary(Primary::FunctionCall(func)) => self
+                    .transpile_function_call(func, program_identifier, handler)
+                    .map(Some),
                 unexpected => {
                     let error = TranspileError::UnexpectedExpression(unexpected.clone());
                     handler.receive(error.clone());
@@ -290,26 +321,30 @@ impl Transpiler {
     fn transpile_function_call(
         &mut self,
         func: &FunctionCall,
+        program_identifier: &str,
         handler: &impl Handler<TranspileError>,
     ) -> TranspileResult<Command> {
         let identifier = func.identifier().span();
         let identifier_name = identifier.str();
-        let location = self.get_or_transpile_function(identifier_name, handler)?;
+        let location =
+            self.get_or_transpile_function(identifier_name, program_identifier, handler)?;
         Ok(Command::Raw(format!("function {location}")))
     }
 
     fn transpile_execute_block(
         &mut self,
         execute: &ExecuteBlock,
+        program_identifier: &str,
         handler: &impl Handler<TranspileError>,
     ) -> TranspileResult<Option<Command>> {
-        self.transpile_execute_block_internal(execute, handler)
+        self.transpile_execute_block_internal(execute, program_identifier, handler)
             .map(|ex| ex.map(Command::Execute))
     }
 
     fn transpile_execute_block_internal(
         &mut self,
         execute: &ExecuteBlock,
+        program_identifier: &str,
         handler: &impl Handler<TranspileError>,
     ) -> TranspileResult<Option<Execute>> {
         match execute {
@@ -321,10 +356,11 @@ impl Transpiler {
                             .statements()
                             .iter()
                             .filter_map(|s| {
-                                self.transpile_statement(s, handler).unwrap_or_else(|err| {
-                                    errors.push(err);
-                                    None
-                                })
+                                self.transpile_statement(s, program_identifier, handler)
+                                    .unwrap_or_else(|err| {
+                                        errors.push(err);
+                                        None
+                                    })
                             })
                             .collect::<Vec<_>>();
 
@@ -337,12 +373,15 @@ impl Transpiler {
                             Ok(Some(Execute::Runs(commands)))
                         }
                     }
-                    ExecuteBlockTail::ExecuteBlock(_, execute_block) => {
-                        self.transpile_execute_block_internal(execute_block, handler)
-                    }
+                    ExecuteBlockTail::ExecuteBlock(_, execute_block) => self
+                        .transpile_execute_block_internal(
+                            execute_block,
+                            program_identifier,
+                            handler,
+                        ),
                 }?;
 
-                self.combine_execute_head_tail(head, tail, handler)
+                self.combine_execute_head_tail(head, tail, program_identifier, handler)
             }
             ExecuteBlock::IfElse(cond, block, el) => {
                 let statements = block.statements();
@@ -353,7 +392,7 @@ impl Transpiler {
                     let commands = statements
                         .iter()
                         .filter_map(|statement| {
-                            self.transpile_statement(statement, handler)
+                            self.transpile_statement(statement, program_identifier, handler)
                                 .unwrap_or_else(|err| {
                                     errors.push(err);
                                     None
@@ -365,13 +404,21 @@ impl Transpiler {
                     }
                     Some(Execute::Runs(commands))
                 } else {
-                    self.transpile_statement(&statements[0], handler)?
+                    self.transpile_statement(&statements[0], program_identifier, handler)?
                         .map(|cmd| Execute::Run(Box::new(cmd)))
                 };
 
                 then.map_or_else(
                     || Ok(None),
-                    |then| self.transpile_conditional(cond, then, Some(el), handler),
+                    |then| {
+                        self.transpile_conditional(
+                            cond,
+                            then,
+                            Some(el),
+                            program_identifier,
+                            handler,
+                        )
+                    },
                 )
             }
         }
@@ -382,6 +429,7 @@ impl Transpiler {
         cond: &Conditional,
         then: Execute,
         el: Option<&Else>,
+        program_identifier: &str,
         handler: &impl Handler<TranspileError>,
     ) -> TranspileResult<Option<Execute>> {
         let (_, cond) = cond.clone().dissolve();
@@ -395,7 +443,7 @@ impl Transpiler {
                 if statements.is_empty() {
                     None
                 } else if statements.len() == 1 {
-                    self.transpile_statement(&statements[0], handler)
+                    self.transpile_statement(&statements[0], program_identifier, handler)
                         .unwrap_or_else(|err| {
                             errors.push(err);
                             None
@@ -405,7 +453,7 @@ impl Transpiler {
                     let commands = statements
                         .iter()
                         .filter_map(|statement| {
-                            self.transpile_statement(statement, handler)
+                            self.transpile_statement(statement, program_identifier, handler)
                                 .unwrap_or_else(|err| {
                                     errors.push(err);
                                     None
@@ -432,12 +480,13 @@ impl Transpiler {
         &mut self,
         head: &ExecuteBlockHead,
         tail: Option<Execute>,
+        program_identifier: &str,
         handler: &impl Handler<TranspileError>,
     ) -> TranspileResult<Option<Execute>> {
         Ok(match head {
             ExecuteBlockHead::Conditional(cond) => {
                 if let Some(tail) = tail {
-                    self.transpile_conditional(cond, tail, None, handler)?
+                    self.transpile_conditional(cond, tail, None, program_identifier, handler)?
                 } else {
                     None
                 }
