@@ -26,7 +26,7 @@ pub struct Transpiler {
     datapack: shulkerbox::datapack::Datapack,
     /// Key: (program identifier, function name)
     functions: RwLock<HashMap<(String, String), FunctionData>>,
-    function_locations: RwLock<HashMap<String, String>>,
+    function_locations: RwLock<HashMap<(String, String), String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -152,32 +152,29 @@ impl Transpiler {
         program_identifier: &str,
         handler: &impl Handler<TranspileError>,
     ) -> TranspileResult<String> {
+        let program_query = (program_identifier.to_string(), name.to_string());
         let already_transpiled = {
             let locations = self.function_locations.read().unwrap();
-            locations.get(name).is_some()
+            locations.get(&program_query).is_some()
         };
         if !already_transpiled {
             let statements = {
                 let functions = self.functions.read().unwrap();
-                let function_data = functions
-                    .get(&(program_identifier.to_string(), name.to_string()))
-                    .ok_or_else(|| {
-                        let error = TranspileError::MissingFunctionDeclaration(name.to_string());
-                        handler.receive(error.clone());
-                        error
-                    })?;
+                let function_data = functions.get(&program_query).ok_or_else(|| {
+                    let error = TranspileError::MissingFunctionDeclaration(name.to_string());
+                    handler.receive(error.clone());
+                    error
+                })?;
                 function_data.statements.clone()
             };
             let commands = self.transpile_function(&statements, program_identifier, handler)?;
 
             let functions = self.functions.read().unwrap();
-            let function_data = functions
-                .get(&(program_identifier.to_string(), name.to_string()))
-                .ok_or_else(|| {
-                    let error = TranspileError::MissingFunctionDeclaration(name.to_string());
-                    handler.receive(error.clone());
-                    error
-                })?;
+            let function_data = functions.get(&program_query).ok_or_else(|| {
+                let error = TranspileError::MissingFunctionDeclaration(name.to_string());
+                handler.receive(error.clone());
+                error
+            })?;
 
             let modified_name = function_data
                 .annotations
@@ -209,15 +206,15 @@ impl Transpiler {
                 self.datapack.add_load(&function_location);
             }
 
-            self.function_locations
-                .write()
-                .unwrap()
-                .insert(name.to_string(), function_location);
+            self.function_locations.write().unwrap().insert(
+                (program_identifier.to_string(), name.to_string()),
+                function_location,
+            );
         }
 
         let locations = self.function_locations.read().unwrap();
         locations
-            .get(name)
+            .get(&program_query)
             .ok_or_else(|| {
                 let error = TranspileError::MissingFunctionDeclaration(name.to_string());
                 handler.receive(error.clone());
