@@ -19,29 +19,26 @@ pub mod lexical;
 pub mod syntax;
 pub mod transpile;
 
+mod public_helpers;
+
 use std::{cell::Cell, fmt::Display, path::Path};
 
-use base::{source_file::SourceFile, Handler, Result};
+use base::{Handler, Result};
 use syntax::syntax_tree::program::ProgramFile;
 
 #[cfg(feature = "shulkerbox")]
-use transpile::transpiler::Transpiler;
+use shulkerbox::{datapack::Datapack, virtual_fs::VFolder};
 
-#[cfg(feature = "shulkerbox")]
-use shulkerbox::{datapack::Datapack, util::compile::CompileOptions, virtual_fs::VFolder};
-
-use crate::{base::Error, lexical::token_stream::TokenStream, syntax::parser::Parser};
+use crate::lexical::token_stream::TokenStream;
 
 /// Converts the given source code to tokens.
 ///
 /// # Errors
 /// - If an error occurs while reading the file.
 pub fn tokenize(path: &Path) -> Result<TokenStream> {
-    let source_file = SourceFile::load(path)?;
-
     let printer = Printer::new();
 
-    Ok(TokenStream::tokenize(&source_file, &printer))
+    public_helpers::tokenize(&printer, path)
 }
 
 /// Parses the given source code.
@@ -50,33 +47,15 @@ pub fn tokenize(path: &Path) -> Result<TokenStream> {
 /// - If an error occurs while reading the file.
 /// - If an error occurs while parsing the source code.
 pub fn parse(path: &Path) -> Result<ProgramFile> {
-    let source_file = SourceFile::load(path)?;
-
     let printer = Printer::new();
 
-    let tokens = TokenStream::tokenize(&source_file, &printer);
-
-    if printer.has_printed() {
-        return Err(Error::Other(
-            "An error occurred while tokenizing the source code.",
-        ));
-    }
-
-    let mut parser = Parser::new(&tokens);
-    let program = parser.parse_program(&printer).ok_or(Error::Other(
-        "An error occured while parsing the source code.",
-    ))?;
-
-    if printer.has_printed() {
-        return Err(Error::Other(
-            "An error occurred while parsing the source code.",
-        ));
-    }
-
-    Ok(program)
+    public_helpers::parse(&printer, path)
 }
 
 /// Transpiles the given source code into a shulkerbox [`Datapack`].
+///
+/// # Parameters:
+/// - `script_paths`: A list of tuples containing the identifier of the program and the path to the script.
 ///
 /// # Errors
 /// - If an error occurs while reading the file.
@@ -89,60 +68,13 @@ where
 {
     let printer = Printer::new();
 
-    let programs = script_paths
-        .iter()
-        .map(|(program_identifier, path)| {
-            let source_file = SourceFile::load(path.as_ref())?;
-
-            let tokens = TokenStream::tokenize(&source_file, &printer);
-
-            // println!("tokens: {tokens:#?}");
-
-            if printer.has_printed() {
-                return Err(Error::Other(
-                    "An error occurred while tokenizing the source code.",
-                ));
-            }
-
-            let mut parser = Parser::new(&tokens);
-            let program = parser.parse_program(&printer).ok_or(Error::Other(
-                "An error occured while parsing the source code.",
-            ))?;
-
-            if printer.has_printed() {
-                return Err(Error::Other(
-                    "An error occurred while parsing the source code.",
-                ));
-            }
-
-            Ok((program_identifier, program))
-        })
-        .collect::<Vec<_>>();
-
-    if programs.iter().any(Result::is_err) {
-        return Err(programs.into_iter().find_map(Result::err).unwrap());
-    }
-    let programs = programs
-        .into_iter()
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>();
-
-    let mut transpiler = Transpiler::new(27);
-    transpiler.transpile(&programs, &printer)?;
-    let datapack = transpiler.into_datapack();
-
-    // println!("datapack: {datapack:#?}");
-
-    if printer.has_printed() {
-        return Err(Error::Other(
-            "An error occurred while transpiling the source code.",
-        ));
-    }
-
-    Ok(datapack)
+    public_helpers::transpile(&printer, script_paths)
 }
 
 /// Compiles the given source code.
+///
+/// # Parameters:
+/// - `script_paths`: A list of tuples containing the identifier of the program and the path to the script.
 ///
 /// # Errors
 /// - If an error occurs while reading the file.
@@ -155,57 +87,7 @@ where
 {
     let printer = Printer::new();
 
-    let programs = script_paths
-        .iter()
-        .map(|(program_identifier, path)| {
-            let source_file = SourceFile::load(path.as_ref())?;
-
-            let tokens = TokenStream::tokenize(&source_file, &printer);
-
-            // println!("tokens: {tokens:#?}");
-
-            if printer.has_printed() {
-                return Err(Error::Other(
-                    "An error occurred while tokenizing the source code.",
-                ));
-            }
-
-            let mut parser = Parser::new(&tokens);
-            let program = parser.parse_program(&printer).ok_or(Error::Other(
-                "An error occured while parsing the source code.",
-            ))?;
-
-            if printer.has_printed() {
-                return Err(Error::Other(
-                    "An error occurred while parsing the source code.",
-                ));
-            }
-
-            Ok((program_identifier, program))
-        })
-        .collect::<Vec<_>>();
-
-    if programs.iter().any(Result::is_err) {
-        return Err(programs.into_iter().find_map(Result::err).unwrap());
-    }
-    let programs = programs
-        .into_iter()
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>();
-
-    let mut transpiler = Transpiler::new(27);
-    transpiler.transpile(&programs, &printer)?;
-    let datapack = transpiler.into_datapack();
-
-    // println!("datapack: {datapack:#?}");
-
-    if printer.has_printed() {
-        return Err(Error::Other(
-            "An error occurred while transpiling the source code.",
-        ));
-    }
-
-    Ok(datapack.compile(&CompileOptions::default()))
+    public_helpers::compile(&printer, script_paths)
 }
 
 struct Printer {
