@@ -38,6 +38,8 @@ pub enum KeywordKind {
     Run,
     Lua,
     Namespace,
+    From,
+    Import,
 }
 
 impl ToString for KeywordKind {
@@ -96,6 +98,8 @@ impl KeywordKind {
             Self::Run => "run",
             Self::Lua => "lua",
             Self::Namespace => "namespace",
+            Self::From => "from",
+            Self::Import => "import",
         }
     }
 

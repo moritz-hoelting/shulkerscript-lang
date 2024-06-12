@@ -5,7 +5,7 @@ use getset::Getters;
 use crate::{
     base::{
         source_file::{SourceElement, Span},
-        Handler,
+        DummyHandler, Handler,
     },
     lexical::{
         token::{Punctuation, Token},
@@ -147,6 +147,45 @@ impl<'a> Parser<'a> {
             open: delimited_tree.open,
             list: delimited_tree.tree.unwrap(),
             close: delimited_tree.close,
+        })
+    }
+
+    /// Parses a list of elements separated by a separator.
+    ///
+    /// The parser position must be at the connected list of the first element. It will
+    /// consume the whole connected list and move the next token after the list.
+    ///
+    /// # Errors
+    /// - if the parser position is not at the connected list of the given element.
+    /// - any error returned by the given parser function.
+    pub fn parse_connected_list<T>(
+        &mut self,
+        seperator: char,
+        mut f: impl FnMut(&mut Self) -> Option<T>,
+        _handler: &impl Handler<Error>,
+    ) -> Option<ConnectedList<T, Punctuation>> {
+        let first = f(self)?;
+
+        let mut rest = Vec::new();
+
+        while let Some(sep) =
+            self.try_parse(|parser| parser.parse_punctuation(seperator, true, &DummyHandler))
+        {
+            if let Some(element) = self.try_parse(&mut f) {
+                rest.push((sep, element));
+            } else {
+                return Some(ConnectedList {
+                    first,
+                    rest,
+                    trailing_separator: Some(sep),
+                });
+            }
+        }
+
+        Some(ConnectedList {
+            first,
+            rest,
+            trailing_separator: None,
         })
     }
 }

@@ -7,7 +7,7 @@ use getset::Getters;
 use crate::{
     base::{
         source_file::{SourceElement, Span},
-        Handler,
+        DummyHandler, Handler,
     },
     lexical::{
         token::{Identifier, Keyword, KeywordKind, Punctuation, StringLiteral, Token},
@@ -32,12 +32,14 @@ use super::{statement::Block, ConnectedList};
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Declaration {
     Function(Function),
+    Import(Import),
 }
 
 impl SourceElement for Declaration {
     fn span(&self) -> Span {
         match self {
             Self::Function(function) => function.span(),
+            Self::Import(import) => import.span(),
         }
     }
 }
@@ -170,6 +172,58 @@ impl SourceElement for Function {
     }
 }
 
+/// Syntax Synopsis:
+///
+/// ``` ebnf
+/// Import:
+///     'from' StringLiteral 'import' ('*' | Identifier (',' Identifier)*) ';'
+///     ;
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct Import {
+    #[get = "pub"]
+    from_keyword: Keyword,
+    #[get = "pub"]
+    module: StringLiteral,
+    #[get = "pub"]
+    import_keyword: Keyword,
+    #[get = "pub"]
+    items: ImportItems,
+    #[get = "pub"]
+    semicolon: Punctuation,
+}
+
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ImportItems {
+    All(Punctuation),
+    Named(ConnectedList<Identifier, Punctuation>),
+}
+
+impl Import {
+    /// Dissolves the [`Import`] into its components.
+    #[must_use]
+    pub fn dissolve(self) -> (Keyword, StringLiteral, Keyword, ImportItems, Punctuation) {
+        (
+            self.from_keyword,
+            self.module,
+            self.import_keyword,
+            self.items,
+            self.semicolon,
+        )
+    }
+}
+
+impl SourceElement for Import {
+    fn span(&self) -> Span {
+        self.from_keyword
+            .span()
+            .join(&self.semicolon.span())
+            .unwrap()
+    }
+}
+
 impl<'a> Parser<'a> {
     pub fn parse_annotation(&mut self, handler: &impl Handler<Error>) -> Option<Annotation> {
         match self.stop_at_significant() {
@@ -229,31 +283,9 @@ impl<'a> Parser<'a> {
             Reading::Atomic(Token::Keyword(function_keyword))
                 if function_keyword.keyword == KeywordKind::Function =>
             {
-                // eat the function keyword
-                self.forward();
+                let function = self.parse_function(handler)?;
 
-                // parse the identifier
-                let identifier = self.parse_identifier(handler)?;
-                let delimited_tree = self.parse_enclosed_list(
-                    Delimiter::Parenthesis,
-                    ',',
-                    |parser: &mut Parser<'_>| parser.parse_identifier(handler),
-                    handler,
-                )?;
-
-                // parse the block
-                let block = self.parse_block(handler)?;
-
-                Some(Declaration::Function(Function {
-                    public_keyword: None,
-                    annotations: Vec::new(),
-                    function_keyword,
-                    identifier,
-                    open_paren: delimited_tree.open,
-                    parameters: delimited_tree.list,
-                    close_paren: delimited_tree.close,
-                    block,
-                }))
+                Some(Declaration::Function(function))
             }
 
             Reading::Atomic(Token::Keyword(pub_keyword))
@@ -263,46 +295,12 @@ impl<'a> Parser<'a> {
                 self.forward();
 
                 // parse the function keyword
-                let function_keyword_reading = self.next_significant_token();
+                let function = self.parse_function(handler)?;
 
-                match function_keyword_reading {
-                    Reading::Atomic(Token::Keyword(function_keyword))
-                        if function_keyword.keyword == KeywordKind::Function =>
-                    {
-                        // eat the function keyword
-                        self.forward();
-
-                        // parse the identifier
-                        let identifier = self.parse_identifier(handler)?;
-                        let delimited_tree = self.parse_enclosed_list(
-                            Delimiter::Parenthesis,
-                            ',',
-                            |parser: &mut Parser<'_>| parser.parse_identifier(handler),
-                            handler,
-                        )?;
-
-                        // parse the block
-                        let block = self.parse_block(handler)?;
-
-                        Some(Declaration::Function(Function {
-                            public_keyword: Some(pub_keyword),
-                            annotations: Vec::new(),
-                            function_keyword,
-                            identifier,
-                            open_paren: delimited_tree.open,
-                            parameters: delimited_tree.list,
-                            close_paren: delimited_tree.close,
-                            block,
-                        }))
-                    }
-                    unexpected => {
-                        handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
-                            expected: SyntaxKind::Keyword(KeywordKind::Function),
-                            found: unexpected.into_token(),
-                        }));
-                        None
-                    }
-                }
+                Some(Declaration::Function(Function {
+                    public_keyword: Some(pub_keyword),
+                    ..function
+                }))
             }
 
             // parse annotations
@@ -316,14 +314,68 @@ impl<'a> Parser<'a> {
                     annotations.push(annotation);
                 }
 
-                // parse the function
-                self.parse_declaration(handler)
-                    .map(|declaration| match declaration {
-                        Declaration::Function(mut function) => {
-                            function.annotations.extend(annotations);
-                            Declaration::Function(function)
-                        }
-                    })
+                self.parse_declaration(handler).and_then(|declaration| {
+                    if let Declaration::Function(mut function) = declaration {
+                        function.annotations.extend(annotations);
+                        Some(Declaration::Function(function))
+                    } else {
+                        handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
+                            expected: SyntaxKind::Keyword(KeywordKind::Function),
+                            found: None,
+                        }));
+                        None
+                    }
+                })
+            }
+
+            Reading::Atomic(Token::Keyword(from_keyword))
+                if from_keyword.keyword == KeywordKind::From =>
+            {
+                // eat the from keyword
+                self.forward();
+
+                // parse the module
+                let module = self.parse_string_literal(handler)?;
+
+                let import_keyword = self.parse_keyword(KeywordKind::Import, handler)?;
+
+                // TODO: re-enable when the asterisk is supported
+                let items = // match self.stop_at_significant() {
+                    // Reading::Atomic(Token::Punctuation(punc)) if punc.punctuation == '*' => {
+                        // eat the asterisk
+                        // self.forward();
+
+                        // ImportItems::All(punc)
+                    // }
+                    // _ => 
+                    self.try_parse(|parser| parser
+                        .parse_connected_list(
+                            ',',
+                            |parser| parser.parse_identifier(&DummyHandler),
+                            handler,
+                        )
+                        .map(ImportItems::Named)) // ,
+                // }
+                ;
+
+                if let Some(items) = items {
+                    let semicolon = self.parse_punctuation(';', true, handler)?;
+
+                    Some(Declaration::Import(Import {
+                        from_keyword,
+                        module,
+                        import_keyword,
+                        items,
+                        semicolon,
+                    }))
+                } else {
+                    handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
+                        expected: SyntaxKind::Identifier,
+                        found: self.stop_at_significant().into_token(),
+                    }));
+
+                    None
+                }
             }
 
             unexpected => {
@@ -337,6 +389,42 @@ impl<'a> Parser<'a> {
 
                 None
             }
+        }
+    }
+
+    pub fn parse_function(&mut self, handler: &impl Handler<Error>) -> Option<Function> {
+        if let Reading::Atomic(Token::Keyword(function_keyword)) = self.stop_at_significant() {
+            // eat the function keyword
+            self.forward();
+
+            // parse the identifier
+            let identifier = self.parse_identifier(handler)?;
+            let delimited_tree = self.parse_enclosed_list(
+                Delimiter::Parenthesis,
+                ',',
+                |parser: &mut Parser<'_>| parser.parse_identifier(handler),
+                handler,
+            )?;
+
+            // parse the block
+            let block = self.parse_block(handler)?;
+
+            Some(Function {
+                public_keyword: None,
+                annotations: Vec::new(),
+                function_keyword,
+                identifier,
+                open_paren: delimited_tree.open,
+                parameters: delimited_tree.list,
+                close_paren: delimited_tree.close,
+                block,
+            })
+        } else {
+            handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
+                expected: SyntaxKind::Keyword(KeywordKind::Function),
+                found: self.peek().into_token(),
+            }));
+            None
         }
     }
 }

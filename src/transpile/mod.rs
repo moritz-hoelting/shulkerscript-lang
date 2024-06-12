@@ -8,3 +8,5 @@ pub mod error;
 pub mod lua;
 #[cfg(feature = "shulkerbox")]
 pub mod transpiler;
+
+mod util;

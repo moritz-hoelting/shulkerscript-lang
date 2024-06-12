@@ -1,14 +1,14 @@
 //! Transpiler for `ShulkerScript`
 
 use chksum_md5 as md5;
-use std::{collections::HashMap, sync::RwLock};
+use std::{collections::HashMap, iter, sync::RwLock};
 
 use shulkerbox::datapack::{self, Command, Datapack, Execute};
 
 use crate::{
     base::{source_file::SourceElement, Handler},
     syntax::syntax_tree::{
-        declaration::Declaration,
+        declaration::{Declaration, ImportItems},
         expression::{Expression, FunctionCall, Primary},
         program::{Namespace, ProgramFile},
         statement::{
@@ -26,13 +26,15 @@ pub struct Transpiler {
     datapack: shulkerbox::datapack::Datapack,
     /// Key: (program identifier, function name)
     functions: RwLock<HashMap<(String, String), FunctionData>>,
-    function_locations: RwLock<HashMap<(String, String), String>>,
+    function_locations: RwLock<HashMap<(String, String), (String, bool)>>,
+    aliases: RwLock<HashMap<(String, String), (String, String)>>,
 }
 
 #[derive(Debug, Clone)]
 struct FunctionData {
     namespace: String,
     statements: Vec<Statement>,
+    public: bool,
     annotations: HashMap<String, Option<String>>,
 }
 
@@ -44,6 +46,7 @@ impl Transpiler {
             datapack: shulkerbox::datapack::Datapack::new(pack_format),
             functions: RwLock::new(HashMap::new()),
             function_locations: RwLock::new(HashMap::new()),
+            aliases: RwLock::new(HashMap::new()),
         }
     }
 
@@ -66,23 +69,7 @@ impl Transpiler {
         Ident: AsRef<str>,
     {
         for (identifier, program) in programs {
-            self.transpile_program(program, identifier.as_ref(), handler)?;
-        }
-
-        Ok(())
-    }
-
-    /// Transpiles the given program.
-    fn transpile_program(
-        &mut self,
-        program: &ProgramFile,
-        identifier: &str,
-        handler: &impl Handler<TranspileError>,
-    ) -> TranspileResult<()> {
-        let namespace = program.namespace();
-
-        for declaration in program.declarations() {
-            self.transpile_declaration(declaration, namespace, identifier, handler);
+            self.transpile_program_declarations(program, identifier.as_ref(), handler);
         }
 
         let mut always_transpile_functions = Vec::new();
@@ -105,6 +92,20 @@ impl Transpiler {
         }
 
         Ok(())
+    }
+
+    /// Transpiles the given program.
+    fn transpile_program_declarations(
+        &mut self,
+        program: &ProgramFile,
+        identifier: &str,
+        handler: &impl Handler<TranspileError>,
+    ) {
+        let namespace = program.namespace();
+
+        for declaration in program.declarations() {
+            self.transpile_declaration(declaration, namespace, identifier, handler);
+        }
     }
 
     /// Transpiles the given declaration.
@@ -136,9 +137,33 @@ impl Transpiler {
                     FunctionData {
                         namespace: namespace.namespace_name().str_content().to_string(),
                         statements,
+                        public: function.is_public(),
                         annotations,
                     },
                 );
+            }
+            Declaration::Import(import) => {
+                let path = import.module().str_content();
+                let import_identifier =
+                    super::util::calculate_import_identifier(program_identifier, path);
+
+                let mut aliases = self.aliases.write().unwrap();
+
+                match import.items() {
+                    ImportItems::All(_) => todo!("Importing all items is not yet supported."),
+                    ImportItems::Named(list) => {
+                        let items = iter::once(list.first())
+                            .chain(list.rest().iter().map(|(_, ident)| ident));
+
+                        for item in items {
+                            let name = item.span.str();
+                            aliases.insert(
+                                (program_identifier.to_string(), name.to_string()),
+                                (import_identifier.clone(), name.to_string()),
+                            );
+                        }
+                    }
+                }
             }
         };
     }
@@ -153,28 +178,53 @@ impl Transpiler {
         handler: &impl Handler<TranspileError>,
     ) -> TranspileResult<String> {
         let program_query = (program_identifier.to_string(), name.to_string());
+        let alias_query = {
+            let aliases = self.aliases.read().unwrap();
+            aliases.get(&program_query).cloned()
+        };
         let already_transpiled = {
             let locations = self.function_locations.read().unwrap();
-            locations.get(&program_query).is_some()
+            locations
+                .get(&program_query)
+                .or_else(|| {
+                    alias_query
+                        .clone()
+                        .and_then(|q| locations.get(&q).filter(|(_, p)| *p))
+                })
+                .is_some()
         };
         if !already_transpiled {
             let statements = {
                 let functions = self.functions.read().unwrap();
-                let function_data = functions.get(&program_query).ok_or_else(|| {
-                    let error = TranspileError::MissingFunctionDeclaration(name.to_string());
-                    handler.receive(error.clone());
-                    error
-                })?;
+                let function_data = functions
+                    .get(&program_query)
+                    .or_else(|| {
+                        alias_query
+                            .clone()
+                            .and_then(|q| functions.get(&q).filter(|f| f.public))
+                    })
+                    .ok_or_else(|| {
+                        let error = TranspileError::MissingFunctionDeclaration(name.to_string());
+                        handler.receive(error.clone());
+                        error
+                    })?;
                 function_data.statements.clone()
             };
             let commands = self.transpile_function(&statements, program_identifier, handler)?;
 
             let functions = self.functions.read().unwrap();
-            let function_data = functions.get(&program_query).ok_or_else(|| {
-                let error = TranspileError::MissingFunctionDeclaration(name.to_string());
-                handler.receive(error.clone());
-                error
-            })?;
+            let function_data = functions
+                .get(&program_query)
+                .or_else(|| {
+                    alias_query
+                        .clone()
+                        .and_then(|q| functions.get(&q).filter(|f| f.public))
+                })
+                .ok_or_else(|| {
+                    let error = TranspileError::MissingFunctionDeclaration(name.to_string());
+                    handler.receive(error.clone());
+                    error
+                })?;
 
             let modified_name = function_data
                 .annotations
@@ -208,19 +258,20 @@ impl Transpiler {
 
             self.function_locations.write().unwrap().insert(
                 (program_identifier.to_string(), name.to_string()),
-                function_location,
+                (function_location, function_data.public),
             );
         }
 
         let locations = self.function_locations.read().unwrap();
         locations
             .get(&program_query)
+            .or_else(|| alias_query.and_then(|q| locations.get(&q).filter(|(_, p)| *p)))
             .ok_or_else(|| {
                 let error = TranspileError::MissingFunctionDeclaration(name.to_string());
                 handler.receive(error.clone());
                 error
             })
-            .map(String::to_owned)
+            .map(|(s, _)| s.to_owned())
     }
 
     fn transpile_function(
