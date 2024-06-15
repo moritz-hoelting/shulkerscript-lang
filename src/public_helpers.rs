@@ -15,6 +15,8 @@ use shulkerbox::{datapack::Datapack, util::compile::CompileOptions, virtual_fs::
 
 /// Tokenizes the source code at the given path.
 pub fn tokenize(printer: &Printer, path: &Path) -> Result<TokenStream> {
+    tracing::info!("Tokenizing the source code at path: {}", path.display());
+
     let source_file = SourceFile::load(path)?;
 
     Ok(TokenStream::tokenize(&source_file, printer))
@@ -29,6 +31,8 @@ pub fn parse(printer: &Printer, path: &Path) -> Result<ProgramFile> {
             "An error occurred while tokenizing the source code.",
         ));
     }
+
+    tracing::info!("Parsing the source code at path: {}", path.display());
 
     let mut parser = Parser::new(&tokens);
     let program = parser.parse_program(printer).ok_or(Error::Other(
@@ -67,6 +71,8 @@ where
         .filter_map(Result::ok)
         .collect::<Vec<_>>();
 
+    tracing::info!("Transpiling the source code.");
+
     let mut transpiler = Transpiler::new(27);
     transpiler.transpile(&programs, printer)?;
     let datapack = transpiler.into_datapack();
@@ -87,6 +93,8 @@ where
     P: AsRef<Path>,
 {
     let datapack = transpile(printer, script_paths)?;
+
+    tracing::info!("Compiling the source code.");
 
     Ok(datapack.compile(&CompileOptions::default()))
 }

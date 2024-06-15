@@ -45,6 +45,7 @@ impl TokenStream {
     /// A tuple containing the stream of successfully tokenized tokens and a list of lexical errors
     /// encountered during tokenization.
     #[must_use]
+    #[tracing::instrument(level = "debug", skip_all, fields(source_file = %source_file.path().display()))]
     pub fn tokenize(source_file: &Arc<SourceFile>, handler: &impl Handler<error::Error>) -> Self {
         // The list of token trees that will be returned.
         let mut tokens = Vec::new();
@@ -57,12 +58,16 @@ impl TokenStream {
                 Err(TokenizeError::EndOfSourceCodeIteratorArgument) => {
                     break;
                 }
-                Err(TokenizeError::FatalLexicalError) => (),
+                Err(TokenizeError::FatalLexicalError) => {
+                    tracing::error!("Fatal lexical error encountered while tokenizing source code");
+                }
             }
         }
 
         // reverse to use pop() instead of remove(0)
         tokens.reverse();
+
+        tracing::debug!("Structuring tokens into trees");
 
         // stucture the tokens into a token stream
         let mut token_trees = Vec::new();

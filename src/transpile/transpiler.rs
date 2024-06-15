@@ -60,6 +60,7 @@ impl Transpiler {
     ///
     /// # Errors
     /// - [`TranspileError::MissingFunctionDeclaration`] If a called function is missing
+    #[tracing::instrument(level = "trace", skip_all)]
     pub fn transpile<Ident>(
         &mut self,
         programs: &[(Ident, ProgramFile)],
@@ -68,6 +69,8 @@ impl Transpiler {
     where
         Ident: AsRef<str>,
     {
+        tracing::trace!("Transpiling program declarations");
+
         for (identifier, program) in programs {
             self.transpile_program_declarations(program, identifier.as_ref(), handler);
         }
@@ -86,6 +89,11 @@ impl Transpiler {
                 };
             }
         }
+
+        tracing::trace!(
+            "Transpiling functions requested by user: {:?}",
+            always_transpile_functions
+        );
 
         for (program_identifier, name) in always_transpile_functions {
             self.get_or_transpile_function(&name, &program_identifier, handler)?;
@@ -171,6 +179,7 @@ impl Transpiler {
     /// Gets the function at the given path, or transpiles it if it hasn't been transpiled yet.
     /// Returns the location of the function or None if the function does not exist.
     #[allow(clippy::significant_drop_tightening)]
+    #[tracing::instrument(level = "trace", skip(self, handler))]
     fn get_or_transpile_function(
         &mut self,
         name: &str,
@@ -194,6 +203,8 @@ impl Transpiler {
                 .is_some()
         };
         if !already_transpiled {
+            tracing::trace!("Function not transpiled yet, transpiling.");
+
             let statements = {
                 let functions = self.functions.read().unwrap();
                 let function_data = functions

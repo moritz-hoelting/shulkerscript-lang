@@ -249,11 +249,13 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses a [`Statement`].
+    #[tracing::instrument(level = "trace", skip_all)]
     pub fn parse_statement(&mut self, handler: &impl Handler<Error>) -> Option<Statement> {
         match self.stop_at_significant() {
             // variable declaration
             Reading::Atomic(Token::CommandLiteral(command)) => {
                 self.forward();
+                tracing::trace!("Parsed literal command '{}'", command.clean_command());
                 Some(Statement::LiteralCommand(command))
             }
             // block statement
@@ -286,6 +288,8 @@ impl<'a> Parser<'a> {
 
                 let block = self.parse_block(handler)?;
 
+                tracing::trace!("Parsed group command");
+
                 Some(Statement::Grouping(Grouping {
                     group_keyword,
                     block,
@@ -302,6 +306,8 @@ impl<'a> Parser<'a> {
                 let expression = self.parse_expression(handler)?;
                 let semicolon = self.parse_punctuation(';', true, handler)?;
 
+                tracing::trace!("Parsed run statement: {:?}", expression);
+
                 Some(Statement::Run(Run {
                     run_keyword,
                     expression,
@@ -313,6 +319,8 @@ impl<'a> Parser<'a> {
             _ => {
                 let expression = self.parse_expression(handler)?;
                 let semicolon = self.parse_punctuation(';', true, handler)?;
+
+                tracing::trace!("Parsed semicolon statement: {:?}", expression);
 
                 Some(Statement::Semicolon(Semicolon {
                     expression,

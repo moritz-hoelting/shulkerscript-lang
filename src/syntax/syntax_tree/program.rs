@@ -78,7 +78,10 @@ impl Namespace {
 
 impl<'a> Parser<'a> {
     /// Parses a [`ProgramFile`].
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn parse_program(&mut self, handler: &impl Handler<Error>) -> Option<ProgramFile> {
+        tracing::debug!("Parsing program");
+
         let namespace = match self.stop_at_significant() {
             Reading::Atomic(Token::Keyword(namespace_keyword))
                 if namespace_keyword.keyword == KeywordKind::Namespace =>
@@ -109,6 +112,11 @@ impl<'a> Parser<'a> {
                 None
             }
         }?;
+
+        tracing::debug!(
+            "Found namespace '{}', parsing declarations",
+            namespace.namespace_name.str_content()
+        );
 
         let mut declarations = Vec::new();
 

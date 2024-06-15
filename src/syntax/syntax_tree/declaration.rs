@@ -278,12 +278,15 @@ impl<'a> Parser<'a> {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip_all)]
     pub fn parse_declaration(&mut self, handler: &impl Handler<Error>) -> Option<Declaration> {
         match self.stop_at_significant() {
             Reading::Atomic(Token::Keyword(function_keyword))
                 if function_keyword.keyword == KeywordKind::Function =>
             {
                 let function = self.parse_function(handler)?;
+
+                tracing::trace!("Parsed function '{:?}'", function.identifier.span.str());
 
                 Some(Declaration::Function(function))
             }
@@ -360,6 +363,8 @@ impl<'a> Parser<'a> {
 
                 if let Some(items) = items {
                     let semicolon = self.parse_punctuation(';', true, handler)?;
+
+                    tracing::trace!("Parsed import from '{:?}'", module.str_content());
 
                     Some(Declaration::Import(Import {
                         from_keyword,

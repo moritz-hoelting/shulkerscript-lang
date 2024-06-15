@@ -15,10 +15,13 @@ mod enabled {
         ///
         /// # Errors
         /// - If Lua code evaluation is disabled.
+        #[tracing::instrument(level = "debug", name = "eval_lua", skip_all, ret)]
         pub fn eval_string(
             &self,
             handler: &impl Handler<TranspileError>,
         ) -> TranspileResult<String> {
+            tracing::debug!("Evaluating Lua code");
+
             let lua = Lua::new();
 
             let name = {
@@ -89,6 +92,7 @@ mod disabled {
             handler: &impl Handler<TranspileError>,
         ) -> TranspileResult<String> {
             handler.receive(TranspileError::LuaDisabled);
+            tracing::error!("Lua code evaluation is disabled");
             Err(TranspileError::LuaDisabled)
         }
     }
