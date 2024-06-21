@@ -3,7 +3,6 @@
 use std::{
     cmp::Ordering,
     fmt::Debug,
-    fs,
     iter::{Iterator, Peekable},
     ops::Range,
     path::{Path, PathBuf},
@@ -13,7 +12,7 @@ use std::{
 
 use getset::{CopyGetters, Getters};
 
-use super::Error;
+use super::{file_provider::FileProvider, Error};
 
 /// Represents a source file that contains the source code.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -84,8 +83,8 @@ impl SourceFile {
     ///
     /// # Errors
     /// - [`Error::IoError`]: Error occurred when reading the file contents.
-    pub fn load(path: &Path) -> Result<Arc<Self>, Error> {
-        let source = fs::read_to_string(path).map_err(Error::IoError)?;
+    pub fn load(path: &Path, provider: &impl FileProvider) -> Result<Arc<Self>, Error> {
+        let source = provider.read_to_string(path)?;
         Ok(Self::new(path.to_path_buf(), source))
     }
 

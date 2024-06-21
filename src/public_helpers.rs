@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::{
-    base::{source_file::SourceFile, Error, Result},
+    base::{source_file::SourceFile, Error, FileProvider, Result},
     lexical::token_stream::TokenStream,
     syntax::{parser::Parser, syntax_tree::program::ProgramFile},
     Printer,
@@ -14,17 +14,25 @@ use crate::transpile::transpiler::Transpiler;
 use shulkerbox::{datapack::Datapack, util::compile::CompileOptions, virtual_fs::VFolder};
 
 /// Tokenizes the source code at the given path.
-pub fn tokenize(printer: &Printer, path: &Path) -> Result<TokenStream> {
+pub fn tokenize(
+    printer: &Printer,
+    file_provider: &impl FileProvider,
+    path: &Path,
+) -> Result<TokenStream> {
     tracing::info!("Tokenizing the source code at path: {}", path.display());
 
-    let source_file = SourceFile::load(path)?;
+    let source_file = SourceFile::load(path, file_provider)?;
 
     Ok(TokenStream::tokenize(&source_file, printer))
 }
 
 /// Parses the source code at the given path.
-pub fn parse(printer: &Printer, path: &Path) -> Result<ProgramFile> {
-    let tokens = tokenize(printer, path)?;
+pub fn parse(
+    printer: &Printer,
+    file_provider: &impl FileProvider,
+    path: &Path,
+) -> Result<ProgramFile> {
+    let tokens = tokenize(printer, file_provider, path)?;
 
     if printer.has_printed() {
         return Err(Error::Other(
@@ -50,14 +58,19 @@ pub fn parse(printer: &Printer, path: &Path) -> Result<ProgramFile> {
 
 /// Transpiles the source code at the given paths into a shulkerbox [`Datapack`].
 #[cfg(feature = "shulkerbox")]
-pub fn transpile<P>(printer: &Printer, script_paths: &[(String, P)]) -> Result<Datapack>
+pub fn transpile<F, P>(
+    printer: &Printer,
+    file_provider: &F,
+    script_paths: &[(String, P)],
+) -> Result<Datapack>
 where
+    F: FileProvider,
     P: AsRef<Path>,
 {
     let programs = script_paths
         .iter()
         .map(|(program_identifier, path)| {
-            let program = parse(printer, path.as_ref())?;
+            let program = parse(printer, file_provider, path.as_ref())?;
 
             Ok((program_identifier, program))
         })
@@ -73,7 +86,7 @@ where
 
     tracing::info!("Transpiling the source code.");
 
-    let mut transpiler = Transpiler::new(27);
+    let mut transpiler = Transpiler::new(crate::DEFAULT_PACK_FORMAT);
     transpiler.transpile(&programs, printer)?;
     let datapack = transpiler.into_datapack();
 
@@ -88,11 +101,16 @@ where
 
 /// Compiles the source code at the given paths.
 #[cfg(feature = "shulkerbox")]
-pub fn compile<P>(printer: &Printer, script_paths: &[(String, P)]) -> Result<VFolder>
+pub fn compile<F, P>(
+    printer: &Printer,
+    file_provider: &F,
+    script_paths: &[(String, P)],
+) -> Result<VFolder>
 where
+    F: FileProvider,
     P: AsRef<Path>,
 {
-    let datapack = transpile(printer, script_paths)?;
+    let datapack = transpile(printer, file_provider, script_paths)?;
 
     tracing::info!("Compiling the source code.");
 

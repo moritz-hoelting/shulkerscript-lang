@@ -23,7 +23,7 @@ mod public_helpers;
 
 use std::{cell::Cell, fmt::Display, path::Path};
 
-use base::{Handler, Result};
+use base::{FileProvider, Handler, Result};
 use syntax::syntax_tree::program::ProgramFile;
 
 #[cfg(feature = "shulkerbox")]
@@ -31,14 +31,19 @@ use shulkerbox::{datapack::Datapack, virtual_fs::VFolder};
 
 use crate::lexical::token_stream::TokenStream;
 
+const DEFAULT_PACK_FORMAT: u8 = 48;
+
 /// Converts the given source code to tokens.
 ///
 /// # Errors
 /// - If an error occurs while reading the file.
-pub fn tokenize(path: &Path) -> Result<TokenStream> {
+pub fn tokenize<F>(file_provider: &F, path: &Path) -> Result<TokenStream>
+where
+    F: FileProvider,
+{
     let printer = Printer::new();
 
-    public_helpers::tokenize(&printer, path)
+    public_helpers::tokenize(&printer, file_provider, path)
 }
 
 /// Parses the given source code.
@@ -46,10 +51,13 @@ pub fn tokenize(path: &Path) -> Result<TokenStream> {
 /// # Errors
 /// - If an error occurs while reading the file.
 /// - If an error occurs while parsing the source code.
-pub fn parse(path: &Path) -> Result<ProgramFile> {
+pub fn parse<F>(file_provider: &F, path: &Path) -> Result<ProgramFile>
+where
+    F: FileProvider,
+{
     let printer = Printer::new();
 
-    public_helpers::parse(&printer, path)
+    public_helpers::parse(&printer, file_provider, path)
 }
 
 /// Transpiles the given source code into a shulkerbox [`Datapack`].
@@ -62,13 +70,14 @@ pub fn parse(path: &Path) -> Result<ProgramFile> {
 /// - If an error occurs while parsing the source code.
 /// - If an error occurs while transpiling the source code.
 #[cfg(feature = "shulkerbox")]
-pub fn transpile<P>(script_paths: &[(String, P)]) -> Result<Datapack>
+pub fn transpile<F, P>(file_provider: &F, script_paths: &[(String, P)]) -> Result<Datapack>
 where
+    F: FileProvider,
     P: AsRef<Path>,
 {
     let printer = Printer::new();
 
-    public_helpers::transpile(&printer, script_paths)
+    public_helpers::transpile(&printer, file_provider, script_paths)
 }
 
 /// Compiles the given source code.
@@ -81,13 +90,14 @@ where
 /// - If an error occurs while parsing the source code.
 /// - If an error occurs while transpiling the source code.
 #[cfg(feature = "shulkerbox")]
-pub fn compile<P>(script_paths: &[(String, P)]) -> Result<VFolder>
+pub fn compile<F, P>(file_provider: &F, script_paths: &[(String, P)]) -> Result<VFolder>
 where
+    F: FileProvider,
     P: AsRef<Path>,
 {
     let printer = Printer::new();
 
-    public_helpers::compile(&printer, script_paths)
+    public_helpers::compile(&printer, file_provider, script_paths)
 }
 
 struct Printer {

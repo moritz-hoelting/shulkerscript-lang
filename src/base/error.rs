@@ -1,11 +1,9 @@
-use std::io;
-
 /// An error that occurred during compilation.
 #[allow(missing_docs)]
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("An error occurred while reading the file.")]
-    IoError(#[from] io::Error),
+    #[error("An error occurred while working with Input/Output.")]
+    IoError(String),
     #[error("An error occured while tokenizing the source code.")]
     TokenizeError(#[from] crate::lexical::token::TokenizeError),
     #[error("An error occurred while parsing the source code.")]
