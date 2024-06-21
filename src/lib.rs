@@ -107,9 +107,13 @@ impl Printer {
     }
 }
 
-impl<E: Display> Handler<E> for Printer {
-    fn receive(&self, error: E) {
-        eprintln!("{error}");
+impl<T: Display> Handler<T> for Printer {
+    fn receive<E: Into<T>>(&self, error: E) {
+        eprintln!("{}", error.into());
         self.printed.set(true);
+    }
+
+    fn has_received(&self) -> bool {
+        self.printed.get()
     }
 }

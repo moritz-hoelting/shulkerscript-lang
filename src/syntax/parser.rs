@@ -42,7 +42,7 @@ impl<'a> Parser<'a> {
         &mut self,
         delimiter: Delimiter,
         f: impl FnOnce(&mut Self) -> Option<T>,
-        handler: &dyn Handler<Error>,
+        handler: &impl Handler<Error>,
     ) -> Option<DelimitedTree<T>> {
         self.current_frame.stop_at_significant();
         let raw_token_tree = self

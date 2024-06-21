@@ -775,13 +775,10 @@ impl<'a> Parser<'a> {
                         handler,
                     ),
                     unexpected => {
-                        handler.receive(
-                            UnexpectedSyntax {
-                                expected: SyntaxKind::Punctuation('('),
-                                found: unexpected.into_token(),
-                            }
-                            .into(),
-                        );
+                        handler.receive(UnexpectedSyntax {
+                            expected: SyntaxKind::Punctuation('('),
+                            found: unexpected.into_token(),
+                        });
                         None
                     }
                 }?;
@@ -795,13 +792,10 @@ impl<'a> Parser<'a> {
 
             // unexpected
             unexpected => {
-                handler.receive(
-                    UnexpectedSyntax {
-                        expected: SyntaxKind::ExecuteBlock,
-                        found: unexpected.into_token(),
-                    }
-                    .into(),
-                );
+                handler.receive(UnexpectedSyntax {
+                    expected: SyntaxKind::ExecuteBlock,
+                    found: unexpected.into_token(),
+                });
                 None
             }
         }
@@ -833,13 +827,10 @@ impl<'a> Parser<'a> {
             }
 
             unexpected => {
-                handler.receive(
-                    UnexpectedSyntax {
-                        expected: SyntaxKind::ExecuteBlockTail,
-                        found: unexpected.into_token(),
-                    }
-                    .into(),
-                );
+                handler.receive(UnexpectedSyntax {
+                    expected: SyntaxKind::ExecuteBlockTail,
+                    found: unexpected.into_token(),
+                });
                 None
             }
         }

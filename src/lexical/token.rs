@@ -492,12 +492,9 @@ impl Token {
                 }
                 .into())
             } else {
-                handler.receive(
-                    UnterminatedDelimitedComment {
-                        span: Span::new(iter.source_file().clone(), start, start + 2).unwrap(),
-                    }
-                    .into(),
-                );
+                handler.receive(UnterminatedDelimitedComment {
+                    span: Span::new(iter.source_file().clone(), start, start + 2).unwrap(),
+                });
                 return Err(TokenizeError::FatalLexicalError);
             }
         }

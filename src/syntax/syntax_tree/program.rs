@@ -102,13 +102,10 @@ impl<'a> Parser<'a> {
                 })
             }
             unexpected => {
-                handler.receive(
-                    UnexpectedSyntax {
-                        expected: SyntaxKind::Keyword(KeywordKind::Namespace),
-                        found: unexpected.into_token(),
-                    }
-                    .into(),
-                );
+                handler.receive(UnexpectedSyntax {
+                    expected: SyntaxKind::Keyword(KeywordKind::Namespace),
+                    found: unexpected.into_token(),
+                });
                 None
             }
         }?;

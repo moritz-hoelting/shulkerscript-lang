@@ -92,7 +92,7 @@ impl TokenStream {
     fn handle_popped_token(
         tokens: &mut Vec<Token>,
         popped_token: Token,
-        handler: &dyn Handler<error::Error>,
+        handler: &impl Handler<error::Error>,
     ) -> Option<TokenTree> {
         match popped_token {
             Token::Punctuation(punc) if punc.punctuation == '{' => {
@@ -116,7 +116,7 @@ impl TokenStream {
         tokens: &mut Vec<Token>,
         open: Punctuation,
         delimiter: Delimiter,
-        handler: &dyn Handler<error::Error>,
+        handler: &impl Handler<error::Error>,
     ) -> Option<Delimited> {
         let mut token_trees = Vec::new();
 
