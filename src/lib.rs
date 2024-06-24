@@ -31,8 +31,6 @@ use shulkerbox::{datapack::Datapack, virtual_fs::VFolder};
 
 use crate::lexical::token_stream::TokenStream;
 
-const DEFAULT_PACK_FORMAT: u8 = 48;
-
 /// Converts the given source code to tokens.
 ///
 /// # Errors
@@ -70,14 +68,18 @@ where
 /// - If an error occurs while parsing the source code.
 /// - If an error occurs while transpiling the source code.
 #[cfg(feature = "shulkerbox")]
-pub fn transpile<F, P>(file_provider: &F, script_paths: &[(String, P)]) -> Result<Datapack>
+pub fn transpile<F, P>(
+    file_provider: &F,
+    pack_format: u8,
+    script_paths: &[(String, P)],
+) -> Result<Datapack>
 where
     F: FileProvider,
     P: AsRef<Path>,
 {
     let printer = Printer::new();
 
-    public_helpers::transpile(&printer, file_provider, script_paths)
+    public_helpers::transpile(&printer, file_provider, pack_format, script_paths)
 }
 
 /// Compiles the given source code.
@@ -90,14 +92,18 @@ where
 /// - If an error occurs while parsing the source code.
 /// - If an error occurs while transpiling the source code.
 #[cfg(feature = "shulkerbox")]
-pub fn compile<F, P>(file_provider: &F, script_paths: &[(String, P)]) -> Result<VFolder>
+pub fn compile<F, P>(
+    file_provider: &F,
+    pack_format: u8,
+    script_paths: &[(String, P)],
+) -> Result<VFolder>
 where
     F: FileProvider,
     P: AsRef<Path>,
 {
     let printer = Printer::new();
 
-    public_helpers::compile(&printer, file_provider, script_paths)
+    public_helpers::compile(&printer, file_provider, pack_format, script_paths)
 }
 
 struct Printer {

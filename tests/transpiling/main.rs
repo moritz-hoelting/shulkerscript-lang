@@ -9,7 +9,7 @@ fn transpile_test1() {
     let mut dir = VFolder::new();
     dir.add_file("test1.shu", VFile::Text(source.to_string()));
 
-    let transpiled = shulkerscript::transpile(&dir, &[("test1".to_string(), "./test1.shu")])
+    let transpiled = shulkerscript::transpile(&dir, 48, &[("test1".to_string(), "./test1.shu")])
         .expect("Failed to transpile");
 
     let expected = {

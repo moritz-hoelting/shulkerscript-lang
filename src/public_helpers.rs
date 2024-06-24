@@ -61,6 +61,7 @@ pub fn parse(
 pub fn transpile<F, P>(
     printer: &Printer,
     file_provider: &F,
+    pack_format: u8,
     script_paths: &[(String, P)],
 ) -> Result<Datapack>
 where
@@ -86,7 +87,7 @@ where
 
     tracing::info!("Transpiling the source code.");
 
-    let mut transpiler = Transpiler::new(crate::DEFAULT_PACK_FORMAT);
+    let mut transpiler = Transpiler::new(pack_format);
     transpiler.transpile(&programs, printer)?;
     let datapack = transpiler.into_datapack();
 
@@ -104,13 +105,14 @@ where
 pub fn compile<F, P>(
     printer: &Printer,
     file_provider: &F,
+    pack_format: u8,
     script_paths: &[(String, P)],
 ) -> Result<VFolder>
 where
     F: FileProvider,
     P: AsRef<Path>,
 {
-    let datapack = transpile(printer, file_provider, script_paths)?;
+    let datapack = transpile(printer, file_provider, pack_format, script_paths)?;
 
     tracing::info!("Compiling the source code.");
 
