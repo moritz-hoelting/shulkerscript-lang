@@ -1,0 +1,12 @@
+namespace "transpiling-test";
+
+#[deobfuscate]
+fn main() {
+    /say Hello, World!
+
+    as("@a"), if ("entity @p[distance=..5]") {
+        /say You are close to me!
+    } else {
+        /say You are alone!
+    }
+}

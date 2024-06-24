@@ -26,6 +26,7 @@ use super::{statement::Block, ConnectedList};
 /// ``` ebnf
 /// Declaration:
 ///    Function
+///    | Import
 ///   ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

@@ -96,5 +96,22 @@ mod vfs {
             assert_eq!(normalize_path_str("./a/b/c"), Some("a/b/c".to_string()));
             assert_eq!(normalize_path_str("../a/b/c"), None);
         }
+
+        #[test]
+        fn test_vfolder_provider() {
+            let mut dir = VFolder::new();
+            dir.add_file("foo.txt", VFile::Text("foo".to_string()));
+            dir.add_file("bar/baz.txt", VFile::Text("bar, baz".to_string()));
+
+            assert_eq!(dir.read_to_string("foo.txt").unwrap(), "foo".to_string());
+            assert_eq!(
+                dir.read_to_string("bar/baz.txt").unwrap(),
+                "bar, baz".to_string()
+            );
+            assert!(matches!(
+                dir.read_to_string("nonexistent.txt"),
+                Err(Error::IoError(_))
+            ));
+        }
     }
 }

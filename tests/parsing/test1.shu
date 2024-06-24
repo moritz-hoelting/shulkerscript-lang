@@ -1,0 +1,5 @@
+namespace "parsing-test";
+
+fn main() {
+    /say Hello, World!
+}

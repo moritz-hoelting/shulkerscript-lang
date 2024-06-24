@@ -14,7 +14,12 @@ Namespace: 'namespace' StringLiteral;
 
 ### Declaration
 ```ebnf
-Declaration: FunctionDeclaration;
+Declaration: FunctionDeclaration | Import;
+```
+
+### Import
+```ebnf
+Import: 'from' StringLiteral 'import' Identifier;
 ```
 
 ### FunctionDeclaration
