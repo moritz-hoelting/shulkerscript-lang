@@ -27,6 +27,15 @@ impl Default for FsProvider {
     }
 }
 
+impl<P> From<P> for FsProvider
+where
+    P: Into<PathBuf>,
+{
+    fn from(root: P) -> Self {
+        Self { root: root.into() }
+    }
+}
+
 impl FileProvider for FsProvider {
     fn read_to_string<P: AsRef<Path>>(&self, path: P) -> Result<String, Error> {
         let full_path = self.root.join(path);

@@ -1,7 +1,6 @@
 //! Module containing structures and implementations for logging messages to the user.
 
 use colored::Colorize;
-use path_absolutize::Absolutize;
 use std::{fmt::Display, sync::Arc};
 
 use super::source_file::{Location, SourceFile, Span};
@@ -74,7 +73,7 @@ impl<'a, T> SourceCodeDisplay<'a, T> {
     }
 }
 
-impl<'a, T: std::fmt::Display> Display for SourceCodeDisplay<'a, T> {
+impl<'a, T: Display> Display for SourceCodeDisplay<'a, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let start_location = self.span.start_location();
         let end_location = self.span.end_location();
@@ -100,12 +99,7 @@ impl<'a, T: std::fmt::Display> Display for SourceCodeDisplay<'a, T> {
             "-->".cyan().bold(),
             format_args!(
                 "{}:{}:{}",
-                self.span
-                    .source_file()
-                    .path()
-                    .absolutize()
-                    .unwrap_or_else(|_| std::borrow::Cow::Borrowed(self.span.source_file().path()))
-                    .display(),
+                self.span.source_file().path().display(),
                 start_location.line,
                 start_location.column
             )

@@ -1,6 +1,6 @@
 //! Contains the [`Token`] struct and its related types.
 
-use std::{collections::HashMap, str::FromStr, sync::OnceLock};
+use std::{borrow::Cow, collections::HashMap, fmt::Display, str::FromStr, sync::OnceLock};
 
 use crate::base::{
     source_file::{SourceElement, SourceIterator, Span},
@@ -42,9 +42,9 @@ pub enum KeywordKind {
     Import,
 }
 
-impl ToString for KeywordKind {
-    fn to_string(&self) -> String {
-        self.as_str().to_string()
+impl Display for KeywordKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -259,11 +259,22 @@ pub struct StringLiteral {
 }
 
 impl StringLiteral {
-    /// Returns the string without the leading and trailing double quotes.
+    /// Returns the string content without escapement characters, leading and trailing double quotes.
     #[must_use]
-    pub fn str_content(&self) -> &str {
+    pub fn str_content(&self) -> Cow<str> {
         let string = self.span.str();
-        &string[1..string.len() - 1]
+        let string = &string[1..string.len() - 1];
+        if string.contains('\\') {
+            let escaped = string
+                .replace("\\n", "\n")
+                .replace("\\r", "\r")
+                .replace("\\t", "\t")
+                .replace("\\\"", "\"")
+                .replace("\\\\", "\\");
+            Cow::Owned(escaped)
+        } else {
+            Cow::Borrowed(string)
+        }
     }
 }
 
@@ -601,5 +612,40 @@ impl Token {
         } else {
             unreachable!("all cases covered before")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::base::source_file::SourceFile;
+    use shulkerbox::virtual_fs::{VFile, VFolder};
+    use std::path::Path;
+
+    use super::*;
+
+    fn get_span(content: &str) -> Span {
+        let source_file = VFile::Text(String::from(content));
+        let mut vfolder = VFolder::new();
+        vfolder.add_file("test.shu", source_file);
+        let source_file = SourceFile::load(Path::new("test.shu"), &vfolder).unwrap();
+
+        Span::new(source_file, 0, content.len()).unwrap()
+    }
+
+    #[test]
+    fn test_string_literal() {
+        let span = get_span(r#""Hello, World!""#);
+        let string_literal = StringLiteral { span };
+
+        let content = string_literal.str_content();
+        assert_eq!(content, "Hello, World!");
+        assert!(matches!(content, Cow::Borrowed(_)));
+
+        let escaped_string_literal = StringLiteral {
+            span: get_span(r#""Hello, \"World\"!""#),
+        };
+        let escaped_content = escaped_string_literal.str_content();
+        assert_eq!(escaped_content, "Hello, \"World\"!");
+        assert!(matches!(escaped_content, Cow::Owned(_)));
     }
 }

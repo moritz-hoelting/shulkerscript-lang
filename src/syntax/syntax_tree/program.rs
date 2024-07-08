@@ -89,9 +89,9 @@ impl<'a> Parser<'a> {
                 // eat the keyword
                 self.forward();
 
-                let namespace_name = self
-                    .parse_string_literal(handler)
-                    .and_then(|name| Namespace::validate_str(name.str_content()).then_some(name))?;
+                let namespace_name = self.parse_string_literal(handler).and_then(|name| {
+                    Namespace::validate_str(name.str_content().as_ref()).then_some(name)
+                })?;
 
                 let semicolon = self.parse_punctuation(';', true, handler)?;
 
