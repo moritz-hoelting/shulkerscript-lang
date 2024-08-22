@@ -33,6 +33,15 @@ use crate::lexical::token_stream::TokenStream;
 ///
 /// # Errors
 /// - If an error occurs while loading the [`SourceFile`].
+///
+/// # Examples
+/// ```no_run
+/// use std::path::Path;
+/// use shulkerscript::{tokenize, base::{FsProvider, PrintHandler}};
+///
+/// let token_stream = tokenize(&PrintHandler::new(), &FsProvider::default(), Path::new("path/to/file.shu"))?;
+/// # Ok::<(), shulkerscript::base::Error>(())
+/// ```
 pub fn tokenize(
     handler: &impl Handler<base::Error>,
     file_provider: &impl FileProvider,
@@ -50,6 +59,15 @@ pub fn tokenize(
 /// # Errors
 /// - If an error occurs during [`tokenize()`].
 /// - If an error occurs while parsing the source code.
+///
+/// # Examples
+/// ```no_run
+/// use std::path::Path;
+/// use shulkerscript::{parse, base::{FsProvider, PrintHandler}};
+///
+/// let program_file = parse(&PrintHandler::new(), &FsProvider::default(), Path::new("path/to/file.shu"))?;
+/// # Ok::<(), shulkerscript::base::Error>(())
+/// ```
 pub fn parse(
     handler: &impl Handler<base::Error>,
     file_provider: &impl FileProvider,
@@ -87,6 +105,22 @@ pub fn parse(
 /// # Errors
 /// - If an error occurs during [`parse()`]
 /// - If an error occurs while transpiling the source code.
+///
+/// # Examples
+/// ```no_run
+/// use std::path::Path;
+/// use shulkerscript::{transpile, base::{FsProvider, PrintHandler}};
+///
+/// let datapack = transpile(
+///     &PrintHandler::new(),
+///     &FsProvider::default(),
+///     48,
+///     &[
+///         (String::from("fileA"), Path::new("path/to/fileA.shu")),
+///         (String::from("fileB"), Path::new("path/to/fileB.shu"))
+///     ])?;
+/// # Ok::<(), shulkerscript::base::Error>(())
+/// ```
 #[cfg(feature = "shulkerbox")]
 pub fn transpile<F, P>(
     handler: &impl Handler<base::Error>,
@@ -139,6 +173,22 @@ where
 ///
 /// # Errors
 /// - If an error occurs during [`transpile()`]
+///
+/// # Examples
+/// ```no_run
+/// use std::path::Path;
+/// use shulkerscript::{compile, base::{FsProvider, PrintHandler}};
+///
+/// let vfolder = compile(
+///     &PrintHandler::new(),
+///     &FsProvider::default(),
+///     48,
+///     &[
+///         (String::from("fileA"), Path::new("path/to/fileA.shu")),
+///         (String::from("fileB"), Path::new("path/to/fileB.shu"))
+///     ])?;
+/// # Ok::<(), shulkerscript::base::Error>(())
+/// ```
 #[cfg(feature = "shulkerbox")]
 pub fn compile<F, P>(
     handler: &impl Handler<base::Error>,
