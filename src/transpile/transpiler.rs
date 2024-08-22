@@ -6,7 +6,7 @@ use std::{collections::HashMap, iter, sync::RwLock};
 use shulkerbox::datapack::{self, Command, Datapack, Execute};
 
 use crate::{
-    base::{source_file::SourceElement, Handler},
+    base::{self, source_file::SourceElement, Handler},
     syntax::syntax_tree::{
         declaration::{Declaration, ImportItems},
         expression::{Expression, FunctionCall, Primary},
@@ -64,7 +64,7 @@ impl Transpiler {
     pub fn transpile<Ident>(
         &mut self,
         programs: &[(Ident, ProgramFile)],
-        handler: &impl Handler<TranspileError>,
+        handler: &impl Handler<base::Error>,
     ) -> Result<(), TranspileError>
     where
         Ident: AsRef<str>,
@@ -107,7 +107,7 @@ impl Transpiler {
         &mut self,
         program: &ProgramFile,
         identifier: &str,
-        handler: &impl Handler<TranspileError>,
+        handler: &impl Handler<base::Error>,
     ) {
         let namespace = program.namespace();
 
@@ -117,12 +117,13 @@ impl Transpiler {
     }
 
     /// Transpiles the given declaration.
+    #[allow(clippy::needless_pass_by_ref_mut)]
     fn transpile_declaration(
         &mut self,
         declaration: &Declaration,
         namespace: &Namespace,
         program_identifier: &str,
-        _handler: &impl Handler<TranspileError>,
+        _handler: &impl Handler<base::Error>,
     ) {
         match declaration {
             Declaration::Function(function) => {
@@ -184,7 +185,7 @@ impl Transpiler {
         &mut self,
         name: &str,
         program_identifier: &str,
-        handler: &impl Handler<TranspileError>,
+        handler: &impl Handler<base::Error>,
     ) -> TranspileResult<String> {
         let program_query = (program_identifier.to_string(), name.to_string());
         let alias_query = {
@@ -289,7 +290,7 @@ impl Transpiler {
         &mut self,
         statements: &[Statement],
         program_identifier: &str,
-        handler: &impl Handler<TranspileError>,
+        handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Vec<Command>> {
         let mut errors = Vec::new();
         let commands = statements
@@ -314,7 +315,7 @@ impl Transpiler {
         &mut self,
         statement: &Statement,
         program_identifier: &str,
-        handler: &impl Handler<TranspileError>,
+        handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Option<Command>> {
         match statement {
             Statement::LiteralCommand(literal_command) => {
@@ -381,7 +382,7 @@ impl Transpiler {
         &mut self,
         func: &FunctionCall,
         program_identifier: &str,
-        handler: &impl Handler<TranspileError>,
+        handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Command> {
         let identifier = func.identifier().span();
         let identifier_name = identifier.str();
@@ -394,7 +395,7 @@ impl Transpiler {
         &mut self,
         execute: &ExecuteBlock,
         program_identifier: &str,
-        handler: &impl Handler<TranspileError>,
+        handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Option<Command>> {
         self.transpile_execute_block_internal(execute, program_identifier, handler)
             .map(|ex| ex.map(Command::Execute))
@@ -404,7 +405,7 @@ impl Transpiler {
         &mut self,
         execute: &ExecuteBlock,
         program_identifier: &str,
-        handler: &impl Handler<TranspileError>,
+        handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Option<Execute>> {
         match execute {
             ExecuteBlock::HeadTail(head, tail) => {
@@ -489,7 +490,7 @@ impl Transpiler {
         then: Execute,
         el: Option<&Else>,
         program_identifier: &str,
-        handler: &impl Handler<TranspileError>,
+        handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Option<Execute>> {
         let (_, cond) = cond.clone().dissolve();
         let (_, cond, _) = cond.dissolve();
@@ -540,7 +541,7 @@ impl Transpiler {
         head: &ExecuteBlockHead,
         tail: Option<Execute>,
         program_identifier: &str,
-        handler: &impl Handler<TranspileError>,
+        handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Option<Execute>> {
         Ok(match head {
             ExecuteBlockHead::Conditional(cond) => {

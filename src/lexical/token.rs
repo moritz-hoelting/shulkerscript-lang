@@ -3,6 +3,7 @@
 use std::{borrow::Cow, collections::HashMap, fmt::Display, str::FromStr, sync::OnceLock};
 
 use crate::base::{
+    self,
     source_file::{SourceElement, SourceIterator, Span},
     Handler,
 };
@@ -11,7 +12,7 @@ use enum_as_inner::EnumAsInner;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
-use super::{error::UnterminatedDelimitedComment, Error};
+use super::error::{self, UnterminatedDelimitedComment};
 
 /// Is an enumeration representing keywords in shulkerscript.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -439,7 +440,7 @@ impl Token {
         start: usize,
         character: char,
         prev_token: Option<&Self>,
-        handler: &impl Handler<Error>,
+        handler: &impl Handler<base::Error>,
     ) -> Result<Self, TokenizeError> {
         // Single line comment
         if let Some((_, '/')) = iter.peek() {
@@ -503,9 +504,9 @@ impl Token {
                 }
                 .into())
             } else {
-                handler.receive(UnterminatedDelimitedComment {
+                handler.receive(error::Error::from(UnterminatedDelimitedComment {
                     span: Span::new(iter.source_file().clone(), start, start + 2).unwrap(),
-                });
+                }));
                 return Err(TokenizeError::FatalLexicalError);
             }
         }
@@ -576,7 +577,7 @@ impl Token {
     /// - [`TokenizeError::FatalLexicalError`] - A fatal lexical error occurred.
     pub fn tokenize(
         iter: &mut SourceIterator,
-        handler: &impl Handler<Error>,
+        handler: &impl Handler<base::Error>,
         prev_token: Option<&Self>,
     ) -> Result<Self, TokenizeError> {
         // Gets the first character

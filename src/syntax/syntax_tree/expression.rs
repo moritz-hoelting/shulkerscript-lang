@@ -5,6 +5,7 @@ use getset::Getters;
 
 use crate::{
     base::{
+        self,
         source_file::{SourceElement, Span},
         Handler,
     },
@@ -155,12 +156,12 @@ impl LuaCode {
 
 impl<'a> Parser<'a> {
     /// Parses an [`Expression`]
-    pub fn parse_expression(&mut self, handler: &impl Handler<Error>) -> Option<Expression> {
+    pub fn parse_expression(&mut self, handler: &impl Handler<base::Error>) -> Option<Expression> {
         Some(Expression::Primary(self.parse_primary(handler)?))
     }
 
     /// Parses an [`Primary`]
-    pub fn parse_primary(&mut self, handler: &impl Handler<Error>) -> Option<Primary> {
+    pub fn parse_primary(&mut self, handler: &impl Handler<base::Error>) -> Option<Primary> {
         match self.stop_at_significant() {
             // identifier expression
             Reading::Atomic(Token::Identifier(identifier)) => {

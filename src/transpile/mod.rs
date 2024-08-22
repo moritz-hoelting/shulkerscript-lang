@@ -3,10 +3,15 @@
 #[doc(hidden)]
 #[cfg(feature = "shulkerbox")]
 pub mod conversions;
-pub mod error;
+mod error;
+#[doc(inline)]
+#[allow(clippy::module_name_repetitions)]
+pub use error::{TranspileError, TranspileResult};
 #[doc(hidden)]
 pub mod lua;
 #[cfg(feature = "shulkerbox")]
-pub mod transpiler;
+mod transpiler;
+#[doc(inline)]
+pub use transpiler::Transpiler;
 
 mod util;

@@ -7,8 +7,9 @@ use getset::Getters;
 
 use crate::{
     base::{
+        self,
         source_file::{SourceElement, Span},
-        DummyHandler, Handler,
+        VoidHandler, Handler,
     },
     lexical::{
         token::{Punctuation, StringLiteral, Token},
@@ -240,7 +241,7 @@ impl SourceElement for Condition {
 
 impl<'a> Parser<'a> {
     /// Parses a [`Condition`].
-    pub fn parse_condition(&mut self, handler: &impl Handler<Error>) -> Option<Condition> {
+    pub fn parse_condition(&mut self, handler: &impl Handler<base::Error>) -> Option<Condition> {
         let mut lhs = Condition::Primary(self.parse_primary_condition(handler)?);
         let mut expressions = VecDeque::new();
 
@@ -305,7 +306,7 @@ impl<'a> Parser<'a> {
     /// Parses a [`PrimaryCondition`].
     pub fn parse_primary_condition(
         &mut self,
-        handler: &impl Handler<Error>,
+        handler: &impl Handler<base::Error>,
     ) -> Option<PrimaryCondition> {
         match self.stop_at_significant() {
             // prefixed expression
@@ -354,7 +355,7 @@ impl<'a> Parser<'a> {
     /// Parses a [`ParenthesizedCondition`].
     pub fn parse_parenthesized_condition(
         &mut self,
-        handler: &impl Handler<Error>,
+        handler: &impl Handler<base::Error>,
     ) -> Option<ParenthesizedCondition> {
         let token_tree = self.step_into(
             Delimiter::Parenthesis,
@@ -377,11 +378,11 @@ impl<'a> Parser<'a> {
         self.try_parse(|parser| match parser.next_significant_token() {
             Reading::Atomic(Token::Punctuation(punc)) => match punc.punctuation {
                 '&' => {
-                    let b = parser.parse_punctuation('&', false, &DummyHandler)?;
+                    let b = parser.parse_punctuation('&', false, &VoidHandler)?;
                     Some(ConditionalBinaryOperator::LogicalAnd(punc, b))
                 }
                 '|' => {
-                    let b = parser.parse_punctuation('|', false, &DummyHandler)?;
+                    let b = parser.parse_punctuation('|', false, &VoidHandler)?;
                     Some(ConditionalBinaryOperator::LogicalOr(punc, b))
                 }
                 _ => None,

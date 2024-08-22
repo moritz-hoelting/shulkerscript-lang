@@ -5,7 +5,7 @@ mod enabled {
     use mlua::Lua;
 
     use crate::{
-        base::{source_file::SourceElement, Handler},
+        base::{self, source_file::SourceElement, Handler},
         syntax::syntax_tree::expression::LuaCode,
         transpile::error::{TranspileError, TranspileResult},
     };
@@ -16,10 +16,7 @@ mod enabled {
         /// # Errors
         /// - If Lua code evaluation is disabled.
         #[tracing::instrument(level = "debug", name = "eval_lua", skip_all, ret)]
-        pub fn eval_string(
-            &self,
-            handler: &impl Handler<TranspileError>,
-        ) -> TranspileResult<String> {
+        pub fn eval_string(&self, handler: &impl Handler<base::Error>) -> TranspileResult<String> {
             tracing::debug!("Evaluating Lua code");
 
             let lua = Lua::new();

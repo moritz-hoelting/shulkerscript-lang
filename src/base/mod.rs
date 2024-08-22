@@ -7,7 +7,7 @@ mod error;
 pub use error::{Error, Result};
 
 mod diagnostic;
-pub use diagnostic::{DummyHandler, Handler};
+pub use diagnostic::{Handler, PrintHandler, SilentHandler, VoidHandler};
 
 mod file_provider;
 pub use file_provider::{FileProvider, FsProvider};

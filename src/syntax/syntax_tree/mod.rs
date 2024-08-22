@@ -4,8 +4,9 @@ use getset::Getters;
 
 use crate::{
     base::{
+        self,
         source_file::{SourceElement, Span},
-        DummyHandler, Handler,
+        Handler, VoidHandler,
     },
     lexical::{
         token::{Punctuation, Token},
@@ -14,7 +15,7 @@ use crate::{
     syntax::parser::Reading,
 };
 
-use super::{error::Error, parser::Parser};
+use super::parser::Parser;
 
 pub mod condition;
 pub mod declaration;
@@ -76,7 +77,7 @@ impl<'a> Parser<'a> {
         delimiter: Delimiter,
         separator: char,
         mut f: impl FnMut(&mut Self) -> Option<T>,
-        handler: &impl Handler<Error>,
+        handler: &impl Handler<base::Error>,
     ) -> Option<DelimitedList<T>> {
         fn skip_to_next_separator(this: &mut Parser, separator: char) -> Option<Punctuation> {
             if let Reading::Atomic(Token::Punctuation(punc)) = this.stop_at(|token| {
@@ -162,14 +163,14 @@ impl<'a> Parser<'a> {
         &mut self,
         seperator: char,
         mut f: impl FnMut(&mut Self) -> Option<T>,
-        _handler: &impl Handler<Error>,
+        _handler: &impl Handler<base::Error>,
     ) -> Option<ConnectedList<T, Punctuation>> {
         let first = f(self)?;
 
         let mut rest = Vec::new();
 
         while let Some(sep) =
-            self.try_parse(|parser| parser.parse_punctuation(seperator, true, &DummyHandler))
+            self.try_parse(|parser| parser.parse_punctuation(seperator, true, &VoidHandler))
         {
             if let Some(element) = self.try_parse(&mut f) {
                 rest.push((sep, element));

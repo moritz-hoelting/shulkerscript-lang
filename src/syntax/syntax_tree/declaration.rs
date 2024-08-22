@@ -6,8 +6,9 @@ use getset::Getters;
 
 use crate::{
     base::{
+        self,
         source_file::{SourceElement, Span},
-        DummyHandler, Handler,
+        Handler, VoidHandler,
     },
     lexical::{
         token::{Identifier, Keyword, KeywordKind, Punctuation, StringLiteral, Token},
@@ -226,7 +227,7 @@ impl SourceElement for Import {
 }
 
 impl<'a> Parser<'a> {
-    pub fn parse_annotation(&mut self, handler: &impl Handler<Error>) -> Option<Annotation> {
+    pub fn parse_annotation(&mut self, handler: &impl Handler<base::Error>) -> Option<Annotation> {
         match self.stop_at_significant() {
             Reading::Atomic(Token::Punctuation(punctuation)) if punctuation.punctuation == '#' => {
                 // eat the pound sign
@@ -280,7 +281,10 @@ impl<'a> Parser<'a> {
     }
 
     #[tracing::instrument(level = "trace", skip_all)]
-    pub fn parse_declaration(&mut self, handler: &impl Handler<Error>) -> Option<Declaration> {
+    pub fn parse_declaration(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> Option<Declaration> {
         match self.stop_at_significant() {
             Reading::Atomic(Token::Keyword(function_keyword))
                 if function_keyword.keyword == KeywordKind::Function =>
@@ -355,7 +359,7 @@ impl<'a> Parser<'a> {
                     self.try_parse(|parser| parser
                         .parse_connected_list(
                             ',',
-                            |parser| parser.parse_identifier(&DummyHandler),
+                            |parser| parser.parse_identifier(&VoidHandler),
                             handler,
                         )
                         .map(ImportItems::Named)) // ,
@@ -398,7 +402,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_function(&mut self, handler: &impl Handler<Error>) -> Option<Function> {
+    pub fn parse_function(&mut self, handler: &impl Handler<base::Error>) -> Option<Function> {
         if let Reading::Atomic(Token::Keyword(function_keyword)) = self.stop_at_significant() {
             // eat the function keyword
             self.forward();

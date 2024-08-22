@@ -7,6 +7,7 @@ use getset::Getters;
 
 use crate::{
     base::{
+        self,
         source_file::{SourceElement, Span},
         Handler,
     },
@@ -14,10 +15,7 @@ use crate::{
         token::{CommandLiteral, DocComment, Keyword, KeywordKind, Punctuation, Token},
         token_stream::Delimiter,
     },
-    syntax::{
-        error::Error,
-        parser::{Parser, Reading},
-    },
+    syntax::parser::{Parser, Reading},
 };
 
 use self::execute_block::ExecuteBlock;
@@ -211,7 +209,7 @@ impl Semicolon {
 
 impl<'a> Parser<'a> {
     /// Parses a [`Block`].
-    pub fn parse_block(&mut self, handler: &impl Handler<Error>) -> Option<Block> {
+    pub fn parse_block(&mut self, handler: &impl Handler<base::Error>) -> Option<Block> {
         let token_tree = self.step_into(
             Delimiter::Brace,
             |parser| {
@@ -250,7 +248,7 @@ impl<'a> Parser<'a> {
 
     /// Parses a [`Statement`].
     #[tracing::instrument(level = "trace", skip_all)]
-    pub fn parse_statement(&mut self, handler: &impl Handler<Error>) -> Option<Statement> {
+    pub fn parse_statement(&mut self, handler: &impl Handler<base::Error>) -> Option<Statement> {
         match self.stop_at_significant() {
             // variable declaration
             Reading::Atomic(Token::CommandLiteral(command)) => {

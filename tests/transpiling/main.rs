@@ -2,6 +2,7 @@ use shulkerbox::{
     datapack::{Command, Condition, Datapack, Execute},
     virtual_fs::{VFile, VFolder},
 };
+use shulkerscript::base::PrintHandler;
 
 #[test]
 fn transpile_test1() {
@@ -9,8 +10,13 @@ fn transpile_test1() {
     let mut dir = VFolder::new();
     dir.add_file("test1.shu", VFile::Text(source.to_string()));
 
-    let transpiled = shulkerscript::transpile(&dir, 48, &[("test1".to_string(), "./test1.shu")])
-        .expect("Failed to transpile");
+    let transpiled = shulkerscript::transpile(
+        &PrintHandler::default(),
+        &dir,
+        48,
+        &[("test1".to_string(), "./test1.shu")],
+    )
+    .expect("Failed to transpile");
 
     let expected = {
         let mut dp = Datapack::new(48);

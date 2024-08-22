@@ -6,6 +6,7 @@ use derive_more::{Deref, From};
 use enum_as_inner::EnumAsInner;
 
 use crate::base::{
+    self,
     source_file::{SourceElement, SourceFile, Span},
     Handler,
 };
@@ -46,7 +47,7 @@ impl TokenStream {
     /// encountered during tokenization.
     #[must_use]
     #[tracing::instrument(level = "debug", skip_all, fields(source_file = %source_file.path().display()))]
-    pub fn tokenize(source_file: &Arc<SourceFile>, handler: &impl Handler<error::Error>) -> Self {
+    pub fn tokenize(source_file: &Arc<SourceFile>, handler: &impl Handler<base::Error>) -> Self {
         // The list of token trees that will be returned.
         let mut tokens = Vec::new();
         let mut source_file_iterator = source_file.iter();
@@ -81,7 +82,7 @@ impl TokenStream {
     /// Handles a token.
     fn handle_token(
         tokens: &mut Vec<Token>,
-        handler: &impl Handler<error::Error>,
+        handler: &impl Handler<base::Error>,
     ) -> Option<TokenTree> {
         tokens
             .pop()
@@ -92,7 +93,7 @@ impl TokenStream {
     fn handle_popped_token(
         tokens: &mut Vec<Token>,
         popped_token: Token,
-        handler: &impl Handler<error::Error>,
+        handler: &impl Handler<base::Error>,
     ) -> Option<TokenTree> {
         match popped_token {
             Token::Punctuation(punc) if punc.punctuation == '{' => {
@@ -116,7 +117,7 @@ impl TokenStream {
         tokens: &mut Vec<Token>,
         open: Punctuation,
         delimiter: Delimiter,
-        handler: &impl Handler<error::Error>,
+        handler: &impl Handler<base::Error>,
     ) -> Option<Delimited> {
         let mut token_trees = Vec::new();
 

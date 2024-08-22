@@ -4,12 +4,14 @@ use getset::Getters;
 
 use crate::{
     base::{
+        self,
         source_file::{SourceElement, Span},
         Handler,
     },
     lexical::token::{Keyword, KeywordKind, Punctuation, StringLiteral, Token},
     syntax::{
-        error::{Error, SyntaxKind, UnexpectedSyntax},
+        self,
+        error::{SyntaxKind, UnexpectedSyntax},
         parser::{Parser, Reading},
     },
 };
@@ -79,7 +81,7 @@ impl Namespace {
 impl<'a> Parser<'a> {
     /// Parses a [`ProgramFile`].
     #[tracing::instrument(level = "debug", skip_all)]
-    pub fn parse_program(&mut self, handler: &impl Handler<Error>) -> Option<ProgramFile> {
+    pub fn parse_program(&mut self, handler: &impl Handler<base::Error>) -> Option<ProgramFile> {
         tracing::debug!("Parsing program");
 
         let namespace = match self.stop_at_significant() {
@@ -102,10 +104,10 @@ impl<'a> Parser<'a> {
                 })
             }
             unexpected => {
-                handler.receive(UnexpectedSyntax {
+                handler.receive(syntax::error::Error::from(UnexpectedSyntax {
                     expected: SyntaxKind::Keyword(KeywordKind::Namespace),
                     found: unexpected.into_token(),
-                });
+                }));
                 None
             }
         }?;

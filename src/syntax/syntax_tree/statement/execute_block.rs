@@ -6,15 +6,17 @@ use getset::Getters;
 
 use crate::{
     base::{
+        self,
         source_file::{SourceElement, Span},
-        DummyHandler, Handler,
+        VoidHandler, Handler,
     },
     lexical::{
         token::{Keyword, KeywordKind, Punctuation, StringLiteral, Token},
         token_stream::Delimiter,
     },
     syntax::{
-        error::{Error, SyntaxKind, UnexpectedSyntax},
+        self,
+        error::{SyntaxKind, UnexpectedSyntax},
         parser::{DelimitedTree, Parser, Reading},
         syntax_tree::condition::ParenthesizedCondition,
     },
@@ -711,7 +713,7 @@ impl<'a> Parser<'a> {
     /// Parses an [`ExecuteBlock`].
     pub fn parse_execute_block_statement(
         &mut self,
-        handler: &impl Handler<Error>,
+        handler: &impl Handler<base::Error>,
     ) -> Option<ExecuteBlock> {
         match self.stop_at_significant() {
             Reading::Atomic(Token::Keyword(if_keyword))
@@ -728,7 +730,7 @@ impl<'a> Parser<'a> {
                 };
 
                 let else_tail = self.try_parse(|parser| {
-                    let block = parser.parse_block(&DummyHandler)?;
+                    let block = parser.parse_block(&VoidHandler)?;
                     let (else_keyword, else_block) = match parser.stop_at_significant() {
                         // else statement
                         Reading::Atomic(Token::Keyword(else_keyword))
@@ -775,10 +777,10 @@ impl<'a> Parser<'a> {
                         handler,
                     ),
                     unexpected => {
-                        handler.receive(UnexpectedSyntax {
+                        handler.receive(syntax::error::Error::from(UnexpectedSyntax {
                             expected: SyntaxKind::Punctuation('('),
                             found: unexpected.into_token(),
-                        });
+                        }));
                         None
                     }
                 }?;
@@ -792,10 +794,10 @@ impl<'a> Parser<'a> {
 
             // unexpected
             unexpected => {
-                handler.receive(UnexpectedSyntax {
+                handler.receive(syntax::error::Error::from(UnexpectedSyntax {
                     expected: SyntaxKind::ExecuteBlock,
                     found: unexpected.into_token(),
-                });
+                }));
                 None
             }
         }
@@ -803,7 +805,7 @@ impl<'a> Parser<'a> {
 
     fn parse_execute_block_tail(
         &mut self,
-        handler: &impl Handler<Error>,
+        handler: &impl Handler<base::Error>,
     ) -> Option<ExecuteBlockTail> {
         match self.stop_at_significant() {
             // nested execute block
@@ -827,10 +829,10 @@ impl<'a> Parser<'a> {
             }
 
             unexpected => {
-                handler.receive(UnexpectedSyntax {
+                handler.receive(syntax::error::Error::from(UnexpectedSyntax {
                     expected: SyntaxKind::ExecuteBlockTail,
                     found: unexpected.into_token(),
-                });
+                }));
                 None
             }
         }

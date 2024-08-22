@@ -4,7 +4,7 @@ use derive_more::{Deref, DerefMut};
 use enum_as_inner::EnumAsInner;
 
 use crate::{
-    base::Handler,
+    base::{self, Handler},
     lexical::{
         token::{Identifier, Keyword, KeywordKind, Numeric, Punctuation, StringLiteral, Token},
         token_stream::{Delimited, Delimiter, TokenStream, TokenTree},
@@ -42,7 +42,7 @@ impl<'a> Parser<'a> {
         &mut self,
         delimiter: Delimiter,
         f: impl FnOnce(&mut Self) -> Option<T>,
-        handler: &impl Handler<Error>,
+        handler: &impl Handler<base::Error>,
     ) -> Option<DelimitedTree<T>> {
         self.current_frame.stop_at_significant();
         let raw_token_tree = self
@@ -363,7 +363,7 @@ impl<'a> Frame<'a> {
     ///
     /// # Errors
     /// If the next [`Token`] is not an [`Identifier`].
-    pub fn parse_identifier(&mut self, handler: &impl Handler<Error>) -> Option<Identifier> {
+    pub fn parse_identifier(&mut self, handler: &impl Handler<base::Error>) -> Option<Identifier> {
         match self.next_significant_token() {
             Reading::Atomic(Token::Identifier(ident)) => Some(ident),
             found => {
@@ -397,7 +397,10 @@ impl<'a> Frame<'a> {
     ///
     /// # Errors
     /// If the next [`Token`] is not an [`StringLiteral`].
-    pub fn parse_string_literal(&mut self, handler: &impl Handler<Error>) -> Option<StringLiteral> {
+    pub fn parse_string_literal(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> Option<StringLiteral> {
         match self.next_significant_token() {
             Reading::Atomic(Token::StringLiteral(literal)) => Some(literal),
             found => {
@@ -417,7 +420,7 @@ impl<'a> Frame<'a> {
     pub fn parse_keyword(
         &mut self,
         expected: KeywordKind,
-        handler: &impl Handler<Error>,
+        handler: &impl Handler<base::Error>,
     ) -> Option<Keyword> {
         match self.next_significant_token() {
             Reading::Atomic(Token::Keyword(keyword_token)) if keyword_token.keyword == expected => {
@@ -441,7 +444,7 @@ impl<'a> Frame<'a> {
         &mut self,
         expected: char,
         skip_insignificant: bool,
-        handler: &impl Handler<Error>,
+        handler: &impl Handler<base::Error>,
     ) -> Option<Punctuation> {
         match if skip_insignificant {
             self.next_significant_token()
