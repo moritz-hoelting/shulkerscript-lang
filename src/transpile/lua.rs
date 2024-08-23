@@ -73,7 +73,7 @@ mod enabled {
 #[cfg(not(feature = "lua"))]
 mod disabled {
     use crate::{
-        base::Handler,
+        base::{self, Handler},
         syntax::syntax_tree::expression::LuaCode,
         transpile::error::{TranspileError, TranspileResult},
     };
@@ -84,10 +84,7 @@ mod disabled {
         ///
         /// # Errors
         /// - If Lua code evaluation is disabled.
-        pub fn eval_string(
-            &self,
-            handler: &impl Handler<TranspileError>,
-        ) -> TranspileResult<String> {
+        pub fn eval_string(&self, handler: &impl Handler<base::Error>) -> TranspileResult<String> {
             handler.receive(TranspileError::LuaDisabled);
             tracing::error!("Lua code evaluation is disabled");
             Err(TranspileError::LuaDisabled)
