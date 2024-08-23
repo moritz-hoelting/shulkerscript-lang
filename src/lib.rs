@@ -85,7 +85,7 @@ pub fn parse(
 
     let mut parser = Parser::new(&tokens);
     let program = parser.parse_program(handler).ok_or(Error::Other(
-        "An error occured while parsing the source code.",
+        "An error occurred while parsing the source code.",
     ))?;
 
     if handler.has_received() {

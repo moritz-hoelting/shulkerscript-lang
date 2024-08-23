@@ -8,7 +8,7 @@ pub enum Error {
     LexicalError(#[from] crate::lexical::Error),
     #[error("An error occured while tokenizing the source code.")]
     TokenizeError(#[from] crate::lexical::token::TokenizeError),
-    #[error("An error occurred while parsing the source code.")]
+    #[error(transparent)]
     ParseError(#[from] crate::syntax::error::Error),
     #[error("An error occurred while transpiling the source code.")]
     TranspileError(#[from] crate::transpile::TranspileError),

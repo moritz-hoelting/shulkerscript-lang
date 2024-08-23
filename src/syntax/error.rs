@@ -87,6 +87,6 @@ impl std::error::Error for UnexpectedSyntax {}
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, thiserror::Error)]
 #[allow(missing_docs)]
 pub enum Error {
-    #[error("{0}")]
+    #[error(transparent)]
     UnexpectedSyntax(#[from] UnexpectedSyntax),
 }
