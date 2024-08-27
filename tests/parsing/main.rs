@@ -12,8 +12,13 @@ fn parsing_test1() {
     let mut dir = VFolder::new();
     dir.add_file("test1.shu", VFile::Text(source.to_string()));
 
-    let parsed = shulkerscript::parse(&PrintHandler::default(), &dir, Path::new("test1.shu"))
-        .expect("Failed to parse");
+    let parsed = shulkerscript::parse(
+        &PrintHandler::default(),
+        &dir,
+        Path::new("test1.shu"),
+        "test1".to_string(),
+    )
+    .expect("Failed to parse");
 
     assert_eq!(
         parsed.namespace().namespace_name().str_content(),
@@ -49,6 +54,11 @@ fn parsing_invalid() {
     let mut dir = VFolder::new();
     dir.add_file("invalid.shu", VFile::Text(source.to_string()));
 
-    shulkerscript::parse(&PrintHandler::default(), &dir, Path::new("invalid.shu"))
-        .expect_err("Expecting parsing failure");
+    shulkerscript::parse(
+        &PrintHandler::default(),
+        &dir,
+        Path::new("invalid.shu"),
+        "invalid".to_string(),
+    )
+    .expect_err("Expecting parsing failure");
 }

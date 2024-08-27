@@ -75,7 +75,7 @@ impl Display for UnexpectedSyntax {
             write!(
                 f,
                 "\n{}",
-                SourceCodeDisplay::new(span.span(), Option::<i32>::None)
+                SourceCodeDisplay::new(span.span(), Option::<u8>::None)
             )
         })
     }

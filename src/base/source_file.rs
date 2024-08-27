@@ -21,6 +21,9 @@ pub struct SourceFile {
     /// Get the path of the source file.
     #[get = "pub"]
     path: PathBuf,
+    /// Get the identifier of the source file.
+    #[get = "pub"]
+    identifier: String,
     /// Get the content of the source file
     #[get = "pub"]
     content: String,
@@ -38,11 +41,12 @@ impl Debug for SourceFile {
 }
 
 impl SourceFile {
-    fn new(path: PathBuf, content: String) -> Arc<Self> {
+    fn new(path: PathBuf, identifier: String, content: String) -> Arc<Self> {
         let lines = get_line_byte_positions(&content);
 
         Arc::new(Self {
             path,
+            identifier,
             content,
             lines,
         })
@@ -83,9 +87,13 @@ impl SourceFile {
     ///
     /// # Errors
     /// - [`Error::IoError`]: Error occurred when reading the file contents.
-    pub fn load(path: &Path, provider: &impl FileProvider) -> Result<Arc<Self>, Error> {
+    pub fn load(
+        path: &Path,
+        identifier: String,
+        provider: &impl FileProvider,
+    ) -> Result<Arc<Self>, Error> {
         let source = provider.read_to_string(path)?;
-        Ok(Self::new(path.to_path_buf(), source))
+        Ok(Self::new(path.to_path_buf(), identifier, source))
     }
 
     /// Get the [`Location`] of a given byte index

@@ -628,7 +628,8 @@ mod tests {
         let source_file = VFile::Text(String::from(content));
         let mut vfolder = VFolder::new();
         vfolder.add_file("test.shu", source_file);
-        let source_file = SourceFile::load(Path::new("test.shu"), &vfolder).unwrap();
+        let source_file =
+            SourceFile::load(Path::new("test.shu"), "test".to_string(), &vfolder).unwrap();
 
         Span::new(source_file, 0, content.len()).unwrap()
     }

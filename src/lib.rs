@@ -39,17 +39,18 @@ use crate::lexical::token_stream::TokenStream;
 /// use std::path::Path;
 /// use shulkerscript::{tokenize, base::{FsProvider, PrintHandler}};
 ///
-/// let token_stream = tokenize(&PrintHandler::new(), &FsProvider::default(), Path::new("path/to/file.shu"))?;
+/// let token_stream = tokenize(&PrintHandler::new(), &FsProvider::default(), Path::new("path/to/file.shu"), "file".to_string())?;
 /// # Ok::<(), shulkerscript::base::Error>(())
 /// ```
 pub fn tokenize(
     handler: &impl Handler<base::Error>,
     file_provider: &impl FileProvider,
     path: &Path,
+    identifier: String,
 ) -> Result<TokenStream> {
     tracing::info!("Tokenizing the source code at path: {}", path.display());
 
-    let source_file = SourceFile::load(path, file_provider)?;
+    let source_file = SourceFile::load(path, identifier, file_provider)?;
 
     Ok(TokenStream::tokenize(&source_file, handler))
 }
@@ -65,15 +66,16 @@ pub fn tokenize(
 /// use std::path::Path;
 /// use shulkerscript::{parse, base::{FsProvider, PrintHandler}};
 ///
-/// let program_file = parse(&PrintHandler::new(), &FsProvider::default(), Path::new("path/to/file.shu"))?;
+/// let program_file = parse(&PrintHandler::new(), &FsProvider::default(), Path::new("path/to/file.shu"), "file".to_string())?;
 /// # Ok::<(), shulkerscript::base::Error>(())
 /// ```
 pub fn parse(
     handler: &impl Handler<base::Error>,
     file_provider: &impl FileProvider,
     path: &Path,
+    identifier: String,
 ) -> Result<ProgramFile> {
-    let tokens = tokenize(handler, file_provider, path)?;
+    let tokens = tokenize(handler, file_provider, path, identifier)?;
 
     if handler.has_received() {
         return Err(Error::Other(
@@ -137,9 +139,14 @@ where
     let programs = script_paths
         .iter()
         .map(|(program_identifier, path)| {
-            let program = parse(handler, file_provider, path.as_ref())?;
+            let program = parse(
+                handler,
+                file_provider,
+                path.as_ref(),
+                program_identifier.clone(),
+            )?;
 
-            Ok((program_identifier, program))
+            Ok(program)
         })
         .collect::<Vec<_>>();
 

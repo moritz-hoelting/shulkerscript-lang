@@ -10,7 +10,7 @@ pub enum Error {
     TokenizeError(#[from] crate::lexical::token::TokenizeError),
     #[error(transparent)]
     ParseError(#[from] crate::syntax::error::Error),
-    #[error("An error occurred while transpiling the source code.")]
+    #[error(transparent)]
     TranspileError(#[from] crate::transpile::TranspileError),
     #[error("An error occurred")]
     Other(&'static str),
