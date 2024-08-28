@@ -455,16 +455,7 @@ impl Token {
 
             Self::walk_iter(iter, |character| !(character == '\n' || character == '\r'));
 
-            let is_cr = iter
-                .peek()
-                .map_or(false, |(_, character)| character == '\r');
-
             let span = Self::create_span(start, iter);
-
-            if let (true, Some((_, '\n'))) = (is_cr, iter.next()) {
-                // skips the crlf
-                iter.next();
-            }
 
             let comment = if is_doccomment {
                 DocComment { span }.into()
