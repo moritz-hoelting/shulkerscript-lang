@@ -35,13 +35,13 @@ pub struct Transpiler {
     aliases: RwLock<HashMap<(String, String), (String, String)>>,
 }
 
-#[derive(Debug, Clone)]
-struct FunctionData {
-    namespace: String,
-    identifier_span: Span,
-    statements: Vec<Statement>,
-    public: bool,
-    annotations: HashMap<String, Option<String>>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct FunctionData {
+    pub(super) namespace: String,
+    pub(super) identifier_span: Span,
+    pub(super) statements: Vec<Statement>,
+    pub(super) public: bool,
+    pub(super) annotations: HashMap<String, Option<String>>,
 }
 
 impl Transpiler {
@@ -224,9 +224,10 @@ impl Transpiler {
                     })
                     .ok_or_else(|| {
                         let error = TranspileError::MissingFunctionDeclaration(
-                            MissingFunctionDeclaration {
-                                span: identifier_span.clone(),
-                            },
+                            MissingFunctionDeclaration::from_context(
+                                identifier_span.clone(),
+                                &functions,
+                            ),
                         );
                         handler.receive(error.clone());
                         error
@@ -244,10 +245,12 @@ impl Transpiler {
                         .and_then(|q| functions.get(&q).filter(|f| f.public))
                 })
                 .ok_or_else(|| {
-                    let error =
-                        TranspileError::MissingFunctionDeclaration(MissingFunctionDeclaration {
-                            span: identifier_span.clone(),
-                        });
+                    let error = TranspileError::MissingFunctionDeclaration(
+                        MissingFunctionDeclaration::from_context(
+                            identifier_span.clone(),
+                            &functions,
+                        ),
+                    );
                     handler.receive(error.clone());
                     error
                 })?;
@@ -297,10 +300,12 @@ impl Transpiler {
             .get(&program_query)
             .or_else(|| alias_query.and_then(|q| locations.get(&q).filter(|(_, p)| *p)))
             .ok_or_else(|| {
-                let error =
-                    TranspileError::MissingFunctionDeclaration(MissingFunctionDeclaration {
-                        span: identifier_span.clone(),
-                    });
+                let error = TranspileError::MissingFunctionDeclaration(
+                    MissingFunctionDeclaration::from_context(
+                        identifier_span.clone(),
+                        &self.functions.read().unwrap(),
+                    ),
+                );
                 handler.receive(error.clone());
                 error
             })
