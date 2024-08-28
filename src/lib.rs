@@ -29,6 +29,9 @@ use shulkerbox::{datapack::Datapack, virtual_fs::VFolder};
 
 use crate::lexical::token_stream::TokenStream;
 
+/// The version of the `ShulkerScript` language.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Converts the given source code to tokens and returns a token stream.
 ///
 /// # Errors
