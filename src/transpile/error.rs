@@ -51,10 +51,11 @@ impl MissingFunctionDeclaration {
         let alternatives = functions
             .iter()
             .filter_map(|((program_identifier, function_name), data)| {
-                let normalized_distance = strsim::normalized_levenshtein(own_name, function_name);
+                let normalized_distance =
+                    strsim::normalized_damerau_levenshtein(own_name, function_name);
                 (program_identifier == own_program_identifier
                     && (normalized_distance > 0.8
-                        || strsim::levenshtein(own_name, function_name) < 3))
+                        || strsim::damerau_levenshtein(own_name, function_name) < 3))
                     .then_some((normalized_distance, data))
             })
             .sorted_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
