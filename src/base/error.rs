@@ -2,8 +2,10 @@
 #[allow(missing_docs)]
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("An error occurred while working with Input/Output.")]
+    #[error("An error occurred while working with Input/Output: {0}")]
     IoError(String),
+    #[error(transparent)]
+    Utf8Error(#[from] std::str::Utf8Error),
     #[error("An error occurred while lexing the source code.")]
     LexicalError(#[from] crate::lexical::Error),
     #[error("An error occured while tokenizing the source code.")]

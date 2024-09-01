@@ -92,8 +92,12 @@ impl SourceFile {
         identifier: String,
         provider: &impl FileProvider,
     ) -> Result<Arc<Self>, Error> {
-        let source = provider.read_to_string(path)?;
-        Ok(Self::new(path.to_path_buf(), identifier, source))
+        let source = provider.read_str(path)?;
+        Ok(Self::new(
+            path.to_path_buf(),
+            identifier,
+            source.into_owned(),
+        ))
     }
 
     /// Get the [`Location`] of a given byte index
