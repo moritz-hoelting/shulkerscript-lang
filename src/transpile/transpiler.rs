@@ -23,7 +23,7 @@ use crate::{
     transpile::error::MissingFunctionDeclaration,
 };
 
-use super::error::{TranspileError, TranspileResult};
+use super::error::{TranspileError, TranspileResult, UnexpectedExpression};
 
 /// A transpiler for `ShulkerScript`.
 #[derive(Debug)]
@@ -396,7 +396,9 @@ impl Transpiler {
                     self.transpile_function_call(func, handler).map(Some)
                 }
                 unexpected => {
-                    let error = TranspileError::UnexpectedExpression(unexpected.clone());
+                    let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
+                        unexpected.clone(),
+                    ));
                     handler.receive(error.clone());
                     Err(error)
                 }

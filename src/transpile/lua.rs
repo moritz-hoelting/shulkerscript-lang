@@ -7,7 +7,7 @@ mod enabled {
     use crate::{
         base::{self, source_file::SourceElement, Handler},
         syntax::syntax_tree::expression::LuaCode,
-        transpile::error::{TranspileError, TranspileResult},
+        transpile::error::{LuaRuntimeError, TranspileError, TranspileResult},
     };
 
     impl LuaCode {
@@ -48,24 +48,19 @@ mod enabled {
                 .set_name(name)
                 .eval::<String>()
                 .map_err(|err| {
-                    let err = TranspileError::from(err);
-                    handler.receive(err.clone());
+                    let err_string = err.to_string();
+                    let err = TranspileError::from(LuaRuntimeError {
+                        error_message: err_string
+                            .strip_prefix("runtime error: ")
+                            .unwrap_or(&err_string)
+                            .to_string(),
+                        code_block: self.span(),
+                    });
+                    handler.receive(crate::Error::from(err.clone()));
                     err
                 })?;
 
             Ok(lua_result)
-        }
-    }
-
-    impl From<mlua::Error> for TranspileError {
-        fn from(value: mlua::Error) -> Self {
-            let string = value.to_string();
-            Self::LuaRuntimeError(
-                string
-                    .strip_prefix("runtime error: ")
-                    .unwrap_or(&string)
-                    .to_string(),
-            )
         }
     }
 }

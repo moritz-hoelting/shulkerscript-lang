@@ -17,16 +17,16 @@ use super::transpiler::FunctionData;
 
 /// Errors that can occur during transpilation.
 #[allow(clippy::module_name_repetitions, missing_docs)]
-#[derive(Debug, thiserror::Error, Clone)]
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum TranspileError {
     #[error(transparent)]
     MissingFunctionDeclaration(#[from] MissingFunctionDeclaration),
-    #[error("Unexpected expression: {}", .0.span().str())]
-    UnexpectedExpression(Expression),
+    #[error(transparent)]
+    UnexpectedExpression(#[from] UnexpectedExpression),
     #[error("Lua code evaluation is disabled.")]
     LuaDisabled,
-    #[error("Lua runtime error: {}", .0)]
-    LuaRuntimeError(String),
+    #[error(transparent)]
+    LuaRuntimeError(#[from] LuaRuntimeError),
 }
 
 /// The result of a transpilation operation.
@@ -101,3 +101,51 @@ impl Display for MissingFunctionDeclaration {
 }
 
 impl std::error::Error for MissingFunctionDeclaration {}
+
+/// An error that occurs when a function declaration is missing.
+#[allow(clippy::module_name_repetitions)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LuaRuntimeError {
+    pub code_block: Span,
+    pub error_message: String,
+}
+
+impl Display for LuaRuntimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = format!(
+            r#"error during lua code execution: "{}""#,
+            self.error_message
+        );
+        write!(f, "{}", Message::new(Severity::Error, message))?;
+
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(&self.code_block, Option::<u8>::None)
+        )
+    }
+}
+
+impl std::error::Error for LuaRuntimeError {}
+
+/// An error that occurs when a function declaration is missing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnexpectedExpression(pub Expression);
+
+impl Display for UnexpectedExpression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            Message::new(Severity::Error, "encountered unexpected expression")
+        )?;
+
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(&self.0.span(), Option::<u8>::None)
+        )
+    }
+}
+
+impl std::error::Error for UnexpectedExpression {}
