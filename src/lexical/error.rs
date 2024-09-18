@@ -7,16 +7,18 @@ use crate::base::{
     source_file::Span,
 };
 
-use super::token_stream::Delimiter;
+use super::{token, token_stream::Delimiter};
 
 /// Represents an error that occurred during the lexical analysis of the source code.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, thiserror::Error)]
 pub enum Error {
-    #[error("Comment is not terminated.")]
+    #[error(transparent)]
     UnterminatedDelimitedComment(#[from] UnterminatedDelimitedComment),
-    #[error("Delimiter is not terminated.")]
+    #[error(transparent)]
     UndelimitedDelimiter(#[from] UndelimitedDelimiter),
+    #[error("Tokenize error: {0}")]
+    TokenizeError(#[from] token::TokenizeError),
 }
 
 /// Source code contains an unclosed `/*` comment.

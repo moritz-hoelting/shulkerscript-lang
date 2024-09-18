@@ -10,6 +10,6 @@ mod diagnostic;
 pub use diagnostic::{Handler, PrintHandler, SilentHandler, VoidHandler};
 
 mod file_provider;
-pub use file_provider::{FileProvider, FsProvider};
+pub use file_provider::{Error as FileProviderError, FileProvider, FsProvider};
 
 pub mod log;

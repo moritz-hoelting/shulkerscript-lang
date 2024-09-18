@@ -1,9 +1,9 @@
 use std::{
     borrow::Cow,
+    fmt::Display,
     path::{Path, PathBuf},
+    sync::Arc,
 };
-
-use super::Error;
 
 /// A trait for providing file contents.
 pub trait FileProvider {
@@ -22,7 +22,12 @@ pub trait FileProvider {
     /// - If the file is not valid UTF-8.
     fn read_str<P: AsRef<Path>>(&self, path: P) -> Result<Cow<str>, Error> {
         let bytes = self.read_bytes(path)?;
-        let string = std::str::from_utf8(&bytes)?.to_string();
+        let string = std::str::from_utf8(&bytes)
+            .map_err(|err| {
+                let arc: Arc<dyn std::error::Error + Send + Sync> = Arc::new(err);
+                Error::other(arc)
+            })?
+            .to_string();
         Ok(Cow::Owned(string))
     }
 }
@@ -56,20 +61,118 @@ impl FileProvider for FsProvider {
         let full_path = self.root.join(path);
         std::fs::read(full_path)
             .map(Cow::Owned)
-            .map_err(|err| Error::IoError(err.to_string()))
+            .map_err(Error::from)
     }
 
     fn read_str<P: AsRef<Path>>(&self, path: P) -> Result<Cow<str>, Error> {
         let full_path = self.root.join(path);
         std::fs::read_to_string(full_path)
             .map(Cow::Owned)
-            .map_err(|err| Error::IoError(err.to_string()))
+            .map_err(Error::from)
+    }
+}
+
+/// The error type for [`FileProvider`] operations.
+#[allow(clippy::module_name_repetitions)]
+#[derive(Debug, Clone, thiserror::Error)]
+pub struct Error {
+    kind: std::io::ErrorKind,
+    #[source]
+    error: Option<Arc<dyn std::error::Error + Send + Sync>>,
+}
+
+impl Error {
+    /// Creates a new [`FileProviderError`] from a known kind of error as well as an
+    /// arbitrary error payload.
+    ///
+    /// The `error` argument is an arbitrary
+    /// payload which will be contained in this [`FileProviderError`].
+    ///
+    /// Note that this function allocates memory on the heap.
+    /// If no extra payload is required, use the `From` conversion from
+    /// `ErrorKind`.
+    pub fn new<E>(kind: std::io::ErrorKind, error: E) -> Self
+    where
+        E: Into<Arc<dyn std::error::Error + Send + Sync>>,
+    {
+        Self {
+            kind,
+            error: Some(error.into()),
+        }
+    }
+
+    /// Creates a new [`FileProviderError`] from an arbitrary error payload.
+    ///
+    /// It is a shortcut for [`FileProviderError::new`]
+    /// with [`std::io::ErrorKind::Other`].
+    pub fn other<E>(error: E) -> Self
+    where
+        E: Into<Arc<dyn std::error::Error + Send + Sync>>,
+    {
+        Self::new(std::io::ErrorKind::Other, error)
+    }
+
+    /// Returns a reference to the inner error wrapped by this error (if any).
+    ///
+    /// If this [`FileProviderError`] was constructed via [`Self::new`] then this function will
+    /// return [`Some`], otherwise it will return [`None`].
+    #[must_use]
+    pub fn get_ref(&self) -> Option<&(dyn std::error::Error + Send + Sync + 'static)> {
+        return self.error.as_deref();
+    }
+
+    /// Consumes the [`FileProviderError`], returning its inner error (if any).
+    ///
+    /// If this [`Error`] was constructed via [`Self::new`] then this function will
+    /// return [`Some`], otherwise it will return [`None`].
+    #[must_use]
+    pub fn into_inner(self) -> Option<Arc<dyn std::error::Error + Send + Sync>> {
+        self.error
+    }
+
+    /// Returns the corresponding [`std::io::ErrorKind`] for this error.
+    #[must_use]
+    pub fn kind(&self) -> std::io::ErrorKind {
+        self.kind
+    }
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.error {
+            Some(err) => write!(f, "{}: {}", self.kind, err),
+            None => write!(f, "{}", self.kind),
+        }
+    }
+}
+
+impl PartialEq for Error {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
+impl From<std::io::ErrorKind> for Error {
+    fn from(value: std::io::ErrorKind) -> Self {
+        Self {
+            kind: value,
+            error: None,
+        }
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(value: std::io::Error) -> Self {
+        let kind = value.kind();
+        let error = value.into_inner().map(Arc::from);
+
+        Self { kind, error }
     }
 }
 
 #[cfg(feature = "shulkerbox")]
 mod vfs {
-    use std::borrow::Cow;
+    use std::{borrow::Cow, sync::Arc};
 
     use super::{Error, FileProvider, Path};
     use shulkerbox::virtual_fs::{VFile, VFolder};
@@ -77,10 +180,10 @@ mod vfs {
     impl FileProvider for VFolder {
         fn read_bytes<P: AsRef<Path>>(&self, path: P) -> Result<Cow<[u8]>, Error> {
             normalize_path_str(path).map_or_else(
-                || Err(Error::IoError("Invalid path".to_string())),
+                || Err(Error::from(std::io::ErrorKind::InvalidData)),
                 |path| {
                     self.get_file(&path)
-                        .ok_or_else(|| Error::IoError("File not found".to_string()))
+                        .ok_or_else(|| Error::from(std::io::ErrorKind::NotFound))
                         .map(|file| Cow::Borrowed(file.as_bytes()))
                 },
             )
@@ -88,15 +191,18 @@ mod vfs {
 
         fn read_str<P: AsRef<Path>>(&self, path: P) -> Result<Cow<str>, Error> {
             normalize_path_str(path).map_or_else(
-                || Err(Error::IoError("Invalid path".to_string())),
+                || Err(Error::from(std::io::ErrorKind::InvalidData)),
                 |path| {
                     self.get_file(&path)
-                        .ok_or_else(|| Error::IoError("File not found".to_string()))
+                        .ok_or_else(|| Error::from(std::io::ErrorKind::NotFound))
                         .and_then(|file| match file {
                             VFile::Text(text) => Ok(Cow::Borrowed(text.as_str())),
                             VFile::Binary(bin) => {
-                                let string = std::str::from_utf8(bin)
-                                    .map_err(|err| Error::IoError(err.to_string()))?;
+                                let string = std::str::from_utf8(bin).map_err(|err| {
+                                    let arc: Arc<dyn std::error::Error + Send + Sync> =
+                                        Arc::new(err);
+                                    Error::new(std::io::ErrorKind::InvalidData, arc)
+                                })?;
 
                                 Ok(Cow::Borrowed(string))
                             }
@@ -161,10 +267,7 @@ mod vfs {
                 dir.read_str("bar/baz.txt").unwrap().into_owned(),
                 "bar, baz".to_string()
             );
-            assert!(matches!(
-                dir.read_str("nonexistent.txt"),
-                Err(Error::IoError(_))
-            ));
+            assert!(dir.read_str("nonexistent.txt").is_err());
         }
     }
 }
