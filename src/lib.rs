@@ -81,7 +81,7 @@ pub fn parse(
     let tokens = tokenize(handler, file_provider, path, identifier)?;
 
     if handler.has_received() {
-        return Err(Error::Other(
+        return Err(Error::other(
             "An error occurred while tokenizing the source code.",
         ));
     }
@@ -89,12 +89,12 @@ pub fn parse(
     tracing::info!("Parsing the source code at path: {}", path.display());
 
     let mut parser = Parser::new(&tokens);
-    let program = parser.parse_program(handler).ok_or(Error::Other(
-        "An error occurred while parsing the source code.",
-    ))?;
+    let program = parser
+        .parse_program(handler)
+        .ok_or_else(|| Error::other("An error occurred while parsing the source code."))?;
 
     if handler.has_received() {
-        return Err(Error::Other(
+        return Err(Error::other(
             "An error occurred while parsing the source code.",
         ));
     }
@@ -168,7 +168,7 @@ where
     let datapack = transpiler.into_datapack();
 
     if handler.has_received() {
-        return Err(Error::Other(
+        return Err(Error::other(
             "An error occurred while transpiling the source code.",
         ));
     }
