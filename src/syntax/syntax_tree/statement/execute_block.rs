@@ -8,15 +8,14 @@ use crate::{
     base::{
         self,
         source_file::{SourceElement, Span},
-        VoidHandler, Handler,
+        Handler, VoidHandler,
     },
     lexical::{
         token::{Keyword, KeywordKind, Punctuation, StringLiteral, Token},
         token_stream::Delimiter,
     },
     syntax::{
-        self,
-        error::{SyntaxKind, UnexpectedSyntax},
+        error::{Error, ParseResult, SyntaxKind, UnexpectedSyntax},
         parser::{DelimitedTree, Parser, Reading},
         syntax_tree::condition::ParenthesizedCondition,
     },
@@ -711,10 +710,14 @@ impl Summon {
 
 impl<'a> Parser<'a> {
     /// Parses an [`ExecuteBlock`].
+    ///
+    /// # Errors
+    /// - if not at the start of an execute block statement.
+    /// - if the parsing of the execute block statement fails.
     pub fn parse_execute_block_statement(
         &mut self,
         handler: &impl Handler<base::Error>,
-    ) -> Option<ExecuteBlock> {
+    ) -> ParseResult<ExecuteBlock> {
         match self.stop_at_significant() {
             Reading::Atomic(Token::Keyword(if_keyword))
                 if if_keyword.keyword == KeywordKind::If =>
@@ -739,14 +742,17 @@ impl<'a> Parser<'a> {
                             // eat the else keyword
                             parser.forward();
 
-                            let else_block = parser.parse_block(handler)?;
+                            let else_block = parser.parse_block(&VoidHandler)?;
 
-                            Some((else_keyword, else_block))
+                            Ok((else_keyword, else_block))
                         }
-                        _ => None,
+                        unexpected => Err(UnexpectedSyntax {
+                            expected: SyntaxKind::Keyword(KeywordKind::Else),
+                            found: unexpected.into_token(),
+                        }),
                     }?;
 
-                    Some((
+                    Ok((
                         block,
                         Else {
                             else_keyword,
@@ -755,11 +761,11 @@ impl<'a> Parser<'a> {
                     ))
                 });
 
-                if let Some((block, else_tail)) = else_tail {
-                    Some(ExecuteBlock::IfElse(conditional, block, else_tail))
+                if let Ok((block, else_tail)) = else_tail {
+                    Ok(ExecuteBlock::IfElse(conditional, block, else_tail))
                 } else {
                     let tail = self.parse_execute_block_tail(handler)?;
-                    Some(ExecuteBlock::HeadTail(
+                    Ok(ExecuteBlock::HeadTail(
                         ExecuteBlockHead::Conditional(conditional),
                         tail,
                     ))
@@ -777,11 +783,12 @@ impl<'a> Parser<'a> {
                         handler,
                     ),
                     unexpected => {
-                        handler.receive(syntax::error::Error::from(UnexpectedSyntax {
+                        let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                             expected: SyntaxKind::Punctuation('('),
                             found: unexpected.into_token(),
-                        }));
-                        None
+                        });
+                        handler.receive(err.clone());
+                        Err(err)
                     }
                 }?;
 
@@ -789,16 +796,17 @@ impl<'a> Parser<'a> {
 
                 let head = head_from_keyword(keyword, argument)?;
 
-                Some(ExecuteBlock::HeadTail(head, tail))
+                Ok(ExecuteBlock::HeadTail(head, tail))
             }
 
             // unexpected
             unexpected => {
-                handler.receive(syntax::error::Error::from(UnexpectedSyntax {
+                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                     expected: SyntaxKind::ExecuteBlock,
                     found: unexpected.into_token(),
-                }));
-                None
+                });
+                handler.receive(err.clone());
+                Err(err)
             }
         }
     }
@@ -806,7 +814,7 @@ impl<'a> Parser<'a> {
     fn parse_execute_block_tail(
         &mut self,
         handler: &impl Handler<base::Error>,
-    ) -> Option<ExecuteBlockTail> {
+    ) -> ParseResult<ExecuteBlockTail> {
         match self.stop_at_significant() {
             // nested execute block
             Reading::Atomic(Token::Punctuation(punc)) if punc.punctuation == ',' => {
@@ -815,7 +823,7 @@ impl<'a> Parser<'a> {
 
                 let execute_block = self.parse_execute_block_statement(handler)?;
 
-                Some(ExecuteBlockTail::ExecuteBlock(
+                Ok(ExecuteBlockTail::ExecuteBlock(
                     punc,
                     Box::new(execute_block),
                 ))
@@ -825,15 +833,16 @@ impl<'a> Parser<'a> {
             Reading::IntoDelimited(punc) if punc.punctuation == '{' => {
                 let block = self.parse_block(handler)?;
 
-                Some(ExecuteBlockTail::Block(block))
+                Ok(ExecuteBlockTail::Block(block))
             }
 
             unexpected => {
-                handler.receive(syntax::error::Error::from(UnexpectedSyntax {
+                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                     expected: SyntaxKind::ExecuteBlockTail,
                     found: unexpected.into_token(),
-                }));
-                None
+                });
+                handler.receive(err.clone());
+                Err(err)
             }
         }
     }
@@ -842,8 +851,8 @@ impl<'a> Parser<'a> {
 fn head_from_keyword(
     keyword: Keyword,
     argument: DelimitedTree<StringLiteral>,
-) -> Option<ExecuteBlockHead> {
-    Some(match keyword.keyword {
+) -> ParseResult<ExecuteBlockHead> {
+    Ok(match keyword.keyword {
         KeywordKind::Align => Align {
             align_keyword: keyword,
             open_paren: argument.open,

@@ -1,5 +1,7 @@
 //! Syntax tree nodes for conditions.
 
+#![allow(clippy::missing_errors_doc)]
+
 use std::{cmp::Ordering, collections::VecDeque};
 
 use enum_as_inner::EnumAsInner;
@@ -9,14 +11,14 @@ use crate::{
     base::{
         self,
         source_file::{SourceElement, Span},
-        VoidHandler, Handler,
+        Handler, VoidHandler,
     },
     lexical::{
         token::{Punctuation, StringLiteral, Token},
         token_stream::Delimiter,
     },
     syntax::{
-        error::{Error, SyntaxKind, UnexpectedSyntax},
+        error::{Error, ParseResult, SyntaxKind, UnexpectedSyntax},
         parser::{Parser, Reading},
     },
 };
@@ -241,12 +243,20 @@ impl SourceElement for Condition {
 
 impl<'a> Parser<'a> {
     /// Parses a [`Condition`].
-    pub fn parse_condition(&mut self, handler: &impl Handler<base::Error>) -> Option<Condition> {
+    ///
+    /// # Precedence of the operators
+    /// 1. `!`
+    /// 2. `&&`
+    /// 3. `||`
+    pub fn parse_condition(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> ParseResult<Condition> {
         let mut lhs = Condition::Primary(self.parse_primary_condition(handler)?);
         let mut expressions = VecDeque::new();
 
         // Parses a list of binary operators and expressions
-        while let Some(binary_operator) = self.try_parse_conditional_binary_operator() {
+        while let Ok(binary_operator) = self.try_parse_conditional_binary_operator() {
             expressions.push_back((
                 binary_operator,
                 Some(Condition::Primary(self.parse_primary_condition(handler)?)),
@@ -300,14 +310,14 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Some(lhs)
+        Ok(lhs)
     }
 
     /// Parses a [`PrimaryCondition`].
     pub fn parse_primary_condition(
         &mut self,
         handler: &impl Handler<base::Error>,
-    ) -> Option<PrimaryCondition> {
+    ) -> ParseResult<PrimaryCondition> {
         match self.stop_at_significant() {
             // prefixed expression
             Reading::Atomic(Token::Punctuation(punc)) if punc.punctuation == '!' => {
@@ -321,7 +331,7 @@ impl<'a> Parser<'a> {
 
                 let operand = Box::new(self.parse_primary_condition(handler)?);
 
-                Some(PrimaryCondition::Prefix(ConditionalPrefix {
+                Ok(PrimaryCondition::Prefix(ConditionalPrefix {
                     operator,
                     operand,
                 }))
@@ -330,7 +340,7 @@ impl<'a> Parser<'a> {
             // string literal
             Reading::Atomic(Token::StringLiteral(literal)) => {
                 self.forward();
-                Some(PrimaryCondition::StringLiteral(literal))
+                Ok(PrimaryCondition::StringLiteral(literal))
             }
 
             // parenthesized condition
@@ -342,12 +352,17 @@ impl<'a> Parser<'a> {
                 // make progress
                 self.forward();
 
-                handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
-                    expected: SyntaxKind::Expression,
+                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
+                    expected: SyntaxKind::Either(&[
+                        SyntaxKind::Punctuation('!'),
+                        SyntaxKind::StringLiteral,
+                        SyntaxKind::Punctuation('('),
+                    ]),
                     found: unexpected.into_token(),
-                }));
+                });
+                handler.receive(err.clone());
 
-                None
+                Err(err)
             }
         }
     }
@@ -356,38 +371,59 @@ impl<'a> Parser<'a> {
     pub fn parse_parenthesized_condition(
         &mut self,
         handler: &impl Handler<base::Error>,
-    ) -> Option<ParenthesizedCondition> {
+    ) -> ParseResult<ParenthesizedCondition> {
         let token_tree = self.step_into(
             Delimiter::Parenthesis,
             |parser| {
                 let cond = parser.parse_condition(handler)?;
                 parser.stop_at_significant();
-                Some(cond)
+                Ok(cond)
             },
             handler,
         )?;
 
-        Some(ParenthesizedCondition {
+        Ok(ParenthesizedCondition {
             open_paren: token_tree.open,
             condition: Box::new(token_tree.tree?),
             close_paren: token_tree.close,
         })
     }
 
-    fn try_parse_conditional_binary_operator(&mut self) -> Option<ConditionalBinaryOperator> {
+    fn try_parse_conditional_binary_operator(&mut self) -> ParseResult<ConditionalBinaryOperator> {
         self.try_parse(|parser| match parser.next_significant_token() {
-            Reading::Atomic(Token::Punctuation(punc)) => match punc.punctuation {
-                '&' => {
-                    let b = parser.parse_punctuation('&', false, &VoidHandler)?;
-                    Some(ConditionalBinaryOperator::LogicalAnd(punc, b))
-                }
-                '|' => {
-                    let b = parser.parse_punctuation('|', false, &VoidHandler)?;
-                    Some(ConditionalBinaryOperator::LogicalOr(punc, b))
-                }
-                _ => None,
+            Reading::Atomic(token) => match token.clone() {
+                Token::Punctuation(punc) => match punc.punctuation {
+                    '&' => {
+                        let b = parser.parse_punctuation('&', false, &VoidHandler)?;
+                        Ok(ConditionalBinaryOperator::LogicalAnd(punc, b))
+                    }
+                    '|' => {
+                        let b = parser.parse_punctuation('|', false, &VoidHandler)?;
+                        Ok(ConditionalBinaryOperator::LogicalOr(punc, b))
+                    }
+                    _ => Err(Error::UnexpectedSyntax(UnexpectedSyntax {
+                        expected: SyntaxKind::Either(&[
+                            SyntaxKind::Punctuation('&'),
+                            SyntaxKind::Punctuation('|'),
+                        ]),
+                        found: Some(token),
+                    })),
+                },
+                unexpected => Err(Error::UnexpectedSyntax(UnexpectedSyntax {
+                    expected: SyntaxKind::Either(&[
+                        SyntaxKind::Punctuation('&'),
+                        SyntaxKind::Punctuation('|'),
+                    ]),
+                    found: Some(unexpected),
+                })),
             },
-            _ => None,
+            unexpected => Err(Error::UnexpectedSyntax(UnexpectedSyntax {
+                expected: SyntaxKind::Either(&[
+                    SyntaxKind::Punctuation('&'),
+                    SyntaxKind::Punctuation('|'),
+                ]),
+                found: unexpected.into_token(),
+            })),
         })
     }
 }

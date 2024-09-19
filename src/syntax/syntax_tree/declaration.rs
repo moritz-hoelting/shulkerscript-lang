@@ -15,7 +15,7 @@ use crate::{
         token_stream::Delimiter,
     },
     syntax::{
-        error::{Error, SyntaxKind, UnexpectedSyntax},
+        error::{Error, ParseResult, SyntaxKind, UnexpectedSyntax},
         parser::{Parser, Reading},
     },
 };
@@ -227,7 +227,15 @@ impl SourceElement for Import {
 }
 
 impl<'a> Parser<'a> {
-    pub fn parse_annotation(&mut self, handler: &impl Handler<base::Error>) -> Option<Annotation> {
+    /// Parses an annotation.
+    ///
+    /// # Errors
+    /// - if the parser position is not at an annotation.
+    /// - if the parsing of the annotation fails
+    pub fn parse_annotation(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> ParseResult<Annotation> {
         match self.stop_at_significant() {
             Reading::Atomic(Token::Punctuation(punctuation)) if punctuation.punctuation == '#' => {
                 // eat the pound sign
@@ -239,36 +247,29 @@ impl<'a> Parser<'a> {
                     |parser| {
                         let identifier = parser.parse_identifier(handler)?;
 
-                        let value = if let Reading::Atomic(Token::Punctuation(punctuation)) =
-                            parser.stop_at_significant()
-                        {
-                            if punctuation.punctuation == '=' {
+                        let value = match parser.stop_at_significant() {
+                            Reading::Atomic(Token::Punctuation(punc))
+                                if punc.punctuation == '=' =>
+                            {
                                 // eat the equals sign
                                 parser.forward();
 
                                 // parse the string literal
-                                let string_literal = parser
-                                    .next_significant_token()
-                                    .into_token()?
-                                    .into_string_literal()
-                                    .ok()?;
+                                let string_literal = parser.parse_string_literal(handler)?;
 
-                                Some((punctuation, string_literal))
-                            } else {
-                                None
+                                Some((punc, string_literal))
                             }
-                        } else {
-                            None
+                            _ => None,
                         };
 
-                        Some((identifier, value))
+                        Ok((identifier, value))
                     },
                     handler,
                 )?;
 
                 let (identifier, value) = content.tree?;
 
-                Some(Annotation {
+                Ok(Annotation {
                     pound_sign: punctuation,
                     open_bracket: content.open,
                     identifier,
@@ -276,7 +277,14 @@ impl<'a> Parser<'a> {
                     close_bracket: content.close,
                 })
             }
-            _ => None,
+            unexpected => {
+                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
+                    expected: SyntaxKind::Punctuation('#'),
+                    found: unexpected.into_token(),
+                });
+                handler.receive(err.clone());
+                Err(err)
+            }
         }
     }
 
@@ -284,7 +292,7 @@ impl<'a> Parser<'a> {
     pub fn parse_declaration(
         &mut self,
         handler: &impl Handler<base::Error>,
-    ) -> Option<Declaration> {
+    ) -> ParseResult<Declaration> {
         match self.stop_at_significant() {
             Reading::Atomic(Token::Keyword(function_keyword))
                 if function_keyword.keyword == KeywordKind::Function =>
@@ -293,22 +301,17 @@ impl<'a> Parser<'a> {
 
                 tracing::trace!("Parsed function '{:?}'", function.identifier.span.str());
 
-                Some(Declaration::Function(function))
+                Ok(Declaration::Function(function))
             }
 
             Reading::Atomic(Token::Keyword(pub_keyword))
                 if pub_keyword.keyword == KeywordKind::Pub =>
             {
-                // eat the public keyword
-                self.forward();
-
-                // parse the function keyword
                 let function = self.parse_function(handler)?;
 
-                Some(Declaration::Function(Function {
-                    public_keyword: Some(pub_keyword),
-                    ..function
-                }))
+                tracing::trace!("Parsed function '{:?}'", function.identifier.span.str());
+
+                Ok(Declaration::Function(function))
             }
 
             // parse annotations
@@ -316,23 +319,15 @@ impl<'a> Parser<'a> {
                 // parse the annotation
                 let mut annotations = Vec::new();
 
-                while let Some(annotation) =
-                    self.try_parse(|parser| parser.parse_annotation(handler))
+                while let Ok(annotation) =
+                    self.try_parse(|parser| parser.parse_annotation(&VoidHandler))
                 {
                     annotations.push(annotation);
                 }
 
-                self.parse_declaration(handler).and_then(|declaration| {
-                    if let Declaration::Function(mut function) = declaration {
-                        function.annotations.extend(annotations);
-                        Some(Declaration::Function(function))
-                    } else {
-                        handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
-                            expected: SyntaxKind::Keyword(KeywordKind::Function),
-                            found: None,
-                        }));
-                        None
-                    }
+                self.parse_function(handler).map(|mut function| {
+                    function.annotations.extend(annotations);
+                    Declaration::Function(function)
                 })
             }
 
@@ -366,12 +361,12 @@ impl<'a> Parser<'a> {
                 // }
                 ;
 
-                if let Some(items) = items {
+                if let Ok(items) = items {
                     let semicolon = self.parse_punctuation(';', true, handler)?;
 
                     tracing::trace!("Parsed import from '{:?}'", module.str_content());
 
-                    Some(Declaration::Import(Import {
+                    Ok(Declaration::Import(Import {
                         from_keyword,
                         module,
                         import_keyword,
@@ -379,12 +374,13 @@ impl<'a> Parser<'a> {
                         semicolon,
                     }))
                 } else {
-                    handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
-                        expected: SyntaxKind::Identifier,
+                    let err = Error::UnexpectedSyntax(UnexpectedSyntax {
+                        expected: SyntaxKind::Punctuation('*'),
                         found: self.stop_at_significant().into_token(),
-                    }));
+                    });
+                    handler.receive(err.clone());
 
-                    None
+                    Err(err)
                 }
             }
 
@@ -392,49 +388,64 @@ impl<'a> Parser<'a> {
                 // make progress
                 self.forward();
 
-                handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
+                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                     expected: SyntaxKind::Declaration,
                     found: unexpected.into_token(),
-                }));
+                });
+                handler.receive(err.clone());
 
-                None
+                Err(err)
             }
         }
     }
 
-    pub fn parse_function(&mut self, handler: &impl Handler<base::Error>) -> Option<Function> {
-        if let Reading::Atomic(Token::Keyword(function_keyword)) = self.stop_at_significant() {
-            // eat the function keyword
-            self.forward();
+    /// Parses a function.
+    ///
+    /// # Errors
+    /// - if the parser is not at a function (not at annotation).
+    /// - if the parsing of the function fails.
+    pub fn parse_function(&mut self, handler: &impl Handler<base::Error>) -> ParseResult<Function> {
+        let pub_keyword =
+            self.try_parse(|parser| parser.parse_keyword(KeywordKind::Pub, &VoidHandler));
 
-            // parse the identifier
-            let identifier = self.parse_identifier(handler)?;
-            let delimited_tree = self.parse_enclosed_list(
-                Delimiter::Parenthesis,
-                ',',
-                |parser: &mut Parser<'_>| parser.parse_identifier(handler),
-                handler,
-            )?;
+        match self.stop_at_significant() {
+            Reading::Atomic(Token::Keyword(function_keyword))
+                if function_keyword.keyword == KeywordKind::Function =>
+            {
+                // eat the function keyword
+                self.forward();
 
-            // parse the block
-            let block = self.parse_block(handler)?;
+                // parse the identifier
+                let identifier = self.parse_identifier(handler)?;
+                let delimited_tree = self.parse_enclosed_list(
+                    Delimiter::Parenthesis,
+                    ',',
+                    |parser: &mut Parser<'_>| parser.parse_identifier(handler),
+                    handler,
+                )?;
 
-            Some(Function {
-                public_keyword: None,
-                annotations: Vec::new(),
-                function_keyword,
-                identifier,
-                open_paren: delimited_tree.open,
-                parameters: delimited_tree.list,
-                close_paren: delimited_tree.close,
-                block,
-            })
-        } else {
-            handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
-                expected: SyntaxKind::Keyword(KeywordKind::Function),
-                found: self.peek().into_token(),
-            }));
-            None
+                // parse the block
+                let block = self.parse_block(handler)?;
+
+                Ok(Function {
+                    public_keyword: pub_keyword.ok(),
+                    annotations: Vec::new(),
+                    function_keyword,
+                    identifier,
+                    open_paren: delimited_tree.open,
+                    parameters: delimited_tree.list,
+                    close_paren: delimited_tree.close,
+                    block,
+                })
+            }
+            unexpected => {
+                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
+                    expected: SyntaxKind::Keyword(KeywordKind::Function),
+                    found: unexpected.into_token(),
+                });
+                handler.receive(err.clone());
+                Err(err)
+            }
         }
     }
 }

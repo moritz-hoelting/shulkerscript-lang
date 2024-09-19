@@ -1,6 +1,7 @@
 //! The program node of the syntax tree.
 
 use getset::Getters;
+use itertools::Itertools;
 
 use crate::{
     base::{
@@ -11,7 +12,7 @@ use crate::{
     lexical::token::{Keyword, KeywordKind, Punctuation, StringLiteral, Token},
     syntax::{
         self,
-        error::{SyntaxKind, UnexpectedSyntax},
+        error::{InvalidArgument, ParseResult, SyntaxKind, UnexpectedSyntax},
         parser::{Parser, Reading},
     },
 };
@@ -70,18 +71,34 @@ impl Namespace {
     }
 
     /// Validates a namespace string.
-    #[must_use]
-    pub fn validate_str(namespace: &str) -> bool {
+    ///
+    /// # Errors
+    /// - If the namespace contains invalid characters.
+    pub fn validate_str(namespace: &str) -> Result<(), String> {
         const VALID_CHARS: &str = "0123456789abcdefghijklmnopqrstuvwxyz_-.";
 
-        namespace.chars().all(|c| VALID_CHARS.contains(c))
+        let invalid_chars = namespace
+            .chars()
+            .filter(|c| !VALID_CHARS.contains(*c))
+            .sorted()
+            .unique()
+            .collect::<String>();
+
+        if invalid_chars.is_empty() {
+            Ok(())
+        } else {
+            Err(invalid_chars)
+        }
     }
 }
 
 impl<'a> Parser<'a> {
     /// Parses a [`ProgramFile`].
     #[tracing::instrument(level = "debug", skip_all)]
-    pub fn parse_program(&mut self, handler: &impl Handler<base::Error>) -> Option<ProgramFile> {
+    pub fn parse_program(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> ParseResult<ProgramFile> {
         tracing::debug!("Parsing program");
 
         let namespace = match self.stop_at_significant() {
@@ -92,23 +109,37 @@ impl<'a> Parser<'a> {
                 self.forward();
 
                 let namespace_name = self.parse_string_literal(handler).and_then(|name| {
-                    Namespace::validate_str(name.str_content().as_ref()).then_some(name)
+                    Namespace::validate_str(name.str_content().as_ref())
+                        .map(|()| name.clone())
+                        .map_err(|invalid| {
+                            let err = syntax::error::Error::InvalidArgument(InvalidArgument {
+                                message: format!(
+                                    "Invalid characters in namespace '{}'. The following characters are not allowed in namespace definitions: '{}'",
+                                    name.str_content(),
+                                    invalid
+                                ),
+                                span: name.span(),
+                            });
+                            handler.receive(err.clone());
+                            err
+                        })
                 })?;
 
                 let semicolon = self.parse_punctuation(';', true, handler)?;
 
-                Some(Namespace {
+                Ok(Namespace {
                     namespace_keyword,
                     namespace_name,
                     semicolon,
                 })
             }
             unexpected => {
-                handler.receive(syntax::error::Error::from(UnexpectedSyntax {
+                let err = syntax::error::Error::from(UnexpectedSyntax {
                     expected: SyntaxKind::Keyword(KeywordKind::Namespace),
                     found: unexpected.into_token(),
-                }));
-                None
+                });
+                handler.receive(err.clone());
+                Err(err)
             }
         }?;
 
@@ -123,7 +154,7 @@ impl<'a> Parser<'a> {
             let result = self.parse_declaration(handler);
 
             #[allow(clippy::option_if_let_else)]
-            if let Some(x) = result {
+            if let Ok(x) = result {
                 declarations.push(x);
             } else {
                 self.stop_at(|reading| {
@@ -137,7 +168,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Some(ProgramFile {
+        Ok(ProgramFile {
             namespace,
             declarations,
         })
