@@ -15,7 +15,7 @@ use crate::{
     syntax::parser::Reading,
 };
 
-use super::parser::Parser;
+use super::{error::ParseResult, parser::Parser};
 
 pub mod condition;
 pub mod declaration;
@@ -76,9 +76,9 @@ impl<'a> Parser<'a> {
         &mut self,
         delimiter: Delimiter,
         separator: char,
-        mut f: impl FnMut(&mut Self) -> Option<T>,
+        mut f: impl FnMut(&mut Self) -> ParseResult<T>,
         handler: &impl Handler<base::Error>,
-    ) -> Option<DelimitedList<T>> {
+    ) -> ParseResult<DelimitedList<T>> {
         fn skip_to_next_separator(this: &mut Parser, separator: char) -> Option<Punctuation> {
             if let Reading::Atomic(Token::Punctuation(punc)) = this.stop_at(|token| {
                 matches!(
@@ -101,7 +101,7 @@ impl<'a> Parser<'a> {
                 let mut trailing_separator: Option<Punctuation> = None;
 
                 while !parser.is_exhausted() {
-                    let Some(element) = f(parser) else {
+                    let Ok(element) = f(parser) else {
                         skip_to_next_separator(parser, separator);
                         continue;
                     };
@@ -122,7 +122,7 @@ impl<'a> Parser<'a> {
 
                     // expect separator if not exhausted
                     if !parser.is_exhausted() {
-                        let Some(separator) = parser.parse_punctuation(separator, true, handler)
+                        let Ok(separator) = parser.parse_punctuation(separator, true, handler)
                         else {
                             if let Some(punctuation) = skip_to_next_separator(parser, separator) {
                                 trailing_separator = Some(punctuation);
@@ -135,7 +135,7 @@ impl<'a> Parser<'a> {
                     }
                 }
 
-                Some(first.map(|first| ConnectedList {
+                Ok(first.map(|first| ConnectedList {
                     first,
                     rest,
                     trailing_separator,
@@ -144,7 +144,7 @@ impl<'a> Parser<'a> {
             handler,
         )?;
 
-        Some(DelimitedList {
+        Ok(DelimitedList {
             open: delimited_tree.open,
             list: delimited_tree.tree.unwrap(),
             close: delimited_tree.close,
@@ -162,20 +162,20 @@ impl<'a> Parser<'a> {
     pub fn parse_connected_list<T>(
         &mut self,
         seperator: char,
-        mut f: impl FnMut(&mut Self) -> Option<T>,
+        mut f: impl FnMut(&mut Self) -> ParseResult<T>,
         _handler: &impl Handler<base::Error>,
-    ) -> Option<ConnectedList<T, Punctuation>> {
+    ) -> ParseResult<ConnectedList<T, Punctuation>> {
         let first = f(self)?;
 
         let mut rest = Vec::new();
 
-        while let Some(sep) =
+        while let Ok(sep) =
             self.try_parse(|parser| parser.parse_punctuation(seperator, true, &VoidHandler))
         {
-            if let Some(element) = self.try_parse(&mut f) {
+            if let Ok(element) = self.try_parse(&mut f) {
                 rest.push((sep, element));
             } else {
-                return Some(ConnectedList {
+                return Ok(ConnectedList {
                     first,
                     rest,
                     trailing_separator: Some(sep),
@@ -183,7 +183,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Some(ConnectedList {
+        Ok(ConnectedList {
             first,
             rest,
             trailing_separator: None,

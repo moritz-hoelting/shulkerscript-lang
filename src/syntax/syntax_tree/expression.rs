@@ -14,7 +14,8 @@ use crate::{
         token_stream::Delimiter,
     },
     syntax::{
-        error::{Error, UnexpectedSyntax},
+        self,
+        error::{Error, ParseResult, UnexpectedSyntax},
         parser::{Parser, Reading},
     },
 };
@@ -156,12 +157,22 @@ impl LuaCode {
 
 impl<'a> Parser<'a> {
     /// Parses an [`Expression`]
-    pub fn parse_expression(&mut self, handler: &impl Handler<base::Error>) -> Option<Expression> {
-        Some(Expression::Primary(self.parse_primary(handler)?))
+    ///
+    /// # Errors
+    /// - If the parser is not at a primary expression.
+    pub fn parse_expression(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> ParseResult<Expression> {
+        self.parse_primary(handler).map(Expression::Primary)
     }
 
     /// Parses an [`Primary`]
-    pub fn parse_primary(&mut self, handler: &impl Handler<base::Error>) -> Option<Primary> {
+    ///
+    /// # Errors
+    /// - If the parser is not at a primary expression.
+    /// - If the parser is not at a valid primary expression.
+    pub fn parse_primary(&mut self, handler: &impl Handler<base::Error>) -> ParseResult<Primary> {
         match self.stop_at_significant() {
             // identifier expression
             Reading::Atomic(Token::Identifier(identifier)) => {
@@ -169,24 +180,31 @@ impl<'a> Parser<'a> {
                 self.forward();
 
                 // function call
-                if matches!(self.stop_at_significant(), Reading::IntoDelimited(punc) if punc.punctuation == '(')
-                {
-                    let token_tree = self.parse_enclosed_list(
-                        Delimiter::Parenthesis,
-                        ',',
-                        |parser| parser.parse_expression(handler).map(Box::new),
-                        handler,
-                    )?;
+                match self.stop_at_significant() {
+                    Reading::IntoDelimited(punc) if punc.punctuation == '(' => {
+                        let token_tree = self.parse_enclosed_list(
+                            Delimiter::Parenthesis,
+                            ',',
+                            |parser| parser.parse_expression(handler).map(Box::new),
+                            handler,
+                        )?;
 
-                    Some(Primary::FunctionCall(FunctionCall {
-                        identifier,
-                        left_parenthesis: token_tree.open,
-                        right_parenthesis: token_tree.close,
-                        arguments: token_tree.list,
-                    }))
-                } else {
-                    // insert parser for regular identifier here
-                    None
+                        Ok(Primary::FunctionCall(FunctionCall {
+                            identifier,
+                            left_parenthesis: token_tree.open,
+                            right_parenthesis: token_tree.close,
+                            arguments: token_tree.list,
+                        }))
+                    }
+                    unexpected => {
+                        // insert parser for regular identifier here
+                        let err = Error::UnexpectedSyntax(UnexpectedSyntax {
+                            expected: syntax::error::SyntaxKind::Punctuation('('),
+                            found: unexpected.into_token(),
+                        });
+                        handler.receive(err.clone());
+                        Err(err)
+                    }
                 }
             }
 
@@ -195,7 +213,7 @@ impl<'a> Parser<'a> {
                 // eat the string literal
                 self.forward();
 
-                Some(Primary::StringLiteral(literal))
+                Ok(Primary::StringLiteral(literal))
             }
 
             // lua code expression
@@ -212,9 +230,16 @@ impl<'a> Parser<'a> {
                     |parser| match parser.next_significant_token() {
                         Reading::Atomic(Token::Identifier(identifier)) => {
                             parser.forward();
-                            Some(identifier)
+                            Ok(identifier)
                         }
-                        _ => None,
+                        unexpected => {
+                            let err = Error::UnexpectedSyntax(UnexpectedSyntax {
+                                expected: syntax::error::SyntaxKind::Identifier,
+                                found: unexpected.into_token(),
+                            });
+                            handler.receive(err.clone());
+                            Err(err)
+                        }
                     },
                     handler,
                 )?;
@@ -241,12 +266,12 @@ impl<'a> Parser<'a> {
                             })
                             .expect("Invalid lua code span");
 
-                        Some(combined.str().trim().to_owned())
+                        Ok(combined.str().trim().to_owned())
                     },
                     handler,
                 )?;
 
-                Some(Primary::Lua(Box::new(LuaCode {
+                Ok(Primary::Lua(Box::new(LuaCode {
                     lua_keyword,
                     left_parenthesis: variables.open,
                     variables: variables.list,
@@ -261,12 +286,13 @@ impl<'a> Parser<'a> {
                 // make progress
                 self.forward();
 
-                handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
-                    expected: crate::syntax::error::SyntaxKind::Expression,
+                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
+                    expected: syntax::error::SyntaxKind::Expression,
                     found: unexpected.into_token(),
-                }));
+                });
+                handler.receive(err.clone());
 
-                None
+                Err(err)
             }
         }
     }

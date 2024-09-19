@@ -15,7 +15,10 @@ use crate::{
         token::{CommandLiteral, DocComment, Keyword, KeywordKind, Punctuation, Token},
         token_stream::Delimiter,
     },
-    syntax::parser::{Parser, Reading},
+    syntax::{
+        error::ParseResult,
+        parser::{Parser, Reading},
+    },
 };
 
 use self::execute_block::ExecuteBlock;
@@ -209,7 +212,10 @@ impl Semicolon {
 
 impl<'a> Parser<'a> {
     /// Parses a [`Block`].
-    pub fn parse_block(&mut self, handler: &impl Handler<base::Error>) -> Option<Block> {
+    ///
+    /// # Errors
+    /// - if the parser is not at a block.
+    pub fn parse_block(&mut self, handler: &impl Handler<base::Error>) -> ParseResult<Block> {
         let token_tree = self.step_into(
             Delimiter::Brace,
             |parser| {
@@ -217,7 +223,7 @@ impl<'a> Parser<'a> {
 
                 while !parser.is_exhausted() {
                     parser.parse_statement(handler).map_or_else(
-                        || {
+                        |_| {
                             // error recovery
                             parser.stop_at(|reading| matches!(
                                 reading,
@@ -234,12 +240,12 @@ impl<'a> Parser<'a> {
                     );
                 }
 
-                Some(statements)
+                Ok(statements)
             },
             handler,
         )?;
 
-        Some(Block {
+        Ok(Block {
             open_brace: token_tree.open,
             statements: token_tree.tree?,
             close_brace: token_tree.close,
@@ -248,19 +254,22 @@ impl<'a> Parser<'a> {
 
     /// Parses a [`Statement`].
     #[tracing::instrument(level = "trace", skip_all)]
-    pub fn parse_statement(&mut self, handler: &impl Handler<base::Error>) -> Option<Statement> {
+    pub fn parse_statement(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> ParseResult<Statement> {
         match self.stop_at_significant() {
             // variable declaration
             Reading::Atomic(Token::CommandLiteral(command)) => {
                 self.forward();
                 tracing::trace!("Parsed literal command '{}'", command.clean_command());
-                Some(Statement::LiteralCommand(command))
+                Ok(Statement::LiteralCommand(command))
             }
             // block statement
             Reading::IntoDelimited(open_brace) if open_brace.punctuation == '{' => {
                 let block = self.parse_block(handler)?;
 
-                Some(Statement::Block(block))
+                Ok(Statement::Block(block))
             }
 
             // execute block
@@ -274,7 +283,7 @@ impl<'a> Parser<'a> {
             // doc comment
             Reading::Atomic(Token::DocComment(doc_comment)) => {
                 self.forward();
-                Some(Statement::DocComment(doc_comment))
+                Ok(Statement::DocComment(doc_comment))
             }
 
             // grouping statement
@@ -288,7 +297,7 @@ impl<'a> Parser<'a> {
 
                 tracing::trace!("Parsed group command");
 
-                Some(Statement::Grouping(Grouping {
+                Ok(Statement::Grouping(Grouping {
                     group_keyword,
                     block,
                 }))
@@ -306,7 +315,7 @@ impl<'a> Parser<'a> {
 
                 tracing::trace!("Parsed run statement: {:?}", expression);
 
-                Some(Statement::Run(Run {
+                Ok(Statement::Run(Run {
                     run_keyword,
                     expression,
                     semicolon,
@@ -320,7 +329,7 @@ impl<'a> Parser<'a> {
 
                 tracing::trace!("Parsed semicolon statement: {:?}", expression);
 
-                Some(Statement::Semicolon(Semicolon {
+                Ok(Statement::Semicolon(Semicolon {
                     expression,
                     semicolon,
                 }))

@@ -11,7 +11,7 @@ use crate::{
     },
 };
 
-use super::error::{Error, SyntaxKind, UnexpectedSyntax};
+use super::error::{Error, ParseResult, SyntaxKind, UnexpectedSyntax};
 
 /// Represents a parser that reads a token stream and constructs an abstract syntax tree.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deref, DerefMut)]
@@ -38,12 +38,15 @@ impl<'a> Parser<'a> {
     /// Steps into the [`Delimited`] token stream and parses the content within the delimiters.
     ///
     /// The parser's position must be at the delimited token stream.
+    ///
+    /// # Errors
+    /// - If the parser's position is not at the delimited token stream.
     pub fn step_into<T>(
         &mut self,
         delimiter: Delimiter,
-        f: impl FnOnce(&mut Self) -> Option<T>,
+        f: impl FnOnce(&mut Self) -> ParseResult<T>,
         handler: &impl Handler<base::Error>,
-    ) -> Option<DelimitedTree<T>> {
+    ) -> ParseResult<DelimitedTree<T>> {
         self.current_frame.stop_at_significant();
         let raw_token_tree = self
             .current_frame
@@ -62,7 +65,7 @@ impl<'a> Parser<'a> {
                     delimited_tree
                 }
                 found => {
-                    handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
+                    let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                         expected: SyntaxKind::Punctuation(expected),
                         found: Some(match found {
                             TokenTree::Token(token) => token.clone(),
@@ -70,18 +73,20 @@ impl<'a> Parser<'a> {
                                 Token::Punctuation(delimited_tree.open.clone())
                             }
                         }),
-                    }));
+                    });
+                    handler.receive(err.clone());
 
-                    return None;
+                    return Err(err);
                 }
             }
         } else {
-            handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
+            let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                 expected: SyntaxKind::Punctuation(expected),
                 found: self.get_reading(None).into_token(),
-            }));
+            });
+            handler.receive(err.clone());
 
-            return None;
+            return Err(err);
         };
 
         // creates a new frame
@@ -99,7 +104,10 @@ impl<'a> Parser<'a> {
         let tree = f(self);
 
         // pops the current frame off the stack
-        let new_frame = self.stack.pop()?;
+        let new_frame = self
+            .stack
+            .pop()
+            .expect("frame has been pushed on the stack before");
 
         // the current frame must be at the end
         if !self.current_frame.is_exhausted() {
@@ -111,10 +119,12 @@ impl<'a> Parser<'a> {
                 .delimiter
                 .closing_char();
 
-            handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
+            let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                 expected: SyntaxKind::Punctuation(expected),
                 found: self.peek().into_token(),
-            }));
+            });
+            handler.receive(err.clone());
+            return Err(err);
         }
 
         let close_punctuation = self
@@ -128,7 +138,7 @@ impl<'a> Parser<'a> {
         // replaces the current frame with the popped one
         self.current_frame = new_frame;
 
-        Some(DelimitedTree {
+        Ok(DelimitedTree {
             open,
             tree,
             close: close_punctuation,
@@ -137,12 +147,15 @@ impl<'a> Parser<'a> {
 
     /// Tries to parse the given function, and if it fails, resets the current index to the
     /// `current_index` before the function call.
-    pub fn try_parse<T>(&mut self, f: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
+    ///
+    /// # Errors
+    /// - If the given function returns an error.
+    pub fn try_parse<T>(&mut self, f: impl FnOnce(&mut Self) -> ParseResult<T>) -> ParseResult<T> {
         let current_index = self.current_frame.current_index;
 
         let result = f(self);
 
-        if result.is_none() {
+        if result.is_err() {
             self.current_frame.current_index = current_index;
         }
 
@@ -157,7 +170,7 @@ pub struct DelimitedTree<T> {
     pub open: Punctuation,
 
     /// The tree inside the delimiter.
-    pub tree: Option<T>,
+    pub tree: ParseResult<T>,
 
     /// The closing delimiter.
     pub close: Punctuation,
@@ -363,15 +376,19 @@ impl<'a> Frame<'a> {
     ///
     /// # Errors
     /// If the next [`Token`] is not an [`Identifier`].
-    pub fn parse_identifier(&mut self, handler: &impl Handler<base::Error>) -> Option<Identifier> {
+    pub fn parse_identifier(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> ParseResult<Identifier> {
         match self.next_significant_token() {
-            Reading::Atomic(Token::Identifier(ident)) => Some(ident),
+            Reading::Atomic(Token::Identifier(ident)) => Ok(ident),
             found => {
-                handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
+                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                     expected: SyntaxKind::Identifier,
                     found: found.into_token(),
-                }));
-                None
+                });
+                handler.receive(err.clone());
+                Err(err)
             }
         }
     }
@@ -380,15 +397,16 @@ impl<'a> Frame<'a> {
     ///
     /// # Errors
     /// If the next [`Token`] is not an [`Identifier`].
-    pub fn parse_numeric(&mut self, handler: &impl Handler<Error>) -> Option<Numeric> {
+    pub fn parse_numeric(&mut self, handler: &impl Handler<Error>) -> ParseResult<Numeric> {
         match self.next_significant_token() {
-            Reading::Atomic(Token::Numeric(ident)) => Some(ident),
+            Reading::Atomic(Token::Numeric(ident)) => Ok(ident),
             found => {
-                handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
+                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                     expected: SyntaxKind::Numeric,
                     found: found.into_token(),
-                }));
-                None
+                });
+                handler.receive(err.clone());
+                Err(err)
             }
         }
     }
@@ -400,15 +418,16 @@ impl<'a> Frame<'a> {
     pub fn parse_string_literal(
         &mut self,
         handler: &impl Handler<base::Error>,
-    ) -> Option<StringLiteral> {
+    ) -> ParseResult<StringLiteral> {
         match self.next_significant_token() {
-            Reading::Atomic(Token::StringLiteral(literal)) => Some(literal),
+            Reading::Atomic(Token::StringLiteral(literal)) => Ok(literal),
             found => {
-                handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
+                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                     expected: SyntaxKind::StringLiteral,
                     found: found.into_token(),
-                }));
-                None
+                });
+                handler.receive(err.clone());
+                Err(err)
             }
         }
     }
@@ -421,17 +440,18 @@ impl<'a> Frame<'a> {
         &mut self,
         expected: KeywordKind,
         handler: &impl Handler<base::Error>,
-    ) -> Option<Keyword> {
+    ) -> ParseResult<Keyword> {
         match self.next_significant_token() {
             Reading::Atomic(Token::Keyword(keyword_token)) if keyword_token.keyword == expected => {
-                Some(keyword_token)
+                Ok(keyword_token)
             }
             found => {
-                handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
+                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                     expected: SyntaxKind::Keyword(expected),
                     found: found.into_token(),
-                }));
-                None
+                });
+                handler.receive(err.clone());
+                Err(err)
             }
         }
     }
@@ -445,7 +465,7 @@ impl<'a> Frame<'a> {
         expected: char,
         skip_insignificant: bool,
         handler: &impl Handler<base::Error>,
-    ) -> Option<Punctuation> {
+    ) -> ParseResult<Punctuation> {
         match if skip_insignificant {
             self.next_significant_token()
         } else {
@@ -454,14 +474,15 @@ impl<'a> Frame<'a> {
             Reading::Atomic(Token::Punctuation(punctuation_token))
                 if punctuation_token.punctuation == expected =>
             {
-                Some(punctuation_token)
+                Ok(punctuation_token)
             }
             found => {
-                handler.receive(Error::UnexpectedSyntax(UnexpectedSyntax {
+                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                     expected: SyntaxKind::Punctuation(expected),
                     found: found.into_token(),
-                }));
-                None
+                });
+                handler.receive(err.clone());
+                Err(err)
             }
         }
     }

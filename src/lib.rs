@@ -89,9 +89,7 @@ pub fn parse(
     tracing::info!("Parsing the source code at path: {}", path.display());
 
     let mut parser = Parser::new(&tokens);
-    let program = parser
-        .parse_program(handler)
-        .ok_or_else(|| Error::other("An error occurred while parsing the source code."))?;
+    let program = parser.parse_program(handler)?;
 
     if handler.has_received() {
         return Err(Error::other(
