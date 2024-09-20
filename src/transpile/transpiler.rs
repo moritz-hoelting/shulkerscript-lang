@@ -355,7 +355,7 @@ impl Transpiler {
                     Ok(Some(Command::Raw(string.str_content().to_string())))
                 }
                 Expression::Primary(Primary::Lua(code)) => {
-                    Ok(Some(Command::Raw(code.eval_string(handler)?)))
+                    Ok(code.eval_string(handler)?.map(Command::Raw))
                 }
             },
             Statement::Block(_) => {

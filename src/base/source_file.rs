@@ -136,6 +136,12 @@ impl SourceFile {
             None
         }
     }
+
+    /// Get the relative path of the source file from the current working directory.
+    #[must_use]
+    pub fn path_relative(&self) -> Option<PathBuf> {
+        pathdiff::diff_paths(&self.path, std::env::current_dir().ok()?)
+    }
 }
 
 /// Represents a range of characters in a source file.
