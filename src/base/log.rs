@@ -291,7 +291,7 @@ fn write_error_line(
                         (line_number == start_line && index >= start_location.column)
                             || (line_number == end_line
                                 && (index + 1)
-                                    < end_location
+                                    <= end_location
                                         .map_or(usize::MAX, |end_location| end_location.column))
                             || (line_number > start_line && line_number < end_line)
                     } else {

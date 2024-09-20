@@ -128,6 +128,20 @@ impl Display for LuaRuntimeError {
 
 impl std::error::Error for LuaRuntimeError {}
 
+#[cfg(feature = "lua")]
+impl LuaRuntimeError {
+    pub fn from_lua_err(err: &mlua::Error, span: Span) -> Self {
+        let err_string = err.to_string();
+        Self {
+            error_message: err_string
+                .strip_prefix("runtime error: ")
+                .unwrap_or(&err_string)
+                .to_string(),
+            code_block: span,
+        }
+    }
+}
+
 /// An error that occurs when a function declaration is missing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnexpectedExpression(pub Expression);

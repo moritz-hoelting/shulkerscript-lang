@@ -2,7 +2,7 @@
 
 #[cfg(feature = "lua")]
 mod enabled {
-    use mlua::Lua;
+    use mlua::{Lua, Value};
 
     use crate::{
         base::{self, source_file::SourceElement, Handler},
@@ -16,7 +16,10 @@ mod enabled {
         /// # Errors
         /// - If Lua code evaluation is disabled.
         #[tracing::instrument(level = "debug", name = "eval_lua", skip_all, ret)]
-        pub fn eval_string(&self, handler: &impl Handler<base::Error>) -> TranspileResult<String> {
+        pub fn eval_string(
+            &self,
+            handler: &impl Handler<base::Error>,
+        ) -> TranspileResult<Option<String>> {
             tracing::debug!("Evaluating Lua code");
 
             let lua = Lua::new();
@@ -24,7 +27,7 @@ mod enabled {
             let name = {
                 let span = self.span();
                 let file = span.source_file();
-                let path = file.path();
+                let path = file.path_relative().unwrap_or_else(|| file.path().clone());
 
                 let start = span.start_location();
                 let end = span.end_location().unwrap_or_else(|| {
@@ -43,24 +46,62 @@ mod enabled {
                 )
             };
 
+            self.add_globals(&lua).unwrap();
+
             let lua_result = lua
                 .load(self.code())
                 .set_name(name)
-                .eval::<String>()
+                .eval::<Value>()
                 .map_err(|err| {
-                    let err_string = err.to_string();
-                    let err = TranspileError::from(LuaRuntimeError {
-                        error_message: err_string
-                            .strip_prefix("runtime error: ")
-                            .unwrap_or(&err_string)
-                            .to_string(),
-                        code_block: self.span(),
-                    });
+                    let err =
+                        TranspileError::from(LuaRuntimeError::from_lua_err(&err, self.span()));
                     handler.receive(crate::Error::from(err.clone()));
                     err
                 })?;
 
-            Ok(lua_result)
+            self.handle_lua_result(dbg!(lua_result)).map_err(|err| {
+                handler.receive(err.clone());
+                err
+            })
+        }
+
+        fn add_globals(&self, lua: &Lua) -> mlua::Result<()> {
+            let globals = lua.globals();
+
+            let location = {
+                let span = self.span();
+                let file = span.source_file();
+                file.path_relative().unwrap_or_else(|| file.path().clone())
+            };
+            globals.set("shu_location", location.to_string_lossy())?;
+
+            Ok(())
+        }
+
+        fn handle_lua_result(&self, value: Value) -> TranspileResult<Option<String>> {
+            match value {
+                Value::Nil => Ok(None),
+                Value::String(s) => Ok(Some(s.to_string_lossy().into_owned())),
+                Value::Integer(i) => Ok(Some(i.to_string())),
+                Value::Number(n) => Ok(Some(n.to_string())),
+                Value::Function(f) => self.handle_lua_result(f.call(()).map_err(|err| {
+                    TranspileError::LuaRuntimeError(LuaRuntimeError::from_lua_err(
+                        &err,
+                        self.span(),
+                    ))
+                })?),
+                Value::Boolean(_)
+                | Value::Error(_)
+                | Value::Table(_)
+                | Value::Thread(_)
+                | Value::UserData(_)
+                | Value::LightUserData(_) => {
+                    Err(TranspileError::LuaRuntimeError(LuaRuntimeError {
+                        code_block: self.span(),
+                        error_message: format!("invalid return type {}", value.type_name()),
+                    }))
+                }
+            }
         }
     }
 }
@@ -79,7 +120,10 @@ mod disabled {
         ///
         /// # Errors
         /// - If Lua code evaluation is disabled.
-        pub fn eval_string(&self, handler: &impl Handler<base::Error>) -> TranspileResult<String> {
+        pub fn eval_string(
+            &self,
+            handler: &impl Handler<base::Error>,
+        ) -> TranspileResult<Option<String>> {
             handler.receive(TranspileError::LuaDisabled);
             tracing::error!("Lua code evaluation is disabled");
             Err(TranspileError::LuaDisabled)
