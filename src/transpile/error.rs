@@ -1,6 +1,6 @@
 //! Errors that can occur during transpilation.
 
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::BTreeMap, fmt::Display};
 
 use getset::Getters;
 use itertools::Itertools;
@@ -27,6 +27,8 @@ pub enum TranspileError {
     LuaDisabled,
     #[error(transparent)]
     LuaRuntimeError(#[from] LuaRuntimeError),
+    #[error(transparent)]
+    ConflictingFunctionNames(#[from] ConflictingFunctionNames),
 }
 
 /// The result of a transpilation operation.
@@ -44,7 +46,7 @@ pub struct MissingFunctionDeclaration {
 impl MissingFunctionDeclaration {
     pub(super) fn from_context(
         identifier_span: Span,
-        functions: &HashMap<(String, String), FunctionData>,
+        functions: &BTreeMap<(String, String), FunctionData>,
     ) -> Self {
         let own_name = identifier_span.str();
         let own_program_identifier = identifier_span.source_file().identifier();
@@ -163,3 +165,30 @@ impl Display for UnexpectedExpression {
 }
 
 impl std::error::Error for UnexpectedExpression {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConflictingFunctionNames {
+    pub definition: Span,
+    pub name: String,
+}
+
+impl Display for ConflictingFunctionNames {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            Message::new(
+                Severity::Error,
+                format!("the following function declaration conflicts with an existing function with name `{}`", self.name)
+            )
+        )?;
+
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(&self.definition, Option::<u8>::None)
+        )
+    }
+}
+
+impl std::error::Error for ConflictingFunctionNames {}

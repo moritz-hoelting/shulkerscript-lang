@@ -1,7 +1,11 @@
 //! Transpiler for `ShulkerScript`
 
 use chksum_md5 as md5;
-use std::{collections::HashMap, iter, sync::RwLock};
+use std::{
+    collections::{BTreeMap, HashMap},
+    iter,
+    sync::RwLock,
+};
 
 use shulkerbox::datapack::{self, Command, Datapack, Execute};
 
@@ -20,7 +24,7 @@ use crate::{
             Statement,
         },
     },
-    transpile::error::MissingFunctionDeclaration,
+    transpile::error::{ConflictingFunctionNames, MissingFunctionDeclaration},
 };
 
 use super::error::{TranspileError, TranspileResult, UnexpectedExpression};
@@ -30,7 +34,7 @@ use super::error::{TranspileError, TranspileResult, UnexpectedExpression};
 pub struct Transpiler {
     datapack: shulkerbox::datapack::Datapack,
     /// Key: (program identifier, function name)
-    functions: RwLock<HashMap<(String, String), FunctionData>>,
+    functions: RwLock<BTreeMap<(String, String), FunctionData>>,
     function_locations: RwLock<HashMap<(String, String), (String, bool)>>,
     aliases: RwLock<HashMap<(String, String), (String, String)>>,
 }
@@ -50,7 +54,7 @@ impl Transpiler {
     pub fn new(pack_format: u8) -> Self {
         Self {
             datapack: shulkerbox::datapack::Datapack::new(pack_format),
-            functions: RwLock::new(HashMap::new()),
+            functions: RwLock::new(BTreeMap::new()),
             function_locations: RwLock::new(HashMap::new()),
             aliases: RwLock::new(HashMap::new()),
         }
@@ -80,7 +84,7 @@ impl Transpiler {
 
         let mut always_transpile_functions = Vec::new();
 
-        #[allow(clippy::significant_drop_in_scrutinee)]
+        // #[allow(clippy::significant_drop_in_scrutinee)]
         {
             let functions = self.functions.read().unwrap();
             for (_, data) in functions.iter() {
@@ -144,6 +148,7 @@ impl Transpiler {
                         )
                     })
                     .collect();
+                #[allow(clippy::significant_drop_tightening)]
                 self.functions.write().unwrap().insert(
                     (program_identifier, name),
                     FunctionData {
@@ -268,10 +273,18 @@ impl Transpiler {
                 )
                 .unwrap_or_else(|| identifier_span.str().to_string());
 
-            let function = self
-                .datapack
-                .namespace_mut(&function_data.namespace)
-                .function_mut(&modified_name);
+            let namespace = self.datapack.namespace_mut(&function_data.namespace);
+
+            if namespace.function(&modified_name).is_some() {
+                let err = TranspileError::ConflictingFunctionNames(ConflictingFunctionNames {
+                    name: modified_name,
+                    definition: identifier_span.clone(),
+                });
+                handler.receive(err.clone());
+                return Err(err);
+            }
+
+            let function = namespace.function_mut(&modified_name);
             function.get_commands_mut().extend(commands);
 
             let function_location = format!(
