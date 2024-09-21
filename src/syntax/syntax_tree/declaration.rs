@@ -20,7 +20,7 @@ use crate::{
     },
 };
 
-use super::{statement::Block, ConnectedList};
+use super::{statement::Block, ConnectedList, DelimitedList};
 
 /// Syntax Synopsis:
 ///
@@ -35,6 +35,7 @@ use super::{statement::Block, ConnectedList};
 pub enum Declaration {
     Function(Function),
     Import(Import),
+    Tag(Tag),
 }
 
 impl SourceElement for Declaration {
@@ -42,6 +43,7 @@ impl SourceElement for Declaration {
         match self {
             Self::Function(function) => function.span(),
             Self::Import(import) => import.span(),
+            Self::Tag(tag) => tag.span(),
         }
     }
 }
@@ -226,6 +228,79 @@ impl SourceElement for Import {
     }
 }
 
+/// Syntax Synopsis:
+///
+/// ``` ebnf
+/// TagDeclaration:
+///     'tag' StringLiteral ('of' StringLiteral)? 'replace'? '[' (StringLiteral (',' StringLiteral)*)? ']'
+///     ;
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct Tag {
+    #[get = "pub"]
+    tag_keyword: Keyword,
+    #[get = "pub"]
+    name: StringLiteral,
+    #[get = "pub"]
+    of_type: Option<(Keyword, StringLiteral)>,
+    #[get = "pub"]
+    replace: Option<Keyword>,
+    #[get = "pub"]
+    entries: DelimitedList<StringLiteral>,
+}
+
+impl Tag {
+    #[must_use]
+    #[allow(clippy::type_complexity)]
+    pub fn dissolve(
+        self,
+    ) -> (
+        Keyword,
+        StringLiteral,
+        Option<(Keyword, StringLiteral)>,
+        Option<Keyword>,
+        DelimitedList<StringLiteral>,
+    ) {
+        (
+            self.tag_keyword,
+            self.name,
+            self.of_type,
+            self.replace,
+            self.entries,
+        )
+    }
+
+    #[cfg(feature = "shulkerbox")]
+    #[must_use]
+    pub fn tag_type(&self) -> shulkerbox::datapack::tag::TagType {
+        use shulkerbox::datapack::tag::TagType;
+
+        self.of_type
+            .as_ref()
+            .map_or(TagType::Functions, |(_, tag_type)| {
+                match tag_type.str_content().as_ref() {
+                    "function" => TagType::Functions,
+                    "block" => TagType::Blocks,
+                    "entity_type" => TagType::Entities,
+                    "fluid" => TagType::Fluids,
+                    "game_event" => TagType::GameEvents,
+                    "item" => TagType::Items,
+                    other => TagType::Others(other.to_string()),
+                }
+            })
+    }
+}
+
+impl SourceElement for Tag {
+    fn span(&self) -> Span {
+        self.tag_keyword
+            .span()
+            .join(&self.entries.close.span)
+            .unwrap()
+    }
+}
+
 impl<'a> Parser<'a> {
     /// Parses an annotation.
     ///
@@ -382,6 +457,44 @@ impl<'a> Parser<'a> {
 
                     Err(err)
                 }
+            }
+
+            Reading::Atomic(Token::Keyword(tag_keyword))
+                if tag_keyword.keyword == KeywordKind::Tag =>
+            {
+                // eat the tag keyword
+                self.forward();
+
+                // parse the name
+                let name = self.parse_string_literal(handler)?;
+
+                let of_type = self
+                    .try_parse(|parser| {
+                        let of_keyword = parser.parse_keyword(KeywordKind::Of, &VoidHandler)?;
+                        let of_type = parser.parse_string_literal(handler)?;
+
+                        Ok((of_keyword, of_type))
+                    })
+                    .ok();
+
+                let replace = self
+                    .try_parse(|parser| parser.parse_keyword(KeywordKind::Replace, &VoidHandler))
+                    .ok();
+
+                let entries = self.parse_enclosed_list(
+                    Delimiter::Bracket,
+                    ',',
+                    |parser| parser.parse_string_literal(handler),
+                    handler,
+                )?;
+
+                Ok(Declaration::Tag(Tag {
+                    tag_keyword,
+                    name,
+                    of_type,
+                    replace,
+                    entries,
+                }))
             }
 
             unexpected => {

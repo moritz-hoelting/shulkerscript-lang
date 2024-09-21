@@ -84,7 +84,6 @@ impl Transpiler {
 
         let mut always_transpile_functions = Vec::new();
 
-        // #[allow(clippy::significant_drop_in_scrutinee)]
         {
             let functions = self.functions.read().unwrap();
             for (_, data) in functions.iter() {
@@ -181,6 +180,22 @@ impl Transpiler {
                             );
                         }
                     }
+                }
+            }
+            Declaration::Tag(tag) => {
+                let namespace = self
+                    .datapack
+                    .namespace_mut(&namespace.namespace_name().str_content());
+                let sb_tag = namespace.tag_mut(&tag.name().str_content(), tag.tag_type());
+
+                if let Some(list) = &tag.entries().list {
+                    for value in list.elements() {
+                        sb_tag.add_value(value.str_content().as_ref().into());
+                    }
+                }
+
+                if tag.replace().is_some() {
+                    sb_tag.set_replace(true);
                 }
             }
         };
