@@ -49,6 +49,7 @@ pub struct ConnectedList<Element, Separator> {
 
 /// Represents a syntax tree node with a pattern of having [`ConnectedList`] delimited by a pair of
 /// punctuation like such `(a, b, c)`.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DelimitedList<T> {
     /// The open punctuation of the list.

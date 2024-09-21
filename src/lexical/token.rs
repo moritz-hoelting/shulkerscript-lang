@@ -41,6 +41,9 @@ pub enum KeywordKind {
     Namespace,
     From,
     Import,
+    Tag,
+    Of,
+    Replace,
 }
 
 impl Display for KeywordKind {
@@ -101,6 +104,9 @@ impl KeywordKind {
             Self::Namespace => "namespace",
             Self::From => "from",
             Self::Import => "import",
+            Self::Tag => "tag",
+            Self::Of => "of",
+            Self::Replace => "replace",
         }
     }
 

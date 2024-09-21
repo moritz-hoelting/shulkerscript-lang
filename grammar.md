@@ -14,12 +14,17 @@ Namespace: 'namespace' StringLiteral;
 
 ### Declaration
 ```ebnf
-Declaration: FunctionDeclaration | Import;
+Declaration: FunctionDeclaration | Import | TagDeclaration;
 ```
 
 ### Import
 ```ebnf
 Import: 'from' StringLiteral 'import' Identifier;
+```
+
+### TagDeclaration
+```ebnf
+TagDeclaration: 'tag' StringLiteral ('of' StringLiteral)? 'replace'? '[' (StringLiteral (',' StringLiteral)*)? ']';
 ```
 
 ### FunctionDeclaration
