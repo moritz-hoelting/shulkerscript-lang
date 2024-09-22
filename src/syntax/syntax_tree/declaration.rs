@@ -278,15 +278,15 @@ impl Tag {
 
         self.of_type
             .as_ref()
-            .map_or(TagType::Functions, |(_, tag_type)| {
+            .map_or(TagType::Function, |(_, tag_type)| {
                 match tag_type.str_content().as_ref() {
-                    "function" => TagType::Functions,
-                    "block" => TagType::Blocks,
-                    "entity_type" => TagType::Entities,
-                    "fluid" => TagType::Fluids,
-                    "game_event" => TagType::GameEvents,
-                    "item" => TagType::Items,
-                    other => TagType::Others(other.to_string()),
+                    "function" => TagType::Function,
+                    "block" => TagType::Block,
+                    "entity_type" => TagType::Entity,
+                    "fluid" => TagType::Fluid,
+                    "game_event" => TagType::GameEvent,
+                    "item" => TagType::Item,
+                    other => TagType::Other(other.to_string()),
                 }
             })
     }
