@@ -33,7 +33,7 @@ mlua = { version = "0.9.7", features = ["lua54", "vendored"], optional = true }
 path-absolutize = "3.1.1"
 pathdiff = "0.2.1"
 serde = { version = "1.0.197", features = ["derive", "rc"], optional = true }
-shulkerbox = { git = "https://github.com/moritz-hoelting/shulkerbox", default-features = false, optional = true, rev = "aff342a64a94981af942223345b5a5f105212957" }
+shulkerbox = { git = "https://github.com/moritz-hoelting/shulkerbox", default-features = false, optional = true, rev = "4ca0505e357aa7427657d6286f8a1b77eb7e63c6" }
 strsim = "0.11.1"
 strum = { version = "0.26.2", features = ["derive"] }
 strum_macros = "0.26.2"
