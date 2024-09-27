@@ -22,6 +22,8 @@ use crate::{
 
 use super::{statement::Block, ConnectedList, DelimitedList};
 
+/// Represents a declaration in the syntax tree.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
@@ -47,6 +49,8 @@ impl SourceElement for Declaration {
         }
     }
 }
+/// Represents an Annotation with optional value.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
@@ -99,6 +103,8 @@ impl SourceElement for Annotation {
     }
 }
 
+/// Represents a function declaration in the syntax tree.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
@@ -176,6 +182,8 @@ impl SourceElement for Function {
     }
 }
 
+/// Represents an import declaration in the syntax tree.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
@@ -198,6 +206,7 @@ pub struct Import {
     semicolon: Punctuation,
 }
 
+/// Items to import.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ImportItems {
@@ -228,6 +237,8 @@ impl SourceElement for Import {
     }
 }
 
+/// Represents a tag declaration in the syntax tree.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf

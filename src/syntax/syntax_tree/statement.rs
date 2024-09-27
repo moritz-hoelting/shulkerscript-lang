@@ -25,6 +25,8 @@ use self::execute_block::ExecuteBlock;
 
 use super::expression::Expression;
 
+/// Represents a statement in the syntax tree.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
@@ -65,6 +67,8 @@ impl SourceElement for Statement {
     }
 }
 
+/// Represents a block in the syntax tree.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
@@ -103,6 +107,8 @@ impl SourceElement for Block {
     }
 }
 
+/// Represents a run statement in the syntax tree.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
@@ -141,6 +147,8 @@ impl Run {
     }
 }
 
+/// Represents a grouping statement in the syntax tree.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
@@ -176,6 +184,8 @@ impl SourceElement for Grouping {
     }
 }
 
+/// Represents a statement that ends with a semicolon in the syntax tree.
+///
 /// Syntax Synopsis:
 /// ``` ebnf
 /// Semicolon:

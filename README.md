@@ -1,6 +1,6 @@
-# ShulkerScript Language
+# Shulkerscript Language
 
-ShulkerScript is a simple, easy-to-use scripting language for Minecraft datapacks. It is designed to be easy to learn and use, while still being powerful enough to create complex scripts, while not being hindered by Minecraft command limitations.
+Shulkerscript is a simple, easy-to-use scripting language for Minecraft datapacks. It is designed to be easy to learn and use, while still being powerful enough to create complex scripts, while not being hindered by Minecraft command limitations.
 
 ## Usage
 

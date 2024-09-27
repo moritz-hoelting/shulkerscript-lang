@@ -23,7 +23,7 @@ impl From<PrimaryCondition> for DpCondition {
                 Self::Atom(literal.str_content().to_string())
             }
             PrimaryCondition::Parenthesized(cond) => cond.dissolve().1.into(),
-            PrimaryCondition::Prefix(prefix) => match prefix.operator() {
+            PrimaryCondition::Unary(prefix) => match prefix.operator() {
                 ConditionalPrefixOperator::LogicalNot(_) => {
                     Self::Not(Box::new(prefix.dissolve().1.into()))
                 }

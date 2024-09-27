@@ -1,4 +1,4 @@
-//! Transpiler for `ShulkerScript`
+//! Transpiler for `Shulkerscript`
 
 use chksum_md5 as md5;
 use std::{
@@ -29,7 +29,7 @@ use crate::{
 
 use super::error::{TranspileError, TranspileResult, UnexpectedExpression};
 
-/// A transpiler for `ShulkerScript`.
+/// A transpiler for `Shulkerscript`.
 #[derive(Debug)]
 pub struct Transpiler {
     datapack: shulkerbox::datapack::Datapack,
@@ -282,7 +282,7 @@ impl Transpiler {
                     || {
                         let hash_data =
                             program_identifier.to_string() + "\0" + identifier_span.str();
-                        Some("shu/".to_string() + &md5::hash(hash_data).to_hex_lowercase()[..16])
+                        Some("shu/".to_string() + &md5::hash(hash_data).to_hex_lowercase())
                     },
                     Clone::clone,
                 )

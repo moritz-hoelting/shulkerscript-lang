@@ -1,6 +1,6 @@
-//! The `ShulkerScript` language.
+//! The `Shulkerscript` language.
 //!
-//! `ShulkerScript` is a simple, imperative scripting language for creating Minecraft data packs.
+//! `Shulkerscript` is a simple, imperative scripting language for creating Minecraft data packs.
 
 #![deny(
     missing_debug_implementations,
@@ -29,7 +29,9 @@ use shulkerbox::{datapack::Datapack, virtual_fs::VFolder};
 
 use crate::lexical::token_stream::TokenStream;
 
-/// The version of the `ShulkerScript` language.
+/// The version of the `Shulkerscript` language.
+///
+/// Matches the version of this [`crate`].
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Converts the given source code to tokens and returns a token stream.

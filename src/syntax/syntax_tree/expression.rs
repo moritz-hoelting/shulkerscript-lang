@@ -22,6 +22,8 @@ use crate::{
 
 use super::ConnectedList;
 
+/// Represents an expression in the syntax tree.
+///
 /// Syntax Synopsis:
 ///
 /// ```ebnf
@@ -43,6 +45,8 @@ impl SourceElement for Expression {
     }
 }
 
+/// Represents a primary expression in the syntax tree.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
@@ -68,6 +72,8 @@ impl SourceElement for Primary {
     }
 }
 
+/// Represents a function call in the syntax tree.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
@@ -101,6 +107,8 @@ impl SourceElement for FunctionCall {
     }
 }
 
+/// Represents a lua code block in the syntax tree.
+///
 /// Syntax Synopsis:
 ///
 /// ```ebnf

@@ -82,11 +82,11 @@ pub struct Error {
 }
 
 impl Error {
-    /// Creates a new [`FileProviderError`] from a known kind of error as well as an
+    /// Creates a new [`Error`] from a known kind of error as well as an
     /// arbitrary error payload.
     ///
     /// The `error` argument is an arbitrary
-    /// payload which will be contained in this [`FileProviderError`].
+    /// payload which will be contained in this [`Error`].
     ///
     /// Note that this function allocates memory on the heap.
     /// If no extra payload is required, use the `From` conversion from
@@ -101,9 +101,9 @@ impl Error {
         }
     }
 
-    /// Creates a new [`FileProviderError`] from an arbitrary error payload.
+    /// Creates a new [`Error`] from an arbitrary error payload.
     ///
-    /// It is a shortcut for [`FileProviderError::new`]
+    /// It is a shortcut for [`Error::new`]
     /// with [`std::io::ErrorKind::Other`].
     pub fn other<E>(error: E) -> Self
     where
@@ -114,14 +114,14 @@ impl Error {
 
     /// Returns a reference to the inner error wrapped by this error (if any).
     ///
-    /// If this [`FileProviderError`] was constructed via [`Self::new`] then this function will
+    /// If this [`Error`] was constructed via [`Self::new`] then this function will
     /// return [`Some`], otherwise it will return [`None`].
     #[must_use]
     pub fn get_ref(&self) -> Option<&(dyn std::error::Error + Send + Sync + 'static)> {
         return self.error.as_deref();
     }
 
-    /// Consumes the [`FileProviderError`], returning its inner error (if any).
+    /// Consumes the [`Error`], returning its inner error (if any).
     ///
     /// If this [`Error`] was constructed via [`Self::new`] then this function will
     /// return [`Some`], otherwise it will return [`None`].

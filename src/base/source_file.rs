@@ -86,7 +86,7 @@ impl SourceFile {
     /// Load the source file from the given file path.
     ///
     /// # Errors
-    /// - [`Error::IoError`]: Error occurred when reading the file contents.
+    /// - [`Error::FileProviderError`]: Error occurred when reading the file contents.
     pub fn load(
         path: &Path,
         identifier: String,
