@@ -23,6 +23,8 @@ use crate::{
 
 use super::Block;
 
+/// Represents an execute block statement in the syntax tree.
+///
 /// Syntax Synopsis:
 /// ```ebnf
 /// ExecuteBlock:
@@ -51,11 +53,25 @@ impl SourceElement for ExecuteBlock {
     }
 }
 
+/// Represents the head of an execute block statement.
+///
 /// Syntax Synopsis:
+///
 /// ```ebnf
 /// ExecuteBlockHead:
 ///   Conditional
+///  | Align
+///  | Anchored
 ///  | As
+///  | AsAt
+///  | At
+///  | Facing
+///  | In
+///  | On
+///  | Positioned
+///  | Rotated
+///  | Store
+///  | Summon
 /// ;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner, From)]
@@ -96,6 +112,8 @@ impl SourceElement for ExecuteBlockHead {
     }
 }
 
+/// Represents the tail of an execute block statement.
+///
 /// Syntax Synopsis:
 /// ```ebnf
 /// ExecuteBlockTail:
@@ -122,6 +140,8 @@ impl SourceElement for ExecuteBlockTail {
     }
 }
 
+/// Represents an conditional `if` statement in the syntax tree.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
@@ -157,6 +177,8 @@ impl SourceElement for Conditional {
     }
 }
 
+/// Represents an `else` block in the syntax tree.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
@@ -189,6 +211,8 @@ impl SourceElement for Else {
     }
 }
 
+/// Represents an `as` execute statement in the syntax tree.
+///
 /// Syntax Synopsis:
 ///
 /// ```ebnf
@@ -234,6 +258,8 @@ impl As {
     }
 }
 
+/// Represents an `align` execute statement in the syntax tree.
+///
 /// Syntax Synopsis:
 /// ```ebnf
 /// Align:
@@ -278,6 +304,8 @@ impl Align {
     }
 }
 
+/// Represents an `anchored` execute statement in the syntax tree.
+///
 /// Syntax Synopsis:
 /// ```ebnf
 /// Anchored:
@@ -321,6 +349,8 @@ impl Anchored {
     }
 }
 
+/// Represents an `asat` execute statement in the syntax tree.
+///
 /// Syntax Synopsis:
 /// ```ebnf
 /// AsAt:
@@ -364,6 +394,8 @@ impl AsAt {
     }
 }
 
+/// Represents an `at` execute statement in the syntax tree.
+///
 /// Syntax Synopsis:
 /// ```ebnf
 /// At:
@@ -407,6 +439,8 @@ impl At {
     }
 }
 
+/// Represents a `facing` execute statement in the syntax tree.
+///
 /// Syntax Synopsis:
 /// ```ebnf
 /// Facing:
@@ -450,6 +484,8 @@ impl Facing {
     }
 }
 
+/// Represents an `in` execute statement in the syntax tree.
+///
 /// Syntax Synopsis:
 /// ```ebnf
 /// In:
@@ -493,6 +529,8 @@ impl In {
     }
 }
 
+/// Represents an `on` execute statement in the syntax tree.
+///
 /// Syntax Synopsis:
 /// ```ebnf
 /// On:
@@ -536,6 +574,8 @@ impl On {
     }
 }
 
+/// Represents a `positioned` execute statement in the syntax tree.
+///
 /// Syntax Synopsis:
 /// ```ebnf
 /// Positioned:
@@ -579,6 +619,8 @@ impl Positioned {
     }
 }
 
+/// Represents a `rotated` execute statement in the syntax tree.
+///
 /// Syntax Synopsis:
 /// ```ebnf
 /// Rotated:
@@ -622,6 +664,8 @@ impl Rotated {
     }
 }
 
+/// Represents a `store` execute statement in the syntax tree.
+///
 /// Syntax Synopsis:
 /// ```ebnf
 /// Store:
@@ -665,6 +709,8 @@ impl Store {
     }
 }
 
+/// Represents a `summon` execute statement in the syntax tree.
+///
 /// Syntax Synopsis:
 /// ```ebnf
 /// Summon:

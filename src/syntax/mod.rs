@@ -1,4 +1,4 @@
-//! This module contains the syntax tree and parser for the `ShulkerScript` language.
+//! This module contains the syntax tree and parser for the `Shulkerscript` language.
 
 pub mod error;
 pub mod parser;

@@ -23,11 +23,13 @@ use crate::{
     },
 };
 
+/// Condition that is viewed as a single entity during precedence parsing.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
 /// PrimaryCondition:
-///     ConditionalPrefix
+///     UnaryCondition
 ///     | ParenthesizedCondition
 ///     | StringLiteral
 /// ```
@@ -35,7 +37,7 @@ use crate::{
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
 pub enum PrimaryCondition {
-    Prefix(ConditionalPrefix),
+    Unary(UnaryCondition),
     Parenthesized(ParenthesizedCondition),
     StringLiteral(StringLiteral),
 }
@@ -43,13 +45,15 @@ pub enum PrimaryCondition {
 impl SourceElement for PrimaryCondition {
     fn span(&self) -> Span {
         match self {
-            Self::Prefix(prefix) => prefix.span(),
+            Self::Unary(unary) => unary.span(),
             Self::Parenthesized(parenthesized) => parenthesized.span(),
             Self::StringLiteral(literal) => literal.span(),
         }
     }
 }
 
+/// Condition that is composed of two conditions and a binary operator.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
@@ -88,6 +92,8 @@ impl BinaryCondition {
     }
 }
 
+/// Operator that is used to combine two conditions.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
@@ -128,6 +134,8 @@ impl SourceElement for ConditionalBinaryOperator {
     }
 }
 
+/// Condition that is enclosed in parentheses.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
@@ -165,6 +173,8 @@ impl SourceElement for ParenthesizedCondition {
     }
 }
 
+/// Operator that is used to prefix a condition.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
@@ -185,16 +195,18 @@ impl SourceElement for ConditionalPrefixOperator {
     }
 }
 
+/// Condition that is prefixed by an operator.
+///
 /// Syntax Synopsis:
 ///
 /// ```ebnf
-/// ConditionalPrefix:
+/// UnaryCondition:
 ///     ConditionalPrefixOperator PrimaryCondition
 ///     ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
-pub struct ConditionalPrefix {
+pub struct UnaryCondition {
     /// The operator of the prefix.
     #[get = "pub"]
     operator: ConditionalPrefixOperator,
@@ -203,12 +215,12 @@ pub struct ConditionalPrefix {
     operand: Box<PrimaryCondition>,
 }
 
-impl SourceElement for ConditionalPrefix {
+impl SourceElement for UnaryCondition {
     fn span(&self) -> Span {
         self.operator.span().join(&self.operand.span()).unwrap()
     }
 }
-impl ConditionalPrefix {
+impl UnaryCondition {
     /// Dissolves the conditional prefix into its components
     #[must_use]
     pub fn dissolve(self) -> (ConditionalPrefixOperator, PrimaryCondition) {
@@ -216,6 +228,8 @@ impl ConditionalPrefix {
     }
 }
 
+/// Represents a condition in the syntax tree.
+///
 /// Syntax Synopsis:
 ///
 /// ``` ebnf
@@ -331,7 +345,7 @@ impl<'a> Parser<'a> {
 
                 let operand = Box::new(self.parse_primary_condition(handler)?);
 
-                Ok(PrimaryCondition::Prefix(ConditionalPrefix {
+                Ok(PrimaryCondition::Unary(UnaryCondition {
                     operator,
                     operand,
                 }))

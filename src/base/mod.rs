@@ -1,4 +1,4 @@
-//! The base module contains the core functionality of the `ShulkerScript` language.
+//! The base module contains the core functionality of the `Shulkerscript` language.
 
 pub mod source_file;
 

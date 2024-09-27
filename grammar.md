@@ -1,4 +1,4 @@
-# Grammar of the ShulkerScript language
+# Grammar of the Shulkerscript language
 
 ## Table of contents
 
