@@ -4,11 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 authors = ["Moritz Hölting <moritz@hoelting.dev>"]
-categories = ["compilers"]
 description = "Shulkerscript language implementation with compiler"
+categories = ["compilers", "game-development"]
+keywords = ["minecraft", "datapack", "mcfunction"]
 repository = "https://github.com/moritz-hoelting/shulkerscript-lang"
+homepage = "https://shulkerscript.hoelting.dev/"
 readme = "README.md"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -34,7 +36,7 @@ mlua = { version = "0.9.7", features = ["lua54", "vendored"], optional = true }
 path-absolutize = "3.1.1"
 pathdiff = "0.2.1"
 serde = { version = "1.0.197", features = ["derive", "rc"], optional = true }
-shulkerbox = { git = "https://github.com/moritz-hoelting/shulkerbox", default-features = false, optional = true, rev = "a16f1ce105959b37bd5776476352b92905ff12d1" }
+shulkerbox = { git = "https://github.com/moritz-hoelting/shulkerbox", default-features = false, optional = true, rev = "6e956fbe7438158c6a29c1a92d057f0f3093405a" }
 strsim = "0.11.1"
 strum = { version = "0.26.2", features = ["derive"] }
 strum_macros = "0.26.4"
