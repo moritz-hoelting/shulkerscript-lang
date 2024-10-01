@@ -7,8 +7,12 @@ Shulkerscript is a simple, easy-to-use scripting language for Minecraft datapack
 Add the following to your dependencies in `Cargo.toml`:
 ```toml
 [dependencies]
-shulkerscript-lang = { git = "https://github.com/moritz-hoelting/shulkerscript-lang" }
+shulkerscript = "0.1.0"
 ```
+
+## VS Code Extension
+
+A VS Code extension is available [here](https://marketplace.visualstudio.com/items?itemName=moritz-hoelting.shulkerscript-lang) to provide syntax highlighting and snippets for Shulkerscript files.
 
 ## Features
 
