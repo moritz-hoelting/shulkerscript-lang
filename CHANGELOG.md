@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Removed
+
+## [0.1.0] - 2024-10-01
+
+### Added
+
 - Functions
     - without arguments
 - Raw commands
@@ -22,6 +30,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - group
 - Tags
 
-### Changed
-
-### Removed
+[unreleased]: https://github.com/moritz-hoelting/shulkerscript-lang/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/moritz-hoelting/shulkerscript-lang/releases/tag/v0.1.0

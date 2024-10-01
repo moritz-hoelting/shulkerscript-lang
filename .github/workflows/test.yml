@@ -1,0 +1,19 @@
+name: Cargo build & test
+on:
+    push:
+        branches: 
+            - main
+            - development
+            - 'releases/**'
+    pull_request:
+
+env:
+    CARGO_TERM_COLOR: always
+
+jobs:
+    build_and_test:
+        name: Cargo test
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - run: cargo test --verbose
