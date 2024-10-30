@@ -14,6 +14,10 @@ shulkerscript = "0.1.0"
 
 A VS Code extension is available [here](https://marketplace.visualstudio.com/items?itemName=moritz-hoelting.shulkerscript-lang) to provide syntax highlighting and snippets for Shulkerscript files.
 
+## Usage
+
+Read the [documentation](https://shulkerscript.hoelting.dev) for more information on the language and cli.
+
 ## Features
 
 ### Functions

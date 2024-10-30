@@ -81,7 +81,7 @@ mod enabled {
         fn handle_lua_result(&self, value: Value) -> TranspileResult<Option<String>> {
             match value {
                 Value::Nil => Ok(None),
-                Value::String(s) => Ok(Some(s.to_string_lossy().into_owned())),
+                Value::String(s) => Ok(Some(s.to_string_lossy())),
                 Value::Integer(i) => Ok(Some(i.to_string())),
                 Value::Number(n) => Ok(Some(n.to_string())),
                 Value::Function(f) => self.handle_lua_result(f.call(()).map_err(|err| {
@@ -95,12 +95,11 @@ mod enabled {
                 | Value::Table(_)
                 | Value::Thread(_)
                 | Value::UserData(_)
-                | Value::LightUserData(_) => {
-                    Err(TranspileError::LuaRuntimeError(LuaRuntimeError {
-                        code_block: self.span(),
-                        error_message: format!("invalid return type {}", value.type_name()),
-                    }))
-                }
+                | Value::LightUserData(_)
+                | Value::Other(..) => Err(TranspileError::LuaRuntimeError(LuaRuntimeError {
+                    code_block: self.span(),
+                    error_message: format!("invalid return type {}", value.type_name()),
+                })),
             }
         }
     }
