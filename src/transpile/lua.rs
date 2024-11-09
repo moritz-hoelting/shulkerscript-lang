@@ -59,7 +59,7 @@ mod enabled {
                     err
                 })?;
 
-            self.handle_lua_result(dbg!(lua_result)).map_err(|err| {
+            self.handle_lua_result(lua_result).map_err(|err| {
                 handler.receive(err.clone());
                 err
             })
