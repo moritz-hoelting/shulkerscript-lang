@@ -4,6 +4,7 @@ use std::{borrow::Cow, collections::HashMap, fmt::Display, str::FromStr, sync::O
 
 use crate::base::{
     self,
+    log::SourceCodeDisplay,
     source_file::{SourceElement, SourceIterator, Span},
     Handler,
 };
@@ -146,24 +147,7 @@ pub enum Token {
     DocComment(DocComment),
     CommandLiteral(CommandLiteral),
     StringLiteral(StringLiteral),
-}
-
-impl Token {
-    /// Returns the span of the token.
-    #[must_use]
-    pub fn span(&self) -> &Span {
-        match self {
-            Self::WhiteSpaces(token) => &token.span,
-            Self::Identifier(token) => &token.span,
-            Self::Keyword(token) => &token.span,
-            Self::Punctuation(token) => &token.span,
-            Self::Numeric(token) => &token.span,
-            Self::Comment(token) => &token.span,
-            Self::DocComment(token) => &token.span,
-            Self::CommandLiteral(token) => &token.span,
-            Self::StringLiteral(token) => &token.span,
-        }
-    }
+    MacroStringLiteral(MacroStringLiteral),
 }
 
 impl SourceElement for Token {
@@ -178,6 +162,7 @@ impl SourceElement for Token {
             Self::DocComment(token) => token.span(),
             Self::CommandLiteral(token) => token.span(),
             Self::StringLiteral(token) => token.span(),
+            Self::MacroStringLiteral(token) => token.span(),
         }
     }
 }
@@ -291,6 +276,67 @@ impl SourceElement for StringLiteral {
     }
 }
 
+/// Represents a hardcoded macro string literal value in the source code.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MacroStringLiteral {
+    /// The backtick that starts the macro string literal.
+    starting_backtick: Punctuation,
+    /// The parts that make up the macro string literal.
+    parts: Vec<MacroStringLiteralPart>,
+    /// The backtick that ends the macro string literal.
+    ending_backtick: Punctuation,
+}
+
+impl MacroStringLiteral {
+    /// Returns the string content without escapement characters, leading and trailing double quotes.
+    #[must_use]
+    pub fn str_content(&self) -> String {
+        let span = self.span();
+        let string = span.str();
+        let string = &string[1..string.len() - 1];
+        if string.contains('\\') {
+            string
+                .replace("\\n", "\n")
+                .replace("\\r", "\r")
+                .replace("\\t", "\t")
+                .replace("\\\"", "\"")
+                .replace("\\\\", "\\")
+        } else {
+            string.to_string()
+        }
+    }
+
+    /// Returns the parts that make up the macro string literal.
+    #[must_use]
+    pub fn parts(&self) -> &[MacroStringLiteralPart] {
+        &self.parts
+    }
+}
+
+impl SourceElement for MacroStringLiteral {
+    fn span(&self) -> Span {
+        self.starting_backtick
+            .span
+            .join(&self.ending_backtick.span)
+            .expect("Invalid macro string literal span")
+    }
+}
+
+/// Represents a part of a macro string literal value in the source code.
+#[allow(missing_docs)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum MacroStringLiteralPart {
+    Text(Span),
+    MacroUsage {
+        dollar: Punctuation,
+        open_brace: Punctuation,
+        identifier: Identifier,
+        close_brace: Punctuation,
+    },
+}
+
 /// Is an enumeration representing the two kinds of comments in the Shulkerscript programming language.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -363,7 +409,7 @@ impl CommandLiteral {
 }
 
 /// Is an error that can occur when invoking the [`Token::tokenize`] method.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, thiserror::Error, From)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, thiserror::Error)]
 #[allow(missing_docs)]
 pub enum TokenizeError {
     #[error("encountered a fatal lexical error that causes the process to stop.")]
@@ -371,7 +417,94 @@ pub enum TokenizeError {
 
     #[error("the iterator argument is at the end of the source code.")]
     EndOfSourceCodeIteratorArgument,
+
+    #[error(transparent)]
+    InvalidMacroNameCharacter(#[from] InvalidMacroNameCharacter),
+
+    #[error(transparent)]
+    UnclosedMacroUsage(#[from] UnclosedMacroUsage),
+
+    #[error(transparent)]
+    EmptyMacroUsage(#[from] EmptyMacroUsage),
 }
+
+/// Is an error that can occur when the macro name contains invalid characters.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InvalidMacroNameCharacter {
+    /// The span of the invalid characters.
+    pub span: Span,
+}
+
+impl Display for InvalidMacroNameCharacter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            base::log::Message::new(base::log::Severity::Error, format!("The macro name contains invalid characters: `{}`. Only alphanumeric characters and underscores are allowed.", self.span.str()))
+        )?;
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(&self.span, Option::<u8>::None)
+        )
+    }
+}
+
+impl std::error::Error for InvalidMacroNameCharacter {}
+
+/// Is an error that can occur when the macro usage is not closed.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct UnclosedMacroUsage {
+    /// The span of the unclosed macro usage.
+    pub span: Span,
+}
+
+impl Display for UnclosedMacroUsage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            base::log::Message::new(
+                base::log::Severity::Error,
+                "A macro usage was opened with `$(` but never closed."
+            )
+        )?;
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(&self.span, Option::<u8>::None)
+        )
+    }
+}
+
+impl std::error::Error for UnclosedMacroUsage {}
+
+/// Is an error that can occur when the macro usage is not closed.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct EmptyMacroUsage {
+    /// The span of the unclosed macro usage.
+    pub span: Span,
+}
+
+impl Display for EmptyMacroUsage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            base::log::Message::new(
+                base::log::Severity::Error,
+                "A macro usage was opened with `$(` but closed immediately with `)`."
+            )
+        )?;
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(&self.span, Option::<u8>::None)
+        )
+    }
+}
+
+impl std::error::Error for EmptyMacroUsage {}
 
 impl Token {
     /// Increments the iterator while the predicate returns true.
@@ -386,10 +519,31 @@ impl Token {
     }
 
     /// Creates a span from the given start location to the current location of the iterator.
+    #[must_use]
     fn create_span(start: usize, iter: &mut SourceIterator) -> Span {
         iter.peek().map_or_else(
             || Span::to_end(iter.source_file().clone(), start).unwrap(),
             |(index, _)| Span::new(iter.source_file().clone(), start, index).unwrap(),
+        )
+    }
+
+    /// Creates a span from the given start location to the current location of the iterator with the given offset.
+    #[must_use]
+    fn create_span_with_end_offset(
+        start: usize,
+        iter: &mut SourceIterator,
+        end_offset: isize,
+    ) -> Span {
+        iter.peek().map_or_else(
+            || Span::to_end_with_offset(iter.source_file().clone(), start, end_offset).unwrap(),
+            |(index, _)| {
+                Span::new(
+                    iter.source_file().clone(),
+                    start,
+                    index.saturating_add_signed(end_offset),
+                )
+                .unwrap()
+            },
         )
     }
 
@@ -552,6 +706,120 @@ impl Token {
         .into()
     }
 
+    /// Handles a sequence of characters that are enclosed in backticks and contain macro usages
+    fn handle_macro_string_literal(
+        iter: &mut SourceIterator,
+        mut start: usize,
+    ) -> Result<Self, TokenizeError> {
+        let mut is_escaped = false;
+        let mut is_inside_macro = false;
+        let mut encountered_open_parenthesis = false;
+        let starting_backtick = Punctuation {
+            span: Self::create_span(start, iter),
+            punctuation: '`',
+        };
+        start += 1;
+        let mut parts = Vec::new();
+
+        while iter.peek().is_some() {
+            let (index, character) = iter.next().unwrap();
+
+            #[expect(clippy::collapsible_else_if)]
+            if is_inside_macro {
+                if character == ')' {
+                    // Check if the macro usage is empty
+                    if start + 2 == index {
+                        return Err(EmptyMacroUsage {
+                            span: Span::new(iter.source_file().clone(), start, index + 1).unwrap(),
+                        }
+                        .into());
+                    }
+                    parts.push(MacroStringLiteralPart::MacroUsage {
+                        dollar: Punctuation {
+                            span: Span::new(iter.source_file().clone(), start, start + 1).unwrap(),
+                            punctuation: '$',
+                        },
+                        open_brace: Punctuation {
+                            span: Span::new(iter.source_file().clone(), start + 1, start + 2)
+                                .unwrap(),
+                            punctuation: '(',
+                        },
+                        identifier: Identifier {
+                            span: Self::create_span_with_end_offset(start + 2, iter, -1),
+                        },
+                        close_brace: Punctuation {
+                            span: Span::new(iter.source_file().clone(), index, index + 1).unwrap(),
+                            punctuation: ')',
+                        },
+                    });
+                    start = index + 1;
+                    is_inside_macro = false;
+                } else if !encountered_open_parenthesis && character == '(' {
+                    encountered_open_parenthesis = true;
+                } else if encountered_open_parenthesis
+                    && !Self::is_valid_macro_name_character(character)
+                {
+                    if character == '`' {
+                        return Err(UnclosedMacroUsage {
+                            span: Span::new(iter.source_file().clone(), start, start + 2).unwrap(),
+                        }
+                        .into());
+                    }
+
+                    Self::walk_iter(iter, |c| {
+                        c != ')' && !Self::is_valid_macro_name_character(c)
+                    });
+                    return Err(InvalidMacroNameCharacter {
+                        span: Self::create_span(index, iter),
+                    }
+                    .into());
+                }
+            } else {
+                if character == '$' && iter.peek().is_some_and(|(_, c)| c == '(') {
+                    parts.push(MacroStringLiteralPart::Text(
+                        Self::create_span_with_end_offset(start, iter, -1),
+                    ));
+                    start = index;
+                    is_inside_macro = true;
+                    encountered_open_parenthesis = false;
+                } else if character == '\\' {
+                    is_escaped = !is_escaped;
+                } else if character == '`' && !is_escaped {
+                    if start != index {
+                        parts.push(MacroStringLiteralPart::Text(
+                            Self::create_span_with_end_offset(start, iter, -1),
+                        ));
+                    }
+                    start = index;
+                    break;
+                } else {
+                    is_escaped = false;
+                }
+            }
+        }
+
+        if is_inside_macro {
+            Err(UnclosedMacroUsage {
+                span: Span::new(iter.source_file().clone(), start, start + 2).unwrap(),
+            }
+            .into())
+        } else {
+            Ok(MacroStringLiteral {
+                starting_backtick,
+                parts,
+                ending_backtick: Punctuation {
+                    span: Self::create_span(start, iter),
+                    punctuation: '`',
+                },
+            }
+            .into())
+        }
+    }
+
+    fn is_valid_macro_name_character(character: char) -> bool {
+        character.is_ascii_alphanumeric() || character == '_'
+    }
+
     /// Handles a command that is preceeded by a slash
     fn handle_command_literal(iter: &mut SourceIterator, start: usize) -> Self {
         Self::walk_iter(iter, |c| !(c.is_whitespace() && c.is_ascii_control()));
@@ -593,8 +861,14 @@ impl Token {
         // Found comment/single slash punctuation
         else if character == '/' {
             Self::handle_comment(iter, start, character, prev_token, handler)
-        } else if character == '"' {
+        }
+        // Found string literal
+        else if character == '"' {
             Ok(Self::handle_string_literal(iter, start))
+        }
+        // Found macro string literal
+        else if character == '`' {
+            Self::handle_macro_string_literal(iter, start)
         }
         // Found numeric literal
         else if character.is_ascii_digit() {

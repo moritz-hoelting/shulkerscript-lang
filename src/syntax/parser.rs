@@ -6,12 +6,18 @@ use enum_as_inner::EnumAsInner;
 use crate::{
     base::{self, Handler},
     lexical::{
-        token::{Identifier, Keyword, KeywordKind, Numeric, Punctuation, StringLiteral, Token},
+        token::{
+            Identifier, Keyword, KeywordKind, MacroStringLiteral, Numeric, Punctuation,
+            StringLiteral, Token,
+        },
         token_stream::{Delimited, Delimiter, TokenStream, TokenTree},
     },
 };
 
-use super::error::{Error, ParseResult, SyntaxKind, UnexpectedSyntax};
+use super::{
+    error::{Error, ParseResult, SyntaxKind, UnexpectedSyntax},
+    syntax_tree::AnyStringLiteral,
+};
 
 /// Represents a parser that reads a token stream and constructs an abstract syntax tree.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deref, DerefMut)]
@@ -424,6 +430,49 @@ impl<'a> Frame<'a> {
             found => {
                 let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                     expected: SyntaxKind::StringLiteral,
+                    found: found.into_token(),
+                });
+                handler.receive(err.clone());
+                Err(err)
+            }
+        }
+    }
+
+    /// Expects the next [`Token`] to be an [`MacroStringLiteral`], and returns it.
+    ///
+    /// # Errors
+    /// If the next [`Token`] is not an [`MacroStringLiteral`].
+    pub fn parse_macro_string_literal(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> ParseResult<MacroStringLiteral> {
+        match self.next_significant_token() {
+            Reading::Atomic(Token::MacroStringLiteral(literal)) => Ok(literal),
+            found => {
+                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
+                    expected: SyntaxKind::MacroStringLiteral,
+                    found: found.into_token(),
+                });
+                handler.receive(err.clone());
+                Err(err)
+            }
+        }
+    }
+
+    /// Expects the next [`Token`] to be an [`AnyStringLiteral`], and returns it.
+    ///
+    /// # Errors
+    /// If the next [`Token`] is not an [`AnyStringLiteral`].
+    pub fn parse_any_string_literal(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> ParseResult<AnyStringLiteral> {
+        match self.next_significant_token() {
+            Reading::Atomic(Token::StringLiteral(literal)) => Ok(literal.into()),
+            Reading::Atomic(Token::MacroStringLiteral(literal)) => Ok(literal.into()),
+            found => {
+                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
+                    expected: SyntaxKind::AnyStringLiteral,
                     found: found.into_token(),
                 });
                 handler.receive(err.clone());

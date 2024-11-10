@@ -10,7 +10,9 @@ use crate::{
         Handler,
     },
     lexical::{
-        token::{Identifier, Keyword, KeywordKind, Punctuation, StringLiteral, Token},
+        token::{
+            Identifier, Keyword, KeywordKind, MacroStringLiteral, Punctuation, StringLiteral, Token,
+        },
         token_stream::Delimiter,
     },
     syntax::{
@@ -52,6 +54,9 @@ impl SourceElement for Expression {
 /// ``` ebnf
 /// Primary:
 ///     FunctionCall
+///     | StringLiteral
+///     | MacroStringLiteral
+///     | LuaCode
 /// ```
 #[allow(missing_docs)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -59,6 +64,7 @@ impl SourceElement for Expression {
 pub enum Primary {
     FunctionCall(FunctionCall),
     StringLiteral(StringLiteral),
+    MacroStringLiteral(MacroStringLiteral),
     Lua(Box<LuaCode>),
 }
 
@@ -67,6 +73,7 @@ impl SourceElement for Primary {
         match self {
             Self::FunctionCall(function_call) => function_call.span(),
             Self::StringLiteral(string_literal) => string_literal.span(),
+            Self::MacroStringLiteral(macro_string_literal) => macro_string_literal.span(),
             Self::Lua(lua_code) => lua_code.span(),
         }
     }
@@ -180,6 +187,7 @@ impl<'a> Parser<'a> {
     /// # Errors
     /// - If the parser is not at a primary expression.
     /// - If the parser is not at a valid primary expression.
+    #[expect(clippy::too_many_lines)]
     pub fn parse_primary(&mut self, handler: &impl Handler<base::Error>) -> ParseResult<Primary> {
         match self.stop_at_significant() {
             // identifier expression
@@ -222,6 +230,14 @@ impl<'a> Parser<'a> {
                 self.forward();
 
                 Ok(Primary::StringLiteral(literal))
+            }
+
+            // macro string literal expression
+            Reading::Atomic(Token::MacroStringLiteral(macro_string_literal)) => {
+                // eat the macro string literal
+                self.forward();
+
+                Ok(Primary::MacroStringLiteral(macro_string_literal))
             }
 
             // lua code expression
@@ -267,10 +283,11 @@ impl<'a> Parser<'a> {
                         let combined = first
                             .into_token()
                             .and_then(|first| {
-                                first.span().join(&last.into_token().map_or_else(
-                                    || first.span().to_owned(),
-                                    |last| last.span().to_owned(),
-                                ))
+                                first.span().join(
+                                    &last
+                                        .into_token()
+                                        .map_or_else(|| first.span(), |last| last.span()),
+                                )
                             })
                             .expect("Invalid lua code span");
 

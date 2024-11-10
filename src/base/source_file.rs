@@ -253,6 +253,26 @@ impl Span {
         })
     }
 
+    /// Create a span from the given start byte index to the end of the source file with an offset.
+    #[must_use]
+    pub fn to_end_with_offset(
+        source_file: Arc<SourceFile>,
+        start: usize,
+        end_offset: isize,
+    ) -> Option<Self> {
+        if !source_file.content().is_char_boundary(start) {
+            return None;
+        }
+        Some(Self {
+            start,
+            end: source_file
+                .content()
+                .len()
+                .saturating_add_signed(end_offset),
+            source_file,
+        })
+    }
+
     /// Get the string slice of the source code that the span represents.
     #[must_use]
     pub fn str(&self) -> &str {
