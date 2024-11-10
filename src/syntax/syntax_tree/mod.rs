@@ -1,5 +1,6 @@
 //! Contains the syntax tree nodes that represent the structure of the source code.
 
+use derive_more::derive::From;
 use getset::Getters;
 
 use crate::{
@@ -9,7 +10,7 @@ use crate::{
         Handler, VoidHandler,
     },
     lexical::{
-        token::{Punctuation, Token},
+        token::{MacroStringLiteral, Punctuation, StringLiteral, Token},
         token_stream::Delimiter,
     },
     syntax::parser::Reading,
@@ -62,6 +63,29 @@ pub struct DelimitedList<T> {
 
     /// The close punctuation of the list.
     pub close: Punctuation,
+}
+
+/// Represents a syntax tree node that can be either a string literal or a macro string literal.
+///
+/// Syntax Synopsis:
+/// ```ebnf
+/// AnyStringLiteral: StringLiteral | MacroStringLiteral ;
+/// ```
+#[allow(missing_docs)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, From)]
+pub enum AnyStringLiteral {
+    StringLiteral(StringLiteral),
+    MacroStringLiteral(MacroStringLiteral),
+}
+
+impl SourceElement for AnyStringLiteral {
+    fn span(&self) -> Span {
+        match self {
+            Self::StringLiteral(string_literal) => string_literal.span(),
+            Self::MacroStringLiteral(macro_string_literal) => macro_string_literal.span(),
+        }
+    }
 }
 
 impl<'a> Parser<'a> {

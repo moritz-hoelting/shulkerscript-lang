@@ -382,6 +382,9 @@ impl Transpiler {
                 Expression::Primary(Primary::StringLiteral(string)) => {
                     Ok(Some(Command::Raw(string.str_content().to_string())))
                 }
+                Expression::Primary(Primary::MacroStringLiteral(string)) => {
+                    Ok(Some(Command::UsesMacro(string.into())))
+                }
                 Expression::Primary(Primary::Lua(code)) => {
                     Ok(code.eval_string(handler)?.map(Command::Raw))
                 }
@@ -603,53 +606,53 @@ impl Transpiler {
                     None
                 }
             }
-            ExecuteBlockHead::As(as_) => {
-                let selector = as_.as_selector().str_content();
-                tail.map(|tail| Execute::As(selector.to_string(), Box::new(tail)))
+            ExecuteBlockHead::As(r#as) => {
+                let selector = r#as.as_selector();
+                tail.map(|tail| Execute::As(selector.into(), Box::new(tail)))
             }
             ExecuteBlockHead::At(at) => {
-                let selector = at.at_selector().str_content();
-                tail.map(|tail| Execute::At(selector.to_string(), Box::new(tail)))
+                let selector = at.at_selector();
+                tail.map(|tail| Execute::At(selector.into(), Box::new(tail)))
             }
             ExecuteBlockHead::Align(align) => {
-                let align = align.align_selector().str_content();
-                tail.map(|tail| Execute::Align(align.to_string(), Box::new(tail)))
+                let align = align.align_selector();
+                tail.map(|tail| Execute::Align(align.into(), Box::new(tail)))
             }
             ExecuteBlockHead::Anchored(anchored) => {
-                let anchor = anchored.anchored_selector().str_content();
-                tail.map(|tail| Execute::Anchored(anchor.to_string(), Box::new(tail)))
+                let anchor = anchored.anchored_selector();
+                tail.map(|tail| Execute::Anchored(anchor.into(), Box::new(tail)))
             }
-            ExecuteBlockHead::In(in_) => {
-                let dimension = in_.in_selector().str_content();
-                tail.map(|tail| Execute::In(dimension.to_string(), Box::new(tail)))
+            ExecuteBlockHead::In(r#in) => {
+                let dimension = r#in.in_selector();
+                tail.map(|tail| Execute::In(dimension.into(), Box::new(tail)))
             }
             ExecuteBlockHead::Positioned(positioned) => {
-                let position = positioned.positioned_selector().str_content();
-                tail.map(|tail| Execute::Positioned(position.to_string(), Box::new(tail)))
+                let position = positioned.positioned_selector();
+                tail.map(|tail| Execute::Positioned(position.into(), Box::new(tail)))
             }
             ExecuteBlockHead::Rotated(rotated) => {
-                let rotation = rotated.rotated_selector().str_content();
-                tail.map(|tail| Execute::Rotated(rotation.to_string(), Box::new(tail)))
+                let rotation = rotated.rotated_selector();
+                tail.map(|tail| Execute::Rotated(rotation.into(), Box::new(tail)))
             }
             ExecuteBlockHead::Facing(facing) => {
-                let facing = facing.facing_selector().str_content();
-                tail.map(|tail| Execute::Facing(facing.to_string(), Box::new(tail)))
+                let facing = facing.facing_selector();
+                tail.map(|tail| Execute::Facing(facing.into(), Box::new(tail)))
             }
             ExecuteBlockHead::AsAt(as_at) => {
-                let selector = as_at.asat_selector().str_content();
-                tail.map(|tail| Execute::AsAt(selector.to_string(), Box::new(tail)))
+                let selector = as_at.asat_selector();
+                tail.map(|tail| Execute::AsAt(selector.into(), Box::new(tail)))
             }
             ExecuteBlockHead::On(on) => {
-                let dimension = on.on_selector().str_content();
-                tail.map(|tail| Execute::On(dimension.to_string(), Box::new(tail)))
+                let dimension = on.on_selector();
+                tail.map(|tail| Execute::On(dimension.into(), Box::new(tail)))
             }
             ExecuteBlockHead::Store(store) => {
-                let store = store.store_selector().str_content();
-                tail.map(|tail| Execute::Store(store.to_string(), Box::new(tail)))
+                let store = store.store_selector();
+                tail.map(|tail| Execute::Store(store.into(), Box::new(tail)))
             }
             ExecuteBlockHead::Summon(summon) => {
-                let entity = summon.summon_selector().str_content();
-                tail.map(|tail| Execute::Summon(entity.to_string(), Box::new(tail)))
+                let entity = summon.summon_selector();
+                tail.map(|tail| Execute::Summon(entity.into(), Box::new(tail)))
             }
         })
     }

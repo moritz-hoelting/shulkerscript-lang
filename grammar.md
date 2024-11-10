@@ -12,6 +12,21 @@ Program: Namespace Declaration*;
 Namespace: 'namespace' StringLiteral;
 ```
 
+### StringLiteral
+```ebnf
+StringLiteral: '"' TEXT '"';
+```
+
+### MacroStringLiteral
+```ebnf
+MacroStringLiteral: '`' ( TEXT | '$(' [a-zA-Z0-9_]+ ')' )* '`';
+```
+
+### AnyStringLiteral
+```ebnf
+AnyStringLiteral: StringLiteral | MacroStringLiteral;
+```
+
 ### Declaration
 ```ebnf
 Declaration: FunctionDeclaration | Import | TagDeclaration;
@@ -87,7 +102,7 @@ Condition:
 PrimaryCondition:
     ConditionalPrefix
     | ParenthesizedCondition
-    | StringLiteral
+    | AnyStringLiteral
     ;
 ```
 
@@ -144,6 +159,8 @@ Expression:
 ```ebnf
 Primary:
     FunctionCall
+    | AnyStringLiteral
+    | LuaCode
     ;
 ```
 

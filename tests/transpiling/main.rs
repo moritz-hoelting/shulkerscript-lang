@@ -28,9 +28,9 @@ fn transpile_test1() {
         main_fn.add_command(Command::Raw("say Hello, World!".to_string()));
 
         let exec_cmd = Command::Execute(Execute::As(
-            "@a".to_string(),
+            "@a".to_string().into(),
             Box::new(Execute::If(
-                Condition::Atom("entity @p[distance=..5]".to_string()),
+                Condition::Atom("entity @p[distance=..5]".to_string().into()),
                 Box::new(Execute::Run(Box::new(Command::Raw(
                     "say You are close to me!".to_string(),
                 )))),

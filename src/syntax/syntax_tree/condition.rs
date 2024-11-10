@@ -14,7 +14,7 @@ use crate::{
         Handler, VoidHandler,
     },
     lexical::{
-        token::{Punctuation, StringLiteral, Token},
+        token::{Punctuation, Token},
         token_stream::Delimiter,
     },
     syntax::{
@@ -22,6 +22,8 @@ use crate::{
         parser::{Parser, Reading},
     },
 };
+
+use super::AnyStringLiteral;
 
 /// Condition that is viewed as a single entity during precedence parsing.
 ///
@@ -31,7 +33,7 @@ use crate::{
 /// PrimaryCondition:
 ///     UnaryCondition
 ///     | ParenthesizedCondition
-///     | StringLiteral
+///     | AnyStringLiteral
 /// ```
 #[allow(missing_docs)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -39,7 +41,7 @@ use crate::{
 pub enum PrimaryCondition {
     Unary(UnaryCondition),
     Parenthesized(ParenthesizedCondition),
-    StringLiteral(StringLiteral),
+    StringLiteral(AnyStringLiteral),
 }
 
 impl SourceElement for PrimaryCondition {
@@ -354,7 +356,13 @@ impl<'a> Parser<'a> {
             // string literal
             Reading::Atomic(Token::StringLiteral(literal)) => {
                 self.forward();
-                Ok(PrimaryCondition::StringLiteral(literal))
+                Ok(PrimaryCondition::StringLiteral(literal.into()))
+            }
+
+            // macro string literal
+            Reading::Atomic(Token::MacroStringLiteral(literal)) => {
+                self.forward();
+                Ok(PrimaryCondition::StringLiteral(literal.into()))
             }
 
             // parenthesized condition
