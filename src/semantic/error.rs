@@ -29,6 +29,8 @@ pub enum Error {
     InvalidNamespaceName(#[from] InvalidNamespaceName),
     #[error(transparent)]
     UnresolvedMacroUsage(#[from] UnresolvedMacroUsage),
+    #[error(transparent)]
+    IncompatibleFunctionAnnotation(#[from] IncompatibleFunctionAnnotation),
 }
 
 /// An error that occurs when a function declaration is missing.
@@ -212,3 +214,30 @@ impl Display for UnresolvedMacroUsage {
 }
 
 impl std::error::Error for UnresolvedMacroUsage {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct IncompatibleFunctionAnnotation {
+    pub span: Span,
+    pub reason: String,
+}
+
+impl Display for IncompatibleFunctionAnnotation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            Message::new(
+                Severity::Error,
+                format!(
+                    "Annotation `{}` cannot be used here, because {}.",
+                    self.span.str(),
+                    self.reason
+                )
+            )
+        )?;
+
+        write!(f, "\n{}", SourceCodeDisplay::new(&self.span, None::<u8>))
+    }
+}
+
+impl std::error::Error for IncompatibleFunctionAnnotation {}
