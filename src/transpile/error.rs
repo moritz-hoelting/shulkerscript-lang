@@ -8,9 +8,9 @@ use itertools::Itertools;
 use crate::{
     base::{
         log::{Message, Severity, SourceCodeDisplay},
-        source_file::{SourceElement, Span},
+        source_file::Span,
     },
-    syntax::syntax_tree::expression::Expression,
+    semantic::error::UnexpectedExpression,
 };
 
 use super::transpiler::FunctionData;
@@ -20,7 +20,7 @@ use super::transpiler::FunctionData;
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum TranspileError {
     #[error(transparent)]
-    MissingFunctionDeclaration(#[from] MissingFunctionDeclaration),
+    MissingFunctionDeclaration(#[from] TranspileMissingFunctionDeclaration),
     #[error(transparent)]
     UnexpectedExpression(#[from] UnexpectedExpression),
     #[error("Lua code evaluation is disabled.")]
@@ -36,14 +36,14 @@ pub type TranspileResult<T> = Result<T, TranspileError>;
 
 /// An error that occurs when a function declaration is missing.
 #[derive(Debug, Clone, PartialEq, Eq, Getters)]
-pub struct MissingFunctionDeclaration {
+pub struct TranspileMissingFunctionDeclaration {
     #[get = "pub"]
     span: Span,
     #[get = "pub"]
     alternatives: Vec<FunctionData>,
 }
 
-impl MissingFunctionDeclaration {
+impl TranspileMissingFunctionDeclaration {
     pub(super) fn from_context(
         identifier_span: Span,
         functions: &BTreeMap<(String, String), FunctionData>,
@@ -73,7 +73,7 @@ impl MissingFunctionDeclaration {
     }
 }
 
-impl Display for MissingFunctionDeclaration {
+impl Display for TranspileMissingFunctionDeclaration {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = format!(
             "no matching function declaration found for invocation of function `{}`",
@@ -102,7 +102,7 @@ impl Display for MissingFunctionDeclaration {
     }
 }
 
-impl std::error::Error for MissingFunctionDeclaration {}
+impl std::error::Error for TranspileMissingFunctionDeclaration {}
 
 /// An error that occurs when a function declaration is missing.
 #[allow(clippy::module_name_repetitions)]
@@ -143,28 +143,6 @@ impl LuaRuntimeError {
         }
     }
 }
-
-/// An error that occurs when a function declaration is missing.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnexpectedExpression(pub Expression);
-
-impl Display for UnexpectedExpression {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            Message::new(Severity::Error, "encountered unexpected expression")
-        )?;
-
-        write!(
-            f,
-            "\n{}",
-            SourceCodeDisplay::new(&self.0.span(), Option::<u8>::None)
-        )
-    }
-}
-
-impl std::error::Error for UnexpectedExpression {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConflictingFunctionNames {

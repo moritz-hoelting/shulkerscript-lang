@@ -16,6 +16,7 @@ pub use shulkerbox;
 
 pub mod base;
 pub mod lexical;
+pub mod semantic;
 pub mod syntax;
 pub mod transpile;
 
@@ -98,6 +99,8 @@ pub fn parse(
             "An error occurred while parsing the source code.",
         ));
     }
+
+    program.analyze_semantics(handler)?;
 
     Ok(program)
 }

@@ -1,5 +1,7 @@
 //! Execute block statement syntax tree.
 
+use std::collections::HashSet;
+
 use derive_more::From;
 use enum_as_inner::EnumAsInner;
 use getset::Getters;
@@ -985,4 +987,92 @@ fn head_from_keyword(
         .into(),
         _ => unreachable!("The keyword is not a valid execute block head."),
     })
+}
+
+/// Trait for the execute block head items with a [`AnyStringLiteral`] as their selector.
+pub trait ExecuteBlockHeadItem {
+    /// Returns a reference to the selector of the execute block head item.
+    fn selector(&self) -> &AnyStringLiteral;
+
+    /// Analyzes the semantics of the execute block head item.
+    #[expect(clippy::missing_errors_doc)]
+    fn analyze_semantics(
+        &self,
+        macro_names: &HashSet<String>,
+        handler: &impl Handler<base::Error>,
+    ) -> Result<(), crate::semantic::error::Error> {
+        self.selector().analyze_semantics(macro_names, handler)
+    }
+}
+
+impl ExecuteBlockHeadItem for Align {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.align_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for Anchored {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.anchored_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for As {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.as_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for At {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.at_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for AsAt {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.asat_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for Facing {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.facing_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for In {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.in_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for On {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.on_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for Positioned {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.positioned_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for Rotated {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.rotated_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for Store {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.store_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for Summon {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.summon_selector
+    }
 }
