@@ -5,7 +5,8 @@
 use std::collections::HashSet;
 
 use error::{
-    InvalidNamespaceName, MissingFunctionDeclaration, UnexpectedExpression, UnresolvedMacroUsage,
+    IncompatibleFunctionAnnotation, InvalidNamespaceName, MissingFunctionDeclaration,
+    UnexpectedExpression, UnresolvedMacroUsage,
 };
 
 use crate::{
@@ -39,13 +40,21 @@ impl ProgramFile {
     ) -> Result<(), error::Error> {
         self.namespace().analyze_semantics(handler)?;
 
+        let mut errs = Vec::new();
         let function_names = extract_all_function_names(self.declarations(), handler)?;
 
         for declaration in self.declarations() {
-            declaration.analyze_semantics(&function_names, handler)?;
+            if let Err(err) = declaration.analyze_semantics(&function_names, handler) {
+                errs.push(err);
+            }
         }
 
-        Ok(())
+        #[expect(clippy::option_if_let_else)]
+        if let Some(err) = errs.first() {
+            Err(err.clone())
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -143,11 +152,30 @@ impl Function {
         function_names: &HashSet<String>,
         handler: &impl Handler<base::Error>,
     ) -> Result<(), error::Error> {
-        let macro_names = self
-            .parameters()
-            .iter()
-            .flat_map(|l| l.elements().map(|el| el.span.str().to_string()))
-            .collect();
+        let macro_names = if let Some(parameters) = self.parameters() {
+            if let Some(incompatible) = self
+                .annotations()
+                .iter()
+                .find(|a| ["tick", "load"].contains(&a.identifier().span.str()))
+            {
+                let err =
+                    error::Error::IncompatibleFunctionAnnotation(IncompatibleFunctionAnnotation {
+                        span: incompatible.identifier().span(),
+                        reason:
+                            "functions with the `tick` or `load` annotation cannot have parameters"
+                                .to_string(),
+                    });
+                handler.receive(err.clone());
+                return Err(err);
+            }
+
+            parameters
+                .elements()
+                .map(|el| el.span.str().to_string())
+                .collect()
+        } else {
+            HashSet::new()
+        };
 
         self.block()
             .analyze_semantics(function_names, &macro_names, handler)
@@ -162,28 +190,34 @@ impl Block {
         macro_names: &HashSet<String>,
         handler: &impl Handler<base::Error>,
     ) -> Result<(), error::Error> {
+        let mut errs = Vec::new();
         for statement in &self.statements {
-            match statement {
+            if let Err(err) = match statement {
                 Statement::Block(block) => {
-                    block.analyze_semantics(function_names, macro_names, handler)?;
+                    block.analyze_semantics(function_names, macro_names, handler)
                 }
-                Statement::DocComment(_) | Statement::LiteralCommand(_) => {}
+                Statement::DocComment(_) | Statement::LiteralCommand(_) => Ok(()),
                 Statement::ExecuteBlock(ex) => {
-                    ex.analyze_semantics(function_names, macro_names, handler)?;
+                    ex.analyze_semantics(function_names, macro_names, handler)
                 }
                 Statement::Grouping(group) => {
-                    group.analyze_semantics(function_names, macro_names, handler)?;
+                    group.analyze_semantics(function_names, macro_names, handler)
                 }
-                Statement::Run(run) => {
-                    run.analyze_semantics(function_names, macro_names, handler)?;
-                }
+                Statement::Run(run) => run.analyze_semantics(function_names, macro_names, handler),
                 Statement::Semicolon(sem) => {
-                    sem.analyze_semantics(function_names, macro_names, handler)?;
+                    sem.analyze_semantics(function_names, macro_names, handler)
                 }
-            }
+            } {
+                errs.push(err);
+            };
         }
 
-        Ok(())
+        #[expect(clippy::option_if_let_else)]
+        if let Some(err) = errs.first() {
+            Err(err.clone())
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -197,13 +231,27 @@ impl ExecuteBlock {
     ) -> Result<(), error::Error> {
         match self {
             Self::HeadTail(head, tail) => {
-                head.analyze_semantics(function_names, macro_names, handler)?;
-                tail.analyze_semantics(function_names, macro_names, handler)
+                let head_res = head.analyze_semantics(function_names, macro_names, handler);
+                let tail_res = tail.analyze_semantics(function_names, macro_names, handler);
+
+                if head_res.is_err() {
+                    head_res
+                } else {
+                    tail_res
+                }
             }
             Self::IfElse(cond, then, el) => {
-                cond.analyze_semantics(function_names, macro_names, handler)?;
-                then.analyze_semantics(function_names, macro_names, handler)?;
-                el.analyze_semantics(function_names, macro_names, handler)
+                let cond_res = cond.analyze_semantics(function_names, macro_names, handler);
+                let then_res = then.analyze_semantics(function_names, macro_names, handler);
+                let else_res = el.analyze_semantics(function_names, macro_names, handler);
+
+                if cond_res.is_err() {
+                    cond_res
+                } else if then_res.is_err() {
+                    then_res
+                } else {
+                    else_res
+                }
             }
         }
     }
