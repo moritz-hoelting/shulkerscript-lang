@@ -37,7 +37,7 @@ path-absolutize = "3.1.1"
 pathdiff = "0.2.2"
 serde = { version = "1.0.214", features = ["derive", "rc"], optional = true }
 # shulkerbox = { version = "0.1.0", default-features = false, optional = true }
-shulkerbox = { git = "https://github.com/moritz-hoelting/shulkerbox", rev = "8f05fef7030d3e999a07d621ba581ebbb205dadc", default-features = false, optional = true }
+shulkerbox = { git = "https://github.com/moritz-hoelting/shulkerbox", rev = "76d58c0766518fe5ab2635de60ba40972565a3e0", default-features = false, optional = true }
 strsim = "0.11.1"
 strum = { version = "0.26.2", features = ["derive"] }
 strum_macros = "0.26.4"

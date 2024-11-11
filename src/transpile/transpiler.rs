@@ -3,7 +3,6 @@
 use chksum_md5 as md5;
 use std::{
     collections::{BTreeMap, HashMap},
-    iter,
     sync::RwLock,
 };
 
@@ -15,6 +14,7 @@ use crate::{
         source_file::{SourceElement, Span},
         Handler,
     },
+    semantic::error::UnexpectedExpression,
     syntax::syntax_tree::{
         declaration::{Declaration, ImportItems},
         expression::{Expression, FunctionCall, Primary},
@@ -24,10 +24,10 @@ use crate::{
             Statement,
         },
     },
-    transpile::error::{ConflictingFunctionNames, MissingFunctionDeclaration},
+    transpile::error::{ConflictingFunctionNames, TranspileMissingFunctionDeclaration},
 };
 
-use super::error::{TranspileError, TranspileResult, UnexpectedExpression};
+use super::error::{TranspileError, TranspileResult};
 
 /// A transpiler for `Shulkerscript`.
 #[derive(Debug)]
@@ -43,6 +43,7 @@ pub struct Transpiler {
 pub(super) struct FunctionData {
     pub(super) namespace: String,
     pub(super) identifier_span: Span,
+    pub(super) parameters: Vec<String>,
     pub(super) statements: Vec<Statement>,
     pub(super) public: bool,
     pub(super) annotations: HashMap<String, Option<String>>,
@@ -127,7 +128,7 @@ impl Transpiler {
         &mut self,
         declaration: &Declaration,
         namespace: &Namespace,
-        _handler: &impl Handler<base::Error>,
+        handler: &impl Handler<base::Error>,
     ) {
         let program_identifier = declaration.span().source_file().identifier().clone();
         match declaration {
@@ -153,6 +154,15 @@ impl Transpiler {
                     FunctionData {
                         namespace: namespace.namespace_name().str_content().to_string(),
                         identifier_span: identifier_span.clone(),
+                        parameters: function
+                            .parameters()
+                            .as_ref()
+                            .map(|l| {
+                                l.elements()
+                                    .map(|i| i.span.str().to_string())
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default(),
                         statements,
                         public: function.is_public(),
                         annotations,
@@ -167,10 +177,13 @@ impl Transpiler {
                 let mut aliases = self.aliases.write().unwrap();
 
                 match import.items() {
-                    ImportItems::All(_) => todo!("Importing all items is not yet supported."),
+                    ImportItems::All(_) => {
+                        handler.receive(base::Error::Other(
+                            "Importing all items is not yet supported.".to_string(),
+                        ));
+                    }
                     ImportItems::Named(list) => {
-                        let items = iter::once(list.first())
-                            .chain(list.rest().iter().map(|(_, ident)| ident));
+                        let items = list.elements();
 
                         for item in items {
                             let name = item.span.str();
@@ -244,7 +257,7 @@ impl Transpiler {
                     })
                     .ok_or_else(|| {
                         let error = TranspileError::MissingFunctionDeclaration(
-                            MissingFunctionDeclaration::from_context(
+                            TranspileMissingFunctionDeclaration::from_context(
                                 identifier_span.clone(),
                                 &functions,
                             ),
@@ -252,6 +265,7 @@ impl Transpiler {
                         handler.receive(error.clone());
                         error
                     })?;
+
                 function_data.statements.clone()
             };
             let commands = self.transpile_function(&statements, program_identifier, handler)?;
@@ -266,7 +280,7 @@ impl Transpiler {
                 })
                 .ok_or_else(|| {
                     let error = TranspileError::MissingFunctionDeclaration(
-                        MissingFunctionDeclaration::from_context(
+                        TranspileMissingFunctionDeclaration::from_context(
                             identifier_span.clone(),
                             &functions,
                         ),
@@ -329,7 +343,7 @@ impl Transpiler {
             .or_else(|| alias_query.and_then(|q| locations.get(&q).filter(|(_, p)| *p)))
             .ok_or_else(|| {
                 let error = TranspileError::MissingFunctionDeclaration(
-                    MissingFunctionDeclaration::from_context(
+                    TranspileMissingFunctionDeclaration::from_context(
                         identifier_span.clone(),
                         &self.functions.read().unwrap(),
                     ),

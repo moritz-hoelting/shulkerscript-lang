@@ -9,6 +9,8 @@ pub enum Error {
     #[error(transparent)]
     ParseError(#[from] crate::syntax::error::Error),
     #[error(transparent)]
+    SemanticError(#[from] crate::semantic::error::Error),
+    #[error(transparent)]
     TranspileError(#[from] crate::transpile::TranspileError),
     #[error("An error occurred: {0}")]
     Other(String),
