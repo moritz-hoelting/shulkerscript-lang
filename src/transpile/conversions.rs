@@ -70,7 +70,10 @@ impl From<&MacroStringLiteral> for MacroString {
                             MacroStringPart::String(span.str().to_string())
                         }
                         MacroStringLiteralPart::MacroUsage { identifier, .. } => {
-                            MacroStringPart::MacroUsage(identifier.span.str().to_string())
+                            MacroStringPart::MacroUsage(
+                                crate::transpile::util::identifier_to_macro(identifier.span.str())
+                                    .to_string(),
+                            )
                         }
                     })
                     .collect(),

@@ -10,7 +10,7 @@ use crate::{
         log::{Message, Severity, SourceCodeDisplay},
         source_file::Span,
     },
-    semantic::error::UnexpectedExpression,
+    semantic::error::{ConflictingFunctionNames, InvalidFunctionArguments, UnexpectedExpression},
 };
 
 use super::transpiler::FunctionData;
@@ -29,6 +29,8 @@ pub enum TranspileError {
     LuaRuntimeError(#[from] LuaRuntimeError),
     #[error(transparent)]
     ConflictingFunctionNames(#[from] ConflictingFunctionNames),
+    #[error(transparent)]
+    InvalidFunctionArguments(#[from] InvalidFunctionArguments),
 }
 
 /// The result of a transpilation operation.
@@ -143,30 +145,3 @@ impl LuaRuntimeError {
         }
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConflictingFunctionNames {
-    pub definition: Span,
-    pub name: String,
-}
-
-impl Display for ConflictingFunctionNames {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            Message::new(
-                Severity::Error,
-                format!("the following function declaration conflicts with an existing function with name `{}`", self.name)
-            )
-        )?;
-
-        write!(
-            f,
-            "\n{}",
-            SourceCodeDisplay::new(&self.definition, Option::<u8>::None)
-        )
-    }
-}
-
-impl std::error::Error for ConflictingFunctionNames {}

@@ -292,19 +292,37 @@ impl MacroStringLiteral {
     /// Returns the string content without escapement characters, leading and trailing double quotes.
     #[must_use]
     pub fn str_content(&self) -> String {
-        let span = self.span();
-        let string = span.str();
-        let string = &string[1..string.len() - 1];
-        if string.contains('\\') {
-            string
-                .replace("\\n", "\n")
-                .replace("\\r", "\r")
-                .replace("\\t", "\t")
-                .replace("\\\"", "\"")
-                .replace("\\\\", "\\")
-        } else {
-            string.to_string()
+        use std::fmt::Write;
+
+        let mut content = String::new();
+
+        for part in &self.parts {
+            match part {
+                MacroStringLiteralPart::Text(span) => {
+                    let string = span.str();
+                    if string.contains('\\') {
+                        content += &string
+                            .replace("\\n", "\n")
+                            .replace("\\r", "\r")
+                            .replace("\\t", "\t")
+                            .replace("\\\"", "\"")
+                            .replace("\\\\", "\\");
+                    } else {
+                        content += string;
+                    }
+                }
+                MacroStringLiteralPart::MacroUsage { identifier, .. } => {
+                    write!(
+                        content,
+                        "$({})",
+                        crate::transpile::util::identifier_to_macro(identifier.span.str())
+                    )
+                    .expect("can always write to string");
+                }
+            }
         }
+
+        content
     }
 
     /// Returns the parts that make up the macro string literal.
@@ -756,8 +774,7 @@ impl Token {
                     is_inside_macro = false;
                 } else if !encountered_open_parenthesis && character == '(' {
                     encountered_open_parenthesis = true;
-                } else if encountered_open_parenthesis
-                    && !Self::is_valid_macro_name_character(character)
+                } else if encountered_open_parenthesis && !Self::is_identifier_character(character)
                 {
                     if character == '`' {
                         return Err(UnclosedMacroUsage {
@@ -766,9 +783,7 @@ impl Token {
                         .into());
                     }
 
-                    Self::walk_iter(iter, |c| {
-                        c != ')' && !Self::is_valid_macro_name_character(c)
-                    });
+                    Self::walk_iter(iter, |c| c != ')' && !Self::is_identifier_character(c));
                     return Err(InvalidMacroNameCharacter {
                         span: Self::create_span(index, iter),
                     }
@@ -814,10 +829,6 @@ impl Token {
             }
             .into())
         }
-    }
-
-    fn is_valid_macro_name_character(character: char) -> bool {
-        character.is_ascii_alphanumeric() || character == '_'
     }
 
     /// Handles a command that is preceeded by a slash

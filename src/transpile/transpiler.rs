@@ -14,7 +14,7 @@ use crate::{
         source_file::{SourceElement, Span},
         Handler,
     },
-    semantic::error::UnexpectedExpression,
+    semantic::error::{ConflictingFunctionNames, InvalidFunctionArguments, UnexpectedExpression},
     syntax::syntax_tree::{
         declaration::{Declaration, ImportItems},
         expression::{Expression, FunctionCall, Primary},
@@ -24,7 +24,7 @@ use crate::{
             Statement,
         },
     },
-    transpile::error::{ConflictingFunctionNames, TranspileMissingFunctionDeclaration},
+    transpile::error::TranspileMissingFunctionDeclaration,
 };
 
 use super::error::{TranspileError, TranspileResult};
@@ -103,7 +103,7 @@ impl Transpiler {
         );
 
         for identifier_span in always_transpile_functions {
-            self.get_or_transpile_function(&identifier_span, handler)?;
+            self.get_or_transpile_function(&identifier_span, None, handler)?;
         }
 
         Ok(())
@@ -221,8 +221,9 @@ impl Transpiler {
     fn get_or_transpile_function(
         &mut self,
         identifier_span: &Span,
+        arguments: Option<&[&Expression]>,
         handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<String> {
+    ) -> TranspileResult<(String, Option<BTreeMap<String, String>>)> {
         let program_identifier = identifier_span.source_file().identifier();
         let program_query = (
             program_identifier.to_string(),
@@ -337,21 +338,96 @@ impl Transpiler {
             );
         }
 
-        let locations = self.function_locations.read().unwrap();
-        locations
-            .get(&program_query)
-            .or_else(|| alias_query.and_then(|q| locations.get(&q).filter(|(_, p)| *p)))
-            .ok_or_else(|| {
-                let error = TranspileError::MissingFunctionDeclaration(
-                    TranspileMissingFunctionDeclaration::from_context(
-                        identifier_span.clone(),
-                        &self.functions.read().unwrap(),
-                    ),
-                );
-                handler.receive(error.clone());
-                error
-            })
-            .map(|(s, _)| s.to_owned())
+        let parameters = {
+            let functions = self.functions.read().unwrap();
+            let function_data = functions
+                .get(&program_query)
+                .or_else(|| {
+                    alias_query
+                        .clone()
+                        .and_then(|q| functions.get(&q).filter(|f| f.public))
+                })
+                .ok_or_else(|| {
+                    let error = TranspileError::MissingFunctionDeclaration(
+                        TranspileMissingFunctionDeclaration::from_context(
+                            identifier_span.clone(),
+                            &functions,
+                        ),
+                    );
+                    handler.receive(error.clone());
+                    error
+                })?;
+
+            function_data.parameters.clone()
+        };
+
+        let function_location = {
+            let locations = self.function_locations.read().unwrap();
+            locations
+                .get(&program_query)
+                .or_else(|| alias_query.and_then(|q| locations.get(&q).filter(|(_, p)| *p)))
+                .ok_or_else(|| {
+                    let error = TranspileError::MissingFunctionDeclaration(
+                        TranspileMissingFunctionDeclaration::from_context(
+                            identifier_span.clone(),
+                            &self.functions.read().unwrap(),
+                        ),
+                    );
+                    handler.receive(error.clone());
+                    error
+                })
+                .map(|(s, _)| s.to_owned())?
+        };
+
+        let arg_count = arguments.iter().flat_map(|x| x.iter()).count();
+        if arg_count != parameters.len() {
+            let err = TranspileError::InvalidFunctionArguments(InvalidFunctionArguments {
+                expected: parameters.len(),
+                actual: arg_count,
+                span: identifier_span.clone(),
+            });
+            handler.receive(err.clone());
+            Err(err)
+        } else if arg_count > 0 {
+            let mut compiled_args = Vec::new();
+            let mut errs = Vec::new();
+            for expression in arguments.iter().flat_map(|x| x.iter()) {
+                let value = match expression {
+                    Expression::Primary(Primary::FunctionCall(func)) => self
+                        .transpile_function_call(func, handler)
+                        .map(|cmd| match cmd {
+                            Command::Raw(s) => s,
+                            _ => unreachable!("Function call should always return a raw command"),
+                        }),
+                    Expression::Primary(Primary::Lua(lua)) => {
+                        lua.eval_string(handler).map(Option::unwrap_or_default)
+                    }
+                    Expression::Primary(Primary::StringLiteral(string)) => {
+                        Ok(string.str_content().to_string())
+                    }
+                    Expression::Primary(Primary::MacroStringLiteral(literal)) => {
+                        Ok(literal.str_content())
+                    }
+                };
+
+                match value {
+                    Ok(value) => {
+                        compiled_args.push(value);
+                    }
+                    Err(err) => {
+                        compiled_args.push(String::new());
+                        errs.push(err.clone());
+                    }
+                }
+            }
+            if let Some(err) = errs.first() {
+                return Err(err.clone());
+            }
+            let function_args = parameters.into_iter().zip(compiled_args).collect();
+            Ok((function_location, Some(function_args)))
+        } else {
+            Ok((function_location, None))
+        }
     }
 
     fn transpile_function(
@@ -456,8 +532,30 @@ impl Transpiler {
         func: &FunctionCall,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Command> {
-        let location = self.get_or_transpile_function(&func.identifier().span, handler)?;
-        Ok(Command::Raw(format!("function {location}")))
+        let arguments = func.arguments().as_ref().map(|l| {
+            l.elements()
+                .map(derive_more::Deref::deref)
+                .collect::<Vec<_>>()
+        });
+        let (location, arguments) =
+            self.get_or_transpile_function(&func.identifier().span, arguments.as_deref(), handler)?;
+        let mut function_call = format!("function {location}");
+        if let Some(arguments) = arguments {
+            use std::fmt::Write;
+            let arguments = arguments
+                .iter()
+                .map(|(ident, v)| {
+                    format!(
+                        r#"{macro_name}:"{escaped}""#,
+                        macro_name = super::util::identifier_to_macro(ident),
+                        escaped = super::util::escape_str(v)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            write!(function_call, " {{{arguments}}}").unwrap();
+        }
+        Ok(Command::Raw(function_call))
     }
 
     fn transpile_execute_block(
