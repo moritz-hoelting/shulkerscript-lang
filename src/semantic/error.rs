@@ -241,3 +241,46 @@ impl Display for IncompatibleFunctionAnnotation {
 }
 
 impl std::error::Error for IncompatibleFunctionAnnotation {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InvalidFunctionArguments {
+    pub span: Span,
+    pub expected: usize,
+    pub actual: usize,
+}
+
+impl Display for InvalidFunctionArguments {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            Message::new(
+                Severity::Error,
+                format!(
+                    "Expected {} arguments, but got {}.",
+                    self.expected, self.actual
+                )
+            )
+        )?;
+
+        let help_message = if self.expected > self.actual {
+            format!(
+                "You might want to add {} more arguments.",
+                self.expected - self.actual
+            )
+        } else {
+            format!(
+                "You might want to remove {} arguments.",
+                self.actual - self.expected
+            )
+        };
+
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(&self.span, Some(help_message))
+        )
+    }
+}
+
+impl std::error::Error for InvalidFunctionArguments {}

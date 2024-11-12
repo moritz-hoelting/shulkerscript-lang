@@ -14,4 +14,4 @@ mod transpiler;
 #[doc(inline)]
 pub use transpiler::Transpiler;
 
-mod util;
+pub mod util;
