@@ -4,7 +4,6 @@ use chksum_md5 as md5;
 use std::{
     collections::{BTreeMap, HashMap},
     iter,
-    sync::RwLock,
 };
 
 use shulkerbox::datapack::{self, Command, Datapack, Execute};
@@ -34,9 +33,11 @@ use super::error::{TranspileError, TranspileResult, UnexpectedExpression};
 pub struct Transpiler {
     datapack: shulkerbox::datapack::Datapack,
     /// Key: (program identifier, function name)
-    functions: RwLock<BTreeMap<(String, String), FunctionData>>,
-    function_locations: RwLock<HashMap<(String, String), (String, bool)>>,
-    aliases: RwLock<HashMap<(String, String), (String, String)>>,
+    functions: BTreeMap<(String, String), FunctionData>,
+    /// Key: (program identifier, function name), Value: (function location, public)
+    function_locations: HashMap<(String, String), (String, bool)>,
+    /// Key: alias, Value: target
+    aliases: HashMap<(String, String), (String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,9 +55,9 @@ impl Transpiler {
     pub fn new(pack_format: u8) -> Self {
         Self {
             datapack: shulkerbox::datapack::Datapack::new(pack_format),
-            functions: RwLock::new(BTreeMap::new()),
-            function_locations: RwLock::new(HashMap::new()),
-            aliases: RwLock::new(HashMap::new()),
+            functions: BTreeMap::new(),
+            function_locations: HashMap::new(),
+            aliases: HashMap::new(),
         }
     }
 
@@ -85,7 +86,7 @@ impl Transpiler {
         let mut always_transpile_functions = Vec::new();
 
         {
-            let functions = self.functions.read().unwrap();
+            let functions = &mut self.functions;
             for (_, data) in functions.iter() {
                 let always_transpile_function = data.annotations.contains_key("tick")
                     || data.annotations.contains_key("load")
@@ -148,7 +149,7 @@ impl Transpiler {
                     })
                     .collect();
                 #[allow(clippy::significant_drop_tightening)]
-                self.functions.write().unwrap().insert(
+                self.functions.insert(
                     (program_identifier, name),
                     FunctionData {
                         namespace: namespace.namespace_name().str_content().to_string(),
@@ -164,7 +165,7 @@ impl Transpiler {
                 let import_identifier =
                     super::util::calculate_import_identifier(&program_identifier, path);
 
-                let mut aliases = self.aliases.write().unwrap();
+                let aliases = &mut self.aliases;
 
                 match import.items() {
                     ImportItems::All(_) => todo!("Importing all items is not yet supported."),
@@ -215,12 +216,9 @@ impl Transpiler {
             program_identifier.to_string(),
             identifier_span.str().to_string(),
         );
-        let alias_query = {
-            let aliases = self.aliases.read().unwrap();
-            aliases.get(&program_query).cloned()
-        };
+        let alias_query = self.aliases.get(&program_query).cloned();
         let already_transpiled = {
-            let locations = self.function_locations.read().unwrap();
+            let locations = &self.function_locations;
             locations
                 .get(&program_query)
                 .or_else(|| {
@@ -234,7 +232,7 @@ impl Transpiler {
             tracing::trace!("Function not transpiled yet, transpiling.");
 
             let statements = {
-                let functions = self.functions.read().unwrap();
+                let functions = &self.functions;
                 let function_data = functions
                     .get(&program_query)
                     .or_else(|| {
@@ -246,7 +244,7 @@ impl Transpiler {
                         let error = TranspileError::MissingFunctionDeclaration(
                             MissingFunctionDeclaration::from_context(
                                 identifier_span.clone(),
-                                &functions,
+                                functions,
                             ),
                         );
                         handler.receive(error.clone());
@@ -256,7 +254,7 @@ impl Transpiler {
             };
             let commands = self.transpile_function(&statements, program_identifier, handler)?;
 
-            let functions = self.functions.read().unwrap();
+            let functions = &self.functions;
             let function_data = functions
                 .get(&program_query)
                 .or_else(|| {
@@ -268,7 +266,7 @@ impl Transpiler {
                     let error = TranspileError::MissingFunctionDeclaration(
                         MissingFunctionDeclaration::from_context(
                             identifier_span.clone(),
-                            &functions,
+                            functions,
                         ),
                     );
                     handler.receive(error.clone());
@@ -314,7 +312,7 @@ impl Transpiler {
                 self.datapack.add_load(&function_location);
             }
 
-            self.function_locations.write().unwrap().insert(
+            self.function_locations.insert(
                 (
                     program_identifier.to_string(),
                     identifier_span.str().to_string(),
@@ -323,7 +321,7 @@ impl Transpiler {
             );
         }
 
-        let locations = self.function_locations.read().unwrap();
+        let locations = &self.function_locations;
         locations
             .get(&program_query)
             .or_else(|| alias_query.and_then(|q| locations.get(&q).filter(|(_, p)| *p)))
@@ -331,7 +329,7 @@ impl Transpiler {
                 let error = TranspileError::MissingFunctionDeclaration(
                     MissingFunctionDeclaration::from_context(
                         identifier_span.clone(),
-                        &self.functions.read().unwrap(),
+                        &self.functions,
                     ),
                 );
                 handler.receive(error.clone());
