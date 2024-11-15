@@ -66,13 +66,12 @@ impl From<&MacroStringLiteral> for MacroString {
                     .parts()
                     .iter()
                     .map(|part| match part {
-                        MacroStringLiteralPart::Text(span) => {
-                            MacroStringPart::String(span.str().to_string())
-                        }
+                        MacroStringLiteralPart::Text(span) => MacroStringPart::String(
+                            crate::util::unescape_macro_string(span.str()).to_string(),
+                        ),
                         MacroStringLiteralPart::MacroUsage { identifier, .. } => {
                             MacroStringPart::MacroUsage(
-                                crate::transpile::util::identifier_to_macro(identifier.span.str())
-                                    .to_string(),
+                                super::util::identifier_to_macro(identifier.span.str()).to_string(),
                             )
                         }
                     })

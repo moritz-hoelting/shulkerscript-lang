@@ -548,7 +548,7 @@ impl Transpiler {
                     format!(
                         r#"{macro_name}:"{escaped}""#,
                         macro_name = super::util::identifier_to_macro(ident),
-                        escaped = super::util::escape_str(v)
+                        escaped = crate::util::escape_str(v)
                     )
                 })
                 .collect::<Vec<_>>()

@@ -19,6 +19,7 @@ pub mod lexical;
 pub mod semantic;
 pub mod syntax;
 pub mod transpile;
+pub mod util;
 
 use std::path::Path;
 

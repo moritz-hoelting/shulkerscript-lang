@@ -40,30 +40,13 @@ where
     }
 }
 
-/// Escapes `"` and `\` in a string.
-#[must_use]
-pub fn escape_str(s: &str) -> Cow<str> {
-    if s.contains('"') || s.contains('\\') {
-        let mut escaped = String::with_capacity(s.len());
-        for c in s.chars() {
-            match c {
-                '"' => escaped.push_str("\\\""),
-                '\\' => escaped.push_str("\\\\"),
-                _ => escaped.push(c),
-            }
-        }
-        Cow::Owned(escaped)
-    } else {
-        Cow::Borrowed(s)
-    }
-}
-
 /// Transforms an identifier to a macro name that only contains `a-zA-Z0-9_`.
 #[must_use]
 pub fn identifier_to_macro(ident: &str) -> Cow<str> {
-    if ident
-        .chars()
-        .any(|c| !(c == '_' && c.is_ascii_alphanumeric()))
+    if ident.contains("__")
+        || ident
+            .chars()
+            .any(|c| !(c == '_' && c.is_ascii_alphanumeric()))
     {
         let new_ident = ident
             .chars()
@@ -72,20 +55,8 @@ pub fn identifier_to_macro(ident: &str) -> Cow<str> {
 
         let chksum = md5::hash(ident).to_hex_lowercase();
 
-        Cow::Owned(new_ident + "_" + &chksum[..8])
+        Cow::Owned(new_ident + "__" + &chksum[..8])
     } else {
         Cow::Borrowed(ident)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_escape_str() {
-        assert_eq!(escape_str("Hello, world!"), "Hello, world!");
-        assert_eq!(escape_str(r#"Hello, "world"!"#), r#"Hello, \"world\"!"#);
-        assert_eq!(escape_str(r"Hello, \world\!"), r"Hello, \\world\\!");
     }
 }
