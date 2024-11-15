@@ -299,17 +299,7 @@ impl MacroStringLiteral {
         for part in &self.parts {
             match part {
                 MacroStringLiteralPart::Text(span) => {
-                    let string = span.str();
-                    if string.contains('\\') {
-                        content += &string
-                            .replace("\\n", "\n")
-                            .replace("\\r", "\r")
-                            .replace("\\t", "\t")
-                            .replace("\\\"", "\"")
-                            .replace("\\\\", "\\");
-                    } else {
-                        content += string;
-                    }
+                    content += &crate::util::unescape_macro_string(span.str());
                 }
                 MacroStringLiteralPart::MacroUsage { identifier, .. } => {
                     write!(
