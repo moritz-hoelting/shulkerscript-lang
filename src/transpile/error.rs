@@ -13,7 +13,7 @@ use crate::{
     syntax::syntax_tree::expression::Expression,
 };
 
-use super::transpiler::FunctionData;
+use super::FunctionData;
 
 /// Errors that can occur during transpilation.
 #[allow(clippy::module_name_repetitions, missing_docs)]
@@ -44,6 +44,7 @@ pub struct MissingFunctionDeclaration {
 }
 
 impl MissingFunctionDeclaration {
+    #[cfg_attr(not(feature = "shulkerbox"), expect(unused))]
     pub(super) fn from_context(
         identifier_span: Span,
         functions: &BTreeMap<(String, String), FunctionData>,

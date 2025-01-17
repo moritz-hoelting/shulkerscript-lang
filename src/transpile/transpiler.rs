@@ -26,7 +26,10 @@ use crate::{
     transpile::error::{ConflictingFunctionNames, MissingFunctionDeclaration},
 };
 
-use super::error::{TranspileError, TranspileResult, UnexpectedExpression};
+use super::{
+    error::{TranspileError, TranspileResult, UnexpectedExpression},
+    FunctionData,
+};
 
 /// A transpiler for `Shulkerscript`.
 #[derive(Debug)]
@@ -38,15 +41,6 @@ pub struct Transpiler {
     function_locations: HashMap<(String, String), (String, bool)>,
     /// Key: alias, Value: target
     aliases: HashMap<(String, String), (String, String)>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct FunctionData {
-    pub(super) namespace: String,
-    pub(super) identifier_span: Span,
-    pub(super) statements: Vec<Statement>,
-    pub(super) public: bool,
-    pub(super) annotations: HashMap<String, Option<String>>,
 }
 
 impl Transpiler {
