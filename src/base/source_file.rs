@@ -145,7 +145,7 @@ impl SourceFile {
 }
 
 /// Represents a range of characters in a source file.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
 #[derive(Clone, Getters, CopyGetters)]
 pub struct Span {
     /// Get the start byte index of the span.

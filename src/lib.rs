@@ -20,6 +20,12 @@ pub mod lexical;
 pub mod syntax;
 pub mod transpile;
 
+#[cfg(feature = "serde")]
+mod serde;
+#[cfg(feature = "serde")]
+#[cfg_attr(feature = "serde", doc(inline))]
+pub use serde::SerdeWrapper;
+
 use std::path::Path;
 
 use base::{source_file::SourceFile, Error, FileProvider, Handler, Result};
