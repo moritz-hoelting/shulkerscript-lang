@@ -1,7 +1,7 @@
 //! Utilities for (de-)serializing
 
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     marker::PhantomData,
     sync::{Arc, LazyLock, Mutex, RwLock},
 };
@@ -36,13 +36,18 @@ where
     {
         *DEDUPLICATE_SOURCE_FILES.write().unwrap() = true;
         SERIALIZE_DATA.lock().unwrap().clear();
-        let mut s = serializer.serialize_struct("SourceFileWrapper", 2)?;
-        s.serialize_field("data", &self.0)?;
-        *DEDUPLICATE_SOURCE_FILES.write().unwrap() = false;
+        let mut serialized_data = flexbuffers::FlexbufferSerializer::new();
+        self.0
+            .serialize(&mut serialized_data)
+            .map_err(|_| serde::ser::Error::custom("could not buffer serialization"))?;
+        drop(serialized_data);
+        let mut s = serializer.serialize_struct("SerdeWrapper", 3)?;
         s.serialize_field(
             "source_files",
             &SERIALIZE_DATA.lock().unwrap().id_to_source_file,
         )?;
+        s.serialize_field("data", &self.0)?;
+        *DEDUPLICATE_SOURCE_FILES.write().unwrap() = false;
         s.end()
     }
 }
@@ -78,7 +83,7 @@ where
             where
                 V: de::SeqAccess<'de>,
             {
-                let source_files: HashMap<usize, SourceFile> = seq
+                let source_files: BTreeMap<usize, SourceFile> = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
                 *DESERIALIZE_DATA.write().unwrap() = Some(DeserializeData {
@@ -98,7 +103,7 @@ where
             where
                 V: de::MapAccess<'de>,
             {
-                let mut source_files: Option<HashMap<usize, SourceFile>> = None;
+                let mut source_files: Option<BTreeMap<usize, SourceFile>> = None;
                 let mut data = None;
 
                 while let Some(key) = map.next_key()? {
@@ -147,8 +152,8 @@ where
 #[derive(Debug, Default)]
 struct SerializeData {
     id_counter: usize,
-    ptr_to_id: HashMap<usize, usize>,
-    id_to_source_file: HashMap<usize, SourceFile>,
+    ptr_to_id: BTreeMap<usize, usize>,
+    id_to_source_file: BTreeMap<usize, SourceFile>,
 }
 
 impl SerializeData {
@@ -198,7 +203,7 @@ impl Serialize for Span {
 
 #[derive(Debug, Default)]
 struct DeserializeData {
-    id_to_source_file: HashMap<usize, Arc<SourceFile>>,
+    id_to_source_file: BTreeMap<usize, Arc<SourceFile>>,
 }
 
 impl<'de> Deserialize<'de> for Span {
