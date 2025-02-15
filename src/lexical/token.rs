@@ -9,8 +9,7 @@ use crate::base::{
 };
 use derive_more::From;
 use enum_as_inner::EnumAsInner;
-use strum::IntoEnumIterator;
-use strum_macros::EnumIter;
+use strum::{EnumIter, IntoEnumIterator};
 
 use super::error::{self, UnterminatedDelimitedComment};
 
