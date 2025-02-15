@@ -12,7 +12,7 @@ use serde::{
     Deserialize, Serialize,
 };
 
-use crate::base::source_file::{SourceFile, Span};
+use crate::base::source_file::SourceFile;
 
 static DEDUPLICATE_SOURCE_FILES: LazyLock<RwLock<bool>> = LazyLock::new(|| RwLock::new(false));
 
@@ -23,6 +23,7 @@ static DESERIALIZE_DATA: LazyLock<RwLock<Option<DeserializeData>>> =
     LazyLock::new(|| RwLock::new(None));
 
 /// Wrapper to remove duplicate source file data during (de-)serialization
+#[expect(clippy::module_name_repetitions)]
 #[derive(Debug)]
 pub struct SerdeWrapper<T>(pub T);
 
@@ -83,7 +84,7 @@ where
             where
                 V: de::SeqAccess<'de>,
             {
-                let source_files: BTreeMap<usize, SourceFile> = seq
+                let source_files: BTreeMap<u64, SourceFile> = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
                 *DESERIALIZE_DATA.write().unwrap() = Some(DeserializeData {
@@ -103,7 +104,7 @@ where
             where
                 V: de::MapAccess<'de>,
             {
-                let mut source_files: Option<BTreeMap<usize, SourceFile>> = None;
+                let mut source_files: Option<BTreeMap<u64, SourceFile>> = None;
                 let mut data = None;
 
                 while let Some(key) = map.next_key()? {
@@ -140,7 +141,7 @@ where
         let res = deserializer.deserialize_struct(
             "SerdeWrapper",
             &["source_files", "data"],
-            WrapperVisitor(PhantomData::<T>::default()),
+            WrapperVisitor(PhantomData::<T>),
         );
         *DEDUPLICATE_SOURCE_FILES.write().unwrap() = false;
 
@@ -151,9 +152,9 @@ where
 /// Internally used for Serialization
 #[derive(Debug, Default)]
 struct SerializeData {
-    id_counter: usize,
-    ptr_to_id: BTreeMap<usize, usize>,
-    id_to_source_file: BTreeMap<usize, SourceFile>,
+    id_counter: u64,
+    ptr_to_id: BTreeMap<usize, u64>,
+    id_to_source_file: BTreeMap<u64, SourceFile>,
 }
 
 impl SerializeData {
@@ -164,7 +165,7 @@ impl SerializeData {
     }
 
     /// Get id of already stored [`Arc`] or store it and return new id
-    pub fn get_id_of(&mut self, source_file: &Arc<SourceFile>) -> usize {
+    pub fn get_id_of(&mut self, source_file: &Arc<SourceFile>) -> u64 {
         let ptr = Arc::as_ptr(source_file);
         if let Some(&id) = self.ptr_to_id.get(&(ptr as usize)) {
             id
@@ -181,150 +182,92 @@ impl SerializeData {
     }
 }
 
-impl Serialize for Span {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+#[derive(Debug, Default)]
+struct DeserializeData {
+    id_to_source_file: BTreeMap<u64, Arc<SourceFile>>,
+}
+
+pub mod source_file {
+    use std::sync::Arc;
+
+    use serde::{de, Deserialize, Serialize};
+
+    use crate::{base::source_file::SourceFile, serde::DESERIALIZE_DATA};
+
+    use super::{DEDUPLICATE_SOURCE_FILES, SERIALIZE_DATA};
+
+    pub fn serialize<S>(this: &Arc<SourceFile>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        let mut s = serializer.serialize_struct("Span", 3)?;
-        s.serialize_field("start", &self.start())?;
-        s.serialize_field("end", &self.end())?;
-
         if *DEDUPLICATE_SOURCE_FILES.read().unwrap() {
             let mut data = SERIALIZE_DATA.lock().unwrap();
-            s.serialize_field("source_file", &data.get_id_of(self.source_file()))?;
+            serializer.serialize_u64(data.get_id_of(this))
         } else {
-            s.serialize_field("source_file", self.source_file())?;
+            this.as_ref().serialize(serializer)
         }
-
-        s.end()
     }
-}
 
-#[derive(Debug, Default)]
-struct DeserializeData {
-    id_to_source_file: BTreeMap<usize, Arc<SourceFile>>,
-}
-
-impl<'de> Deserialize<'de> for Span {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Arc<SourceFile>, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        #[serde(field_identifier, rename_all = "snake_case")]
-        enum Field {
-            Start,
-            End,
-            SourceFile,
+        if *DEDUPLICATE_SOURCE_FILES.read().unwrap() {
+            let id = u64::deserialize(deserializer)?;
+            Ok(DESERIALIZE_DATA
+                .read()
+                .unwrap()
+                .as_ref()
+                .ok_or_else(|| de::Error::custom("SourceFiles do not have been loaded yet"))?
+                .id_to_source_file
+                .get(&id)
+                .map(Arc::clone)
+                .ok_or_else(|| serde::de::Error::custom("invalid source_file id"))?)
+        } else {
+            Ok(Arc::new(SourceFile::deserialize(deserializer)?))
         }
+    }
+}
 
-        struct SpanVisitor;
+#[cfg(all(test, feature = "shulkerbox"))]
+mod tests {
+    use std::path::Path;
 
-        impl<'de> Visitor<'de> for SpanVisitor {
-            type Value = Span;
+    use shulkerbox::virtual_fs::{VFile, VFolder};
 
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                if *DEDUPLICATE_SOURCE_FILES.read().unwrap() {
-                    formatter.write_str("struct Span with deduplicated SourceFiles")
-                } else {
-                    formatter.write_str("struct Span")
-                }
-            }
+    use crate::{base::SilentHandler, syntax::syntax_tree::program::ProgramFile};
 
-            fn visit_seq<V>(self, mut seq: V) -> Result<Self::Value, V::Error>
-            where
-                V: serde::de::SeqAccess<'de>,
-            {
-                let start = seq
-                    .next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                let end = seq
-                    .next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
-                let source_file = if *DEDUPLICATE_SOURCE_FILES.read().unwrap() {
-                    DESERIALIZE_DATA
-                        .read()
-                        .unwrap()
-                        .as_ref()
-                        .ok_or_else(|| {
-                            de::Error::custom("SourceFiles do not have been loaded yet")
-                        })?
-                        .id_to_source_file
-                        .get(
-                            &seq.next_element()?
-                                .ok_or_else(|| de::Error::invalid_length(2, &self))?,
-                        )
-                        .ok_or_else(|| de::Error::custom("invalid source_file id"))?
-                        .clone()
-                } else {
-                    Arc::new(
-                        seq.next_element()?
-                            .ok_or_else(|| de::Error::invalid_length(2, &self))?,
-                    )
-                };
+    use super::*;
 
-                Ok(Span::new(source_file, start, end)
-                    .ok_or_else(|| de::Error::custom("Invalid data"))?)
-            }
+    #[test]
+    fn test_serde_wrapper() {
+        let mut vfolder = VFolder::new();
+        let vfile = VFile::Text(r#"namespace "test";"#.to_string());
+        vfolder.add_file("main.shu", vfile);
 
-            fn visit_map<V>(self, mut map: V) -> Result<Self::Value, V::Error>
-            where
-                V: de::MapAccess<'de>,
-            {
-                let mut start = None;
-                let mut end = None;
-                let mut source_file = None;
+        let parsed = crate::parse(
+            &SilentHandler::new(),
+            &vfolder,
+            Path::new("main.shu"),
+            "main".to_string(),
+        )
+        .unwrap();
 
-                while let Some(key) = map.next_key()? {
-                    match key {
-                        Field::Start => {
-                            if start.is_some() {
-                                return Err(de::Error::duplicate_field("start"));
-                            }
-                            start = Some(map.next_value()?);
-                        }
-                        Field::End => {
-                            if end.is_some() {
-                                return Err(de::Error::duplicate_field("end"));
-                            }
-                            end = Some(map.next_value()?);
-                        }
-                        Field::SourceFile => {
-                            if source_file.is_some() {
-                                return Err(de::Error::duplicate_field("source_file"));
-                            }
-                            source_file = if *DEDUPLICATE_SOURCE_FILES.read().unwrap() {
-                                Some(
-                                    DESERIALIZE_DATA
-                                        .read()
-                                        .unwrap()
-                                        .as_ref()
-                                        .ok_or_else(|| {
-                                            de::Error::custom(
-                                                "SourceFiles do not have been loaded yet",
-                                            )
-                                        })?
-                                        .id_to_source_file
-                                        .get(&map.next_value()?)
-                                        .ok_or_else(|| de::Error::custom("invalid source_file id"))?
-                                        .clone(),
-                                )
-                            } else {
-                                Some(Arc::new(map.next_value()?))
-                            };
-                        }
-                    }
-                }
-                let start = start.ok_or_else(|| de::Error::missing_field("start"))?;
-                let end = end.ok_or_else(|| de::Error::missing_field("end"))?;
-                let source_file = source_file.ok_or_else(|| de::Error::missing_field("source"))?;
+        let wrapper = SerdeWrapper(parsed);
 
-                Ok(Span::new(source_file, start, end)
-                    .ok_or_else(|| de::Error::custom("Invalid data"))?)
-            }
-        }
+        let serialized = serde_json::to_string_pretty(&wrapper).unwrap();
+        let SerdeWrapper(deserialized) =
+            serde_json::from_str::<SerdeWrapper<ProgramFile>>(&serialized).unwrap();
 
-        deserializer.deserialize_struct("Span", &["start", "end", "source_file"], SpanVisitor)
+        assert_eq!(
+            Arc::as_ptr(
+                deserialized
+                    .namespace()
+                    .namespace_keyword()
+                    .span
+                    .source_file()
+            ),
+            Arc::as_ptr(deserialized.namespace().namespace_name().span.source_file())
+        );
     }
 }

@@ -146,6 +146,7 @@ impl SourceFile {
 
 /// Represents a range of characters in a source file.
 #[derive(Clone, Getters, CopyGetters)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Span {
     /// Get the start byte index of the span.
     #[get_copy = "pub"]
@@ -157,6 +158,7 @@ pub struct Span {
 
     /// Get the source file that the span is located in.
     #[get = "pub"]
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde::source_file"))]
     source_file: Arc<SourceFile>,
 }
 

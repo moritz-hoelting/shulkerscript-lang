@@ -21,7 +21,7 @@ pub mod syntax;
 pub mod transpile;
 
 #[cfg(feature = "serde")]
-mod serde;
+pub(crate) mod serde;
 #[cfg(feature = "serde")]
 #[cfg_attr(feature = "serde", doc(inline))]
 pub use serde::SerdeWrapper;
