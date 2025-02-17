@@ -3,7 +3,7 @@
 use chksum_md5 as md5;
 use std::{
     collections::{BTreeMap, HashMap},
-    iter,
+    ops::Deref,
 };
 
 use shulkerbox::datapack::{self, Command, Datapack, Execute};
@@ -14,6 +14,7 @@ use crate::{
         source_file::{SourceElement, Span},
         Handler,
     },
+    semantic::error::{ConflictingFunctionNames, InvalidFunctionArguments, UnexpectedExpression},
     syntax::syntax_tree::{
         declaration::{Declaration, ImportItems},
         expression::{Expression, FunctionCall, Primary},
@@ -23,11 +24,11 @@ use crate::{
             Statement,
         },
     },
-    transpile::error::{ConflictingFunctionNames, MissingFunctionDeclaration},
+    transpile::error::MissingFunctionDeclaration,
 };
 
 use super::{
-    error::{TranspileError, TranspileResult, UnexpectedExpression},
+    error::{TranspileError, TranspileResult},
     FunctionData,
 };
 
@@ -97,7 +98,7 @@ impl Transpiler {
         );
 
         for identifier_span in always_transpile_functions {
-            self.get_or_transpile_function(&identifier_span, handler)?;
+            self.get_or_transpile_function(&identifier_span, None, handler)?;
         }
 
         Ok(())
@@ -122,7 +123,7 @@ impl Transpiler {
         &mut self,
         declaration: &Declaration,
         namespace: &Namespace,
-        _handler: &impl Handler<base::Error>,
+        handler: &impl Handler<base::Error>,
     ) {
         let program_identifier = declaration.span().source_file().identifier().clone();
         match declaration {
@@ -148,6 +149,15 @@ impl Transpiler {
                     FunctionData {
                         namespace: namespace.namespace_name().str_content().to_string(),
                         identifier_span: identifier_span.clone(),
+                        parameters: function
+                            .parameters()
+                            .as_ref()
+                            .map(|l| {
+                                l.elements()
+                                    .map(|i| i.span.str().to_string())
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default(),
                         statements,
                         public: function.is_public(),
                         annotations,
@@ -162,12 +172,13 @@ impl Transpiler {
                 let aliases = &mut self.aliases;
 
                 match import.items() {
-                    ImportItems::All(_) => todo!("Importing all items is not yet supported."),
+                    ImportItems::All(_) => {
+                        handler.receive(base::Error::Other(
+                            "Importing all items is not yet supported.".to_string(),
+                        ));
+                    }
                     ImportItems::Named(list) => {
-                        let items = iter::once(list.first())
-                            .chain(list.rest().iter().map(|(_, ident)| ident));
-
-                        for item in items {
+                        for item in list.elements() {
                             let name = item.span.str();
                             aliases.insert(
                                 (program_identifier.clone(), name.to_string()),
@@ -203,8 +214,9 @@ impl Transpiler {
     fn get_or_transpile_function(
         &mut self,
         identifier_span: &Span,
+        arguments: Option<&[&Expression]>,
         handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<String> {
+    ) -> TranspileResult<(String, Option<BTreeMap<String, String>>)> {
         let program_identifier = identifier_span.source_file().identifier();
         let program_query = (
             program_identifier.to_string(),
@@ -244,6 +256,7 @@ impl Transpiler {
                         handler.receive(error.clone());
                         error
                     })?;
+
                 function_data.statements.clone()
             };
             let commands = self.transpile_function(&statements, program_identifier, handler)?;
@@ -315,10 +328,35 @@ impl Transpiler {
             );
         }
 
-        let locations = &self.function_locations;
-        locations
+        let parameters = {
+            let function_data = self
+                .functions
+                .get(&program_query)
+                .or_else(|| {
+                    alias_query
+                        .clone()
+                        .and_then(|q| self.functions.get(&q).filter(|f| f.public))
+                })
+                .ok_or_else(|| {
+                    let error = TranspileError::MissingFunctionDeclaration(
+                        MissingFunctionDeclaration::from_context(
+                            identifier_span.clone(),
+                            &self.functions,
+                        ),
+                    );
+                    handler.receive(error.clone());
+                    error
+                })?;
+
+            function_data.parameters.clone()
+        };
+
+        let function_location = self
+            .function_locations
             .get(&program_query)
-            .or_else(|| alias_query.and_then(|q| locations.get(&q).filter(|(_, p)| *p)))
+            .or_else(|| {
+                alias_query.and_then(|q| self.function_locations.get(&q).filter(|(_, p)| *p))
+            })
             .ok_or_else(|| {
                 let error = TranspileError::MissingFunctionDeclaration(
                     MissingFunctionDeclaration::from_context(
@@ -329,7 +367,57 @@ impl Transpiler {
                 handler.receive(error.clone());
                 error
             })
-            .map(|(s, _)| s.to_owned())
+            .map(|(s, _)| s.to_owned())?;
+
+        let arg_count = arguments.iter().flat_map(|x| x.iter()).count();
+        if arg_count != parameters.len() {
+            let err = TranspileError::InvalidFunctionArguments(InvalidFunctionArguments {
+                expected: parameters.len(),
+                actual: arg_count,
+                span: identifier_span.clone(),
+            });
+            handler.receive(err.clone());
+            Err(err)
+        } else if arg_count > 0 {
+            let mut compiled_args = Vec::new();
+            let mut errs = Vec::new();
+            for expression in arguments.iter().flat_map(|x| x.iter()) {
+                let value = match expression {
+                    Expression::Primary(Primary::FunctionCall(func)) => self
+                        .transpile_function_call(func, handler)
+                        .map(|cmd| match cmd {
+                            Command::Raw(s) => s,
+                            _ => unreachable!("Function call should always return a raw command"),
+                        }),
+                    Expression::Primary(Primary::Lua(lua)) => {
+                        lua.eval_string(handler).map(Option::unwrap_or_default)
+                    }
+                    Expression::Primary(Primary::StringLiteral(string)) => {
+                        Ok(string.str_content().to_string())
+                    }
+                    Expression::Primary(Primary::MacroStringLiteral(literal)) => {
+                        Ok(literal.str_content())
+                    }
+                };
+
+                match value {
+                    Ok(value) => {
+                        compiled_args.push(value);
+                    }
+                    Err(err) => {
+                        compiled_args.push(String::new());
+                        errs.push(err.clone());
+                    }
+                }
+            }
+            if let Some(err) = errs.first() {
+                return Err(err.clone());
+            }
+            let function_args = parameters.into_iter().zip(compiled_args).collect();
+            Ok((function_location, Some(function_args)))
+        } else {
+            Ok((function_location, None))
+        }
     }
 
     fn transpile_function(
@@ -373,6 +461,9 @@ impl Transpiler {
                 }
                 Expression::Primary(Primary::StringLiteral(string)) => {
                     Ok(Some(Command::Raw(string.str_content().to_string())))
+                }
+                Expression::Primary(Primary::MacroStringLiteral(string)) => {
+                    Ok(Some(Command::UsesMacro(string.into())))
                 }
                 Expression::Primary(Primary::Lua(code)) => {
                     Ok(code.eval_string(handler)?.map(Command::Raw))
@@ -431,8 +522,29 @@ impl Transpiler {
         func: &FunctionCall,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Command> {
-        let location = self.get_or_transpile_function(&func.identifier().span, handler)?;
-        Ok(Command::Raw(format!("function {location}")))
+        let arguments = func
+            .arguments()
+            .as_ref()
+            .map(|l| l.elements().map(Deref::deref).collect::<Vec<_>>());
+        let (location, arguments) =
+            self.get_or_transpile_function(&func.identifier().span, arguments.as_deref(), handler)?;
+        let mut function_call = format!("function {location}");
+        if let Some(arguments) = arguments {
+            use std::fmt::Write;
+            let arguments = arguments
+                .iter()
+                .map(|(ident, v)| {
+                    format!(
+                        r#"{macro_name}:"{escaped}""#,
+                        macro_name = super::util::identifier_to_macro(ident),
+                        escaped = crate::util::escape_str(v)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            write!(function_call, " {{{arguments}}}").unwrap();
+        }
+        Ok(Command::Raw(function_call))
     }
 
     fn transpile_execute_block(
@@ -595,53 +707,53 @@ impl Transpiler {
                     None
                 }
             }
-            ExecuteBlockHead::As(as_) => {
-                let selector = as_.as_selector().str_content();
-                tail.map(|tail| Execute::As(selector.to_string(), Box::new(tail)))
+            ExecuteBlockHead::As(r#as) => {
+                let selector = r#as.as_selector();
+                tail.map(|tail| Execute::As(selector.into(), Box::new(tail)))
             }
             ExecuteBlockHead::At(at) => {
-                let selector = at.at_selector().str_content();
-                tail.map(|tail| Execute::At(selector.to_string(), Box::new(tail)))
+                let selector = at.at_selector();
+                tail.map(|tail| Execute::At(selector.into(), Box::new(tail)))
             }
             ExecuteBlockHead::Align(align) => {
-                let align = align.align_selector().str_content();
-                tail.map(|tail| Execute::Align(align.to_string(), Box::new(tail)))
+                let align = align.align_selector();
+                tail.map(|tail| Execute::Align(align.into(), Box::new(tail)))
             }
             ExecuteBlockHead::Anchored(anchored) => {
-                let anchor = anchored.anchored_selector().str_content();
-                tail.map(|tail| Execute::Anchored(anchor.to_string(), Box::new(tail)))
+                let anchor = anchored.anchored_selector();
+                tail.map(|tail| Execute::Anchored(anchor.into(), Box::new(tail)))
             }
-            ExecuteBlockHead::In(in_) => {
-                let dimension = in_.in_selector().str_content();
-                tail.map(|tail| Execute::In(dimension.to_string(), Box::new(tail)))
+            ExecuteBlockHead::In(r#in) => {
+                let dimension = r#in.in_selector();
+                tail.map(|tail| Execute::In(dimension.into(), Box::new(tail)))
             }
             ExecuteBlockHead::Positioned(positioned) => {
-                let position = positioned.positioned_selector().str_content();
-                tail.map(|tail| Execute::Positioned(position.to_string(), Box::new(tail)))
+                let position = positioned.positioned_selector();
+                tail.map(|tail| Execute::Positioned(position.into(), Box::new(tail)))
             }
             ExecuteBlockHead::Rotated(rotated) => {
-                let rotation = rotated.rotated_selector().str_content();
-                tail.map(|tail| Execute::Rotated(rotation.to_string(), Box::new(tail)))
+                let rotation = rotated.rotated_selector();
+                tail.map(|tail| Execute::Rotated(rotation.into(), Box::new(tail)))
             }
             ExecuteBlockHead::Facing(facing) => {
-                let facing = facing.facing_selector().str_content();
-                tail.map(|tail| Execute::Facing(facing.to_string(), Box::new(tail)))
+                let facing = facing.facing_selector();
+                tail.map(|tail| Execute::Facing(facing.into(), Box::new(tail)))
             }
             ExecuteBlockHead::AsAt(as_at) => {
-                let selector = as_at.asat_selector().str_content();
-                tail.map(|tail| Execute::AsAt(selector.to_string(), Box::new(tail)))
+                let selector = as_at.asat_selector();
+                tail.map(|tail| Execute::AsAt(selector.into(), Box::new(tail)))
             }
             ExecuteBlockHead::On(on) => {
-                let dimension = on.on_selector().str_content();
-                tail.map(|tail| Execute::On(dimension.to_string(), Box::new(tail)))
+                let dimension = on.on_selector();
+                tail.map(|tail| Execute::On(dimension.into(), Box::new(tail)))
             }
             ExecuteBlockHead::Store(store) => {
-                let store = store.store_selector().str_content();
-                tail.map(|tail| Execute::Store(store.to_string(), Box::new(tail)))
+                let store = store.store_selector();
+                tail.map(|tail| Execute::Store(store.into(), Box::new(tail)))
             }
             ExecuteBlockHead::Summon(summon) => {
-                let entity = summon.summon_selector().str_content();
-                tail.map(|tail| Execute::Summon(entity.to_string(), Box::new(tail)))
+                let entity = summon.summon_selector();
+                tail.map(|tail| Execute::Summon(entity.into(), Box::new(tail)))
             }
         })
     }

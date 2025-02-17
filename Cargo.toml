@@ -37,7 +37,8 @@ mlua = { version = "0.10.2", features = ["lua54", "vendored"], optional = true }
 path-absolutize = "3.1.1"
 pathdiff = "0.2.3"
 serde = { version = "1.0.217", features = ["derive"], optional = true }
-shulkerbox = { version = "0.1.0", default-features = false, optional = true }
+# shulkerbox = { version = "0.1.0", default-features = false, optional = true }
+shulkerbox = { git = "https://github.com/moritz-hoelting/shulkerbox", rev = "76d58c0766518fe5ab2635de60ba40972565a3e0", default-features = false, optional = true }
 strsim = "0.11.1"
 strum = { version = "0.27.0", features = ["derive"] }
 thiserror = "2.0.11"

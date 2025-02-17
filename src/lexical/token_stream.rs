@@ -5,10 +5,13 @@ use std::{fmt::Debug, sync::Arc};
 use derive_more::{Deref, From};
 use enum_as_inner::EnumAsInner;
 
-use crate::base::{
-    self,
-    source_file::{SourceElement, SourceFile, Span},
-    Handler,
+use crate::{
+    base::{
+        self,
+        source_file::{SourceElement, SourceFile, Span},
+        Handler,
+    },
+    lexical::Error,
 };
 
 use super::{
@@ -61,6 +64,17 @@ impl TokenStream {
                 }
                 Err(TokenizeError::FatalLexicalError) => {
                     tracing::error!("Fatal lexical error encountered while tokenizing source code");
+                }
+                Err(TokenizeError::InvalidMacroNameCharacter(err)) => {
+                    handler.receive(Error::TokenizeError(
+                        TokenizeError::InvalidMacroNameCharacter(err),
+                    ));
+                }
+                Err(TokenizeError::UnclosedMacroUsage(err)) => {
+                    handler.receive(Error::TokenizeError(TokenizeError::UnclosedMacroUsage(err)));
+                }
+                Err(TokenizeError::EmptyMacroUsage(err)) => {
+                    handler.receive(Error::TokenizeError(TokenizeError::EmptyMacroUsage(err)));
                 }
             }
         }
@@ -184,7 +198,7 @@ pub enum TokenTree {
 impl SourceElement for TokenTree {
     fn span(&self) -> Span {
         match self {
-            Self::Token(token) => token.span().to_owned(),
+            Self::Token(token) => token.span(),
             Self::Delimited(delimited) => delimited
                 .open
                 .span()

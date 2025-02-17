@@ -12,7 +12,7 @@ use crate::{
     lexical::token::{Keyword, KeywordKind, Punctuation, StringLiteral, Token},
     syntax::{
         self,
-        error::{InvalidArgument, ParseResult, SyntaxKind, UnexpectedSyntax},
+        error::{ParseResult, SyntaxKind, UnexpectedSyntax},
         parser::{Parser, Reading},
     },
 };
@@ -108,22 +108,7 @@ impl<'a> Parser<'a> {
                 // eat the keyword
                 self.forward();
 
-                let namespace_name = self.parse_string_literal(handler).and_then(|name| {
-                    Namespace::validate_str(name.str_content().as_ref())
-                        .map(|()| name.clone())
-                        .map_err(|invalid| {
-                            let err = syntax::error::Error::InvalidArgument(InvalidArgument {
-                                message: format!(
-                                    "Invalid characters in namespace '{}'. The following characters are not allowed in namespace definitions: '{}'",
-                                    name.str_content(),
-                                    invalid
-                                ),
-                                span: name.span(),
-                            });
-                            handler.receive(err.clone());
-                            err
-                        })
-                })?;
+                let namespace_name = self.parse_string_literal(handler)?;
 
                 let semicolon = self.parse_punctuation(';', true, handler)?;
 

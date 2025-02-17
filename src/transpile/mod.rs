@@ -20,13 +20,13 @@ mod transpiler;
 #[cfg_attr(feature = "shulkerbox", doc(inline))]
 pub use transpiler::Transpiler;
 
-#[cfg(feature = "shulkerbox")]
-mod util;
+pub mod util;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct FunctionData {
     pub(super) namespace: String,
     pub(super) identifier_span: Span,
+    pub(super) parameters: Vec<String>,
     pub(super) statements: Vec<Statement>,
     pub(super) public: bool,
     pub(super) annotations: HashMap<String, Option<String>>,

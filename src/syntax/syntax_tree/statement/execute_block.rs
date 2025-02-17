@@ -1,5 +1,7 @@
 //! Execute block statement syntax tree.
 
+use std::collections::HashSet;
+
 use derive_more::From;
 use enum_as_inner::EnumAsInner;
 use getset::Getters;
@@ -11,13 +13,13 @@ use crate::{
         Handler, VoidHandler,
     },
     lexical::{
-        token::{Keyword, KeywordKind, Punctuation, StringLiteral, Token},
+        token::{Keyword, KeywordKind, Punctuation, Token},
         token_stream::Delimiter,
     },
     syntax::{
         error::{Error, ParseResult, SyntaxKind, UnexpectedSyntax},
         parser::{DelimitedTree, Parser, Reading},
-        syntax_tree::condition::ParenthesizedCondition,
+        syntax_tree::{condition::ParenthesizedCondition, AnyStringLiteral},
     },
 };
 
@@ -217,7 +219,7 @@ impl SourceElement for Else {
 ///
 /// ```ebnf
 /// As:
-/// 'as' '(' StringLiteral ')'
+/// 'as' '(' AnyStringLiteral ')'
 /// ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -231,7 +233,7 @@ pub struct As {
     open_paren: Punctuation,
     /// The selector of the as statement.
     #[get = "pub"]
-    as_selector: StringLiteral,
+    as_selector: AnyStringLiteral,
     /// The close parenthesis.
     #[get = "pub"]
     close_paren: Punctuation,
@@ -248,7 +250,7 @@ impl SourceElement for As {
 impl As {
     /// Dissolves the [`As`] into its components.
     #[must_use]
-    pub fn dissolve(self) -> (Keyword, Punctuation, StringLiteral, Punctuation) {
+    pub fn dissolve(self) -> (Keyword, Punctuation, AnyStringLiteral, Punctuation) {
         (
             self.as_keyword,
             self.open_paren,
@@ -263,7 +265,7 @@ impl As {
 /// Syntax Synopsis:
 /// ```ebnf
 /// Align:
-///     'align' '(' StringLiteral ')'
+///     'align' '(' AnyStringLiteral ')'
 /// ;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
@@ -276,7 +278,7 @@ pub struct Align {
     open_paren: Punctuation,
     /// The selector of the align statement.
     #[get = "pub"]
-    align_selector: StringLiteral,
+    align_selector: AnyStringLiteral,
     /// The close parenthesis.
     #[get = "pub"]
     close_paren: Punctuation,
@@ -294,7 +296,7 @@ impl SourceElement for Align {
 impl Align {
     /// Dissolves the [`Align`] into its components.
     #[must_use]
-    pub fn dissolve(self) -> (Keyword, Punctuation, StringLiteral, Punctuation) {
+    pub fn dissolve(self) -> (Keyword, Punctuation, AnyStringLiteral, Punctuation) {
         (
             self.align_keyword,
             self.open_paren,
@@ -309,7 +311,7 @@ impl Align {
 /// Syntax Synopsis:
 /// ```ebnf
 /// Anchored:
-///    'anchored' '(' StringLiteral ')'
+///    'anchored' '(' AnyStringLiteral ')'
 /// ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -323,7 +325,7 @@ pub struct Anchored {
     open_paren: Punctuation,
     /// The selector of the anchored statement.
     #[get = "pub"]
-    anchored_selector: StringLiteral,
+    anchored_selector: AnyStringLiteral,
     /// The close parenthesis.
     #[get = "pub"]
     close_paren: Punctuation,
@@ -339,7 +341,7 @@ impl SourceElement for Anchored {
 impl Anchored {
     /// Dissolves the [`Anchored`] into its components.
     #[must_use]
-    pub fn dissolve(self) -> (Keyword, Punctuation, StringLiteral, Punctuation) {
+    pub fn dissolve(self) -> (Keyword, Punctuation, AnyStringLiteral, Punctuation) {
         (
             self.anchored_keyword,
             self.open_paren,
@@ -354,7 +356,7 @@ impl Anchored {
 /// Syntax Synopsis:
 /// ```ebnf
 /// AsAt:
-///   'asat' '(' StringLiteral ')'
+///   'asat' '(' AnyStringLiteral ')'
 /// ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -368,7 +370,7 @@ pub struct AsAt {
     open_paren: Punctuation,
     /// The selector of the asat statement.
     #[get = "pub"]
-    asat_selector: StringLiteral,
+    asat_selector: AnyStringLiteral,
     /// The close parenthesis.
     #[get = "pub"]
     close_paren: Punctuation,
@@ -384,7 +386,7 @@ impl SourceElement for AsAt {
 impl AsAt {
     /// Dissolves the [`AsAt`] into its components.
     #[must_use]
-    pub fn dissolve(self) -> (Keyword, Punctuation, StringLiteral, Punctuation) {
+    pub fn dissolve(self) -> (Keyword, Punctuation, AnyStringLiteral, Punctuation) {
         (
             self.asat_keyword,
             self.open_paren,
@@ -399,7 +401,7 @@ impl AsAt {
 /// Syntax Synopsis:
 /// ```ebnf
 /// At:
-///  'at' '(' StringLiteral ')'
+///  'at' '(' AnyStringLiteral ')'
 /// ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -413,7 +415,7 @@ pub struct At {
     open_paren: Punctuation,
     /// The selector of the at statement.
     #[get = "pub"]
-    at_selector: StringLiteral,
+    at_selector: AnyStringLiteral,
     /// The close parenthesis.
     #[get = "pub"]
     close_paren: Punctuation,
@@ -429,7 +431,7 @@ impl SourceElement for At {
 impl At {
     /// Dissolves the [`At`] into its components.
     #[must_use]
-    pub fn dissolve(self) -> (Keyword, Punctuation, StringLiteral, Punctuation) {
+    pub fn dissolve(self) -> (Keyword, Punctuation, AnyStringLiteral, Punctuation) {
         (
             self.at_keyword,
             self.open_paren,
@@ -444,7 +446,7 @@ impl At {
 /// Syntax Synopsis:
 /// ```ebnf
 /// Facing:
-///  'facing' '(' StringLiteral ')'
+///  'facing' '(' AnyStringLiteral ')'
 /// ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -458,7 +460,7 @@ pub struct Facing {
     open_paren: Punctuation,
     /// The selector of the facing statement.
     #[get = "pub"]
-    facing_selector: StringLiteral,
+    facing_selector: AnyStringLiteral,
     /// The close parenthesis.
     #[get = "pub"]
     close_paren: Punctuation,
@@ -474,7 +476,7 @@ impl SourceElement for Facing {
 impl Facing {
     /// Dissolves the [`Facing`] into its components.
     #[must_use]
-    pub fn dissolve(self) -> (Keyword, Punctuation, StringLiteral, Punctuation) {
+    pub fn dissolve(self) -> (Keyword, Punctuation, AnyStringLiteral, Punctuation) {
         (
             self.facing_keyword,
             self.open_paren,
@@ -489,7 +491,7 @@ impl Facing {
 /// Syntax Synopsis:
 /// ```ebnf
 /// In:
-/// 'in' '(' StringLiteral ')'
+/// 'in' '(' AnyStringLiteral ')'
 /// ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -503,7 +505,7 @@ pub struct In {
     open_paren: Punctuation,
     /// The selector of the in statement.
     #[get = "pub"]
-    in_selector: StringLiteral,
+    in_selector: AnyStringLiteral,
     /// The close parenthesis.
     #[get = "pub"]
     close_paren: Punctuation,
@@ -519,7 +521,7 @@ impl SourceElement for In {
 impl In {
     /// Dissolves the [`In`] into its components.
     #[must_use]
-    pub fn dissolve(self) -> (Keyword, Punctuation, StringLiteral, Punctuation) {
+    pub fn dissolve(self) -> (Keyword, Punctuation, AnyStringLiteral, Punctuation) {
         (
             self.in_keyword,
             self.open_paren,
@@ -534,7 +536,7 @@ impl In {
 /// Syntax Synopsis:
 /// ```ebnf
 /// On:
-/// 'on' '(' StringLiteral ')'
+/// 'on' '(' AnyStringLiteral ')'
 /// ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -548,7 +550,7 @@ pub struct On {
     open_paren: Punctuation,
     /// The selector of the on statement.
     #[get = "pub"]
-    on_selector: StringLiteral,
+    on_selector: AnyStringLiteral,
     /// The close parenthesis.
     #[get = "pub"]
     close_paren: Punctuation,
@@ -564,7 +566,7 @@ impl SourceElement for On {
 impl On {
     /// Dissolves the [`On`] into its components.
     #[must_use]
-    pub fn dissolve(self) -> (Keyword, Punctuation, StringLiteral, Punctuation) {
+    pub fn dissolve(self) -> (Keyword, Punctuation, AnyStringLiteral, Punctuation) {
         (
             self.on_keyword,
             self.open_paren,
@@ -579,7 +581,7 @@ impl On {
 /// Syntax Synopsis:
 /// ```ebnf
 /// Positioned:
-/// 'positioned' '(' StringLiteral ')'
+/// 'positioned' '(' AnyStringLiteral ')'
 /// ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -593,7 +595,7 @@ pub struct Positioned {
     open_paren: Punctuation,
     /// The selector of the positioned statement.
     #[get = "pub"]
-    positioned_selector: StringLiteral,
+    positioned_selector: AnyStringLiteral,
     /// The close parenthesis.
     #[get = "pub"]
     close_paren: Punctuation,
@@ -609,7 +611,7 @@ impl SourceElement for Positioned {
 impl Positioned {
     /// Dissolves the [`Positioned`] into its components.
     #[must_use]
-    pub fn dissolve(self) -> (Keyword, Punctuation, StringLiteral, Punctuation) {
+    pub fn dissolve(self) -> (Keyword, Punctuation, AnyStringLiteral, Punctuation) {
         (
             self.positioned_keyword,
             self.open_paren,
@@ -624,7 +626,7 @@ impl Positioned {
 /// Syntax Synopsis:
 /// ```ebnf
 /// Rotated:
-/// 'rotated' '(' StringLiteral ')'
+/// 'rotated' '(' AnyStringLiteral ')'
 /// ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -638,7 +640,7 @@ pub struct Rotated {
     open_paren: Punctuation,
     /// The selector of the rotated statement.
     #[get = "pub"]
-    rotated_selector: StringLiteral,
+    rotated_selector: AnyStringLiteral,
     /// The close parenthesis.
     #[get = "pub"]
     close_paren: Punctuation,
@@ -654,7 +656,7 @@ impl SourceElement for Rotated {
 impl Rotated {
     /// Dissolves the [`Rotated`] into its components.
     #[must_use]
-    pub fn dissolve(self) -> (Keyword, Punctuation, StringLiteral, Punctuation) {
+    pub fn dissolve(self) -> (Keyword, Punctuation, AnyStringLiteral, Punctuation) {
         (
             self.rotated_keyword,
             self.open_paren,
@@ -669,7 +671,7 @@ impl Rotated {
 /// Syntax Synopsis:
 /// ```ebnf
 /// Store:
-/// 'store' '(' StringLiteral ')'
+/// 'store' '(' AnyStringLiteral ')'
 /// ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -683,7 +685,7 @@ pub struct Store {
     open_paren: Punctuation,
     /// The selector of the store statement.
     #[get = "pub"]
-    store_selector: StringLiteral,
+    store_selector: AnyStringLiteral,
     /// The close parenthesis.
     #[get = "pub"]
     close_paren: Punctuation,
@@ -699,7 +701,7 @@ impl SourceElement for Store {
 impl Store {
     /// Dissolves the [`Store`] into its components.
     #[must_use]
-    pub fn dissolve(self) -> (Keyword, Punctuation, StringLiteral, Punctuation) {
+    pub fn dissolve(self) -> (Keyword, Punctuation, AnyStringLiteral, Punctuation) {
         (
             self.store_keyword,
             self.open_paren,
@@ -714,7 +716,7 @@ impl Store {
 /// Syntax Synopsis:
 /// ```ebnf
 /// Summon:
-/// 'summon' '(' StringLiteral ')'
+/// 'summon' '(' AnyStringLiteral ')'
 /// ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -728,7 +730,7 @@ pub struct Summon {
     open_paren: Punctuation,
     /// The selector of the summon statement.
     #[get = "pub"]
-    summon_selector: StringLiteral,
+    summon_selector: AnyStringLiteral,
     /// The close parenthesis.
     #[get = "pub"]
     close_paren: Punctuation,
@@ -744,7 +746,7 @@ impl SourceElement for Summon {
 impl Summon {
     /// Dissolves the [`Summon`] into its components.
     #[must_use]
-    pub fn dissolve(self) -> (Keyword, Punctuation, StringLiteral, Punctuation) {
+    pub fn dissolve(self) -> (Keyword, Punctuation, AnyStringLiteral, Punctuation) {
         (
             self.summon_keyword,
             self.open_paren,
@@ -825,7 +827,7 @@ impl<'a> Parser<'a> {
                 let argument = match self.stop_at_significant() {
                     Reading::IntoDelimited(punc) if punc.punctuation == '(' => self.step_into(
                         Delimiter::Parenthesis,
-                        |parser| parser.parse_string_literal(handler),
+                        |parser| parser.parse_any_string_literal(handler),
                         handler,
                     ),
                     unexpected => {
@@ -896,7 +898,7 @@ impl<'a> Parser<'a> {
 
 fn head_from_keyword(
     keyword: Keyword,
-    argument: DelimitedTree<StringLiteral>,
+    argument: DelimitedTree<AnyStringLiteral>,
 ) -> ParseResult<ExecuteBlockHead> {
     Ok(match keyword.keyword {
         KeywordKind::Align => Align {
@@ -985,4 +987,92 @@ fn head_from_keyword(
         .into(),
         _ => unreachable!("The keyword is not a valid execute block head."),
     })
+}
+
+/// Trait for the execute block head items with a [`AnyStringLiteral`] as their selector.
+pub trait ExecuteBlockHeadItem {
+    /// Returns a reference to the selector of the execute block head item.
+    fn selector(&self) -> &AnyStringLiteral;
+
+    /// Analyzes the semantics of the execute block head item.
+    #[expect(clippy::missing_errors_doc)]
+    fn analyze_semantics(
+        &self,
+        macro_names: &HashSet<String>,
+        handler: &impl Handler<base::Error>,
+    ) -> Result<(), crate::semantic::error::Error> {
+        self.selector().analyze_semantics(macro_names, handler)
+    }
+}
+
+impl ExecuteBlockHeadItem for Align {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.align_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for Anchored {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.anchored_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for As {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.as_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for At {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.at_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for AsAt {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.asat_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for Facing {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.facing_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for In {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.in_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for On {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.on_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for Positioned {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.positioned_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for Rotated {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.rotated_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for Store {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.store_selector
+    }
+}
+
+impl ExecuteBlockHeadItem for Summon {
+    fn selector(&self) -> &AnyStringLiteral {
+        &self.summon_selector
+    }
 }

@@ -5,7 +5,7 @@ use std::fmt::Display;
 use crate::{
     base::{
         log::{Message, Severity, SourceCodeDisplay},
-        source_file::Span,
+        source_file::{SourceElement as _, Span},
     },
     lexical::token::{KeywordKind, Token},
 };
@@ -34,6 +34,8 @@ pub enum SyntaxKind {
     Declaration,
     Numeric,
     StringLiteral,
+    MacroStringLiteral,
+    AnyStringLiteral,
     Statement,
     Expression,
     Type,
@@ -69,6 +71,8 @@ impl SyntaxKind {
             Self::Declaration => "a declaration token".to_string(),
             Self::Numeric => "a numeric token".to_string(),
             Self::StringLiteral => "a string literal".to_string(),
+            Self::MacroStringLiteral => "a macro string literal".to_string(),
+            Self::AnyStringLiteral => "a (macro) string literal".to_string(),
             Self::Statement => "a statement syntax".to_string(),
             Self::Expression => "an expression syntax".to_string(),
             Self::Type => "a type syntax".to_string(),
@@ -105,6 +109,7 @@ impl Display for UnexpectedSyntax {
             Some(Token::Numeric(..)) => "a numeric token".to_string(),
             Some(Token::CommandLiteral(..)) => "a literal command token".to_string(),
             Some(Token::StringLiteral(..)) => "a string literal token".to_string(),
+            Some(Token::MacroStringLiteral(..)) => "a macro string literal token".to_string(),
 
             None => "EOF".to_string(),
         };
@@ -117,7 +122,7 @@ impl Display for UnexpectedSyntax {
             write!(
                 f,
                 "\n{}",
-                SourceCodeDisplay::new(span.span(), Option::<u8>::None)
+                SourceCodeDisplay::new(&span.span(), Option::<u8>::None)
             )
         })
     }
