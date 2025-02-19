@@ -14,13 +14,15 @@ use serde::{
 
 use crate::base::source_file::SourceFile;
 
-static DEDUPLICATE_SOURCE_FILES: LazyLock<RwLock<bool>> = LazyLock::new(|| RwLock::new(false));
+thread_local! {
+    static DEDUPLICATE_SOURCE_FILES: LazyLock<RwLock<bool>> = LazyLock::new(|| RwLock::new(false));
 
-static SERIALIZE_DATA: LazyLock<Mutex<SerializeData>> =
-    LazyLock::new(|| Mutex::new(SerializeData::default()));
+    static SERIALIZE_DATA: LazyLock<Mutex<SerializeData>> =
+        LazyLock::new(|| Mutex::new(SerializeData::default()));
 
-static DESERIALIZE_DATA: LazyLock<RwLock<Option<DeserializeData>>> =
-    LazyLock::new(|| RwLock::new(None));
+    static DESERIALIZE_DATA: LazyLock<RwLock<Option<DeserializeData>>> =
+        LazyLock::new(|| RwLock::new(None));
+}
 
 /// Wrapper to remove duplicate source file data during (de-)serialization
 #[expect(clippy::module_name_repetitions)]
@@ -35,20 +37,27 @@ where
     where
         S: serde::Serializer,
     {
-        *DEDUPLICATE_SOURCE_FILES.write().unwrap() = true;
-        SERIALIZE_DATA.lock().unwrap().clear();
-        let mut serialized_data = flexbuffers::FlexbufferSerializer::new();
-        self.0
-            .serialize(&mut serialized_data)
-            .map_err(|_| serde::ser::Error::custom("could not buffer serialization"))?;
-        drop(serialized_data);
-        let mut s = serializer.serialize_struct("SerdeWrapper", 3)?;
-        s.serialize_field(
-            "source_files",
-            &SERIALIZE_DATA.lock().unwrap().id_to_source_file,
-        )?;
-        s.serialize_field("data", &self.0)?;
-        *DEDUPLICATE_SOURCE_FILES.write().unwrap() = false;
+        DEDUPLICATE_SOURCE_FILES.with(|d| *d.write().unwrap() = true);
+        SERIALIZE_DATA.with(|d| d.lock().unwrap().clear());
+        // hold guard so no other can serialize at the same time in same thread
+        let s = DEDUPLICATE_SOURCE_FILES.with(|d| {
+            let guard = d.read().unwrap();
+            let mut serialized_data = flexbuffers::FlexbufferSerializer::new();
+            self.0
+                .serialize(&mut serialized_data)
+                .map_err(|_| serde::ser::Error::custom("could not buffer serialization"))?;
+            drop(serialized_data);
+            let mut s = serializer.serialize_struct("SerdeWrapper", 3)?;
+
+            SERIALIZE_DATA.with(|d| {
+                s.serialize_field("source_files", &d.lock().unwrap().id_to_source_file)
+            })?;
+            s.serialize_field("data", &self.0)?;
+            drop(guard);
+            Ok(s)
+        })?;
+
+        DEDUPLICATE_SOURCE_FILES.with(|d| *d.write().unwrap() = false);
         s.end()
     }
 }
@@ -87,11 +96,13 @@ where
                 let source_files: BTreeMap<u64, SourceFile> = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                *DESERIALIZE_DATA.write().unwrap() = Some(DeserializeData {
-                    id_to_source_file: source_files
-                        .into_iter()
-                        .map(|(k, v)| (k, Arc::new(v)))
-                        .collect(),
+                DESERIALIZE_DATA.with(|d| {
+                    *d.write().unwrap() = Some(DeserializeData {
+                        id_to_source_file: source_files
+                            .into_iter()
+                            .map(|(k, v)| (k, Arc::new(v)))
+                            .collect(),
+                    })
                 });
                 let data = seq
                     .next_element()?
@@ -113,13 +124,15 @@ where
                             if data.is_some() {
                                 return Err(de::Error::duplicate_field("data"));
                             }
-                            *DESERIALIZE_DATA.write().unwrap() =
-                                source_files.as_ref().map(|source_files| DeserializeData {
-                                    id_to_source_file: source_files
-                                        .iter()
-                                        .map(|(&k, v)| (k, Arc::new(v.clone())))
-                                        .collect(),
-                                });
+                            DESERIALIZE_DATA.with(|d| {
+                                *d.write().unwrap() =
+                                    source_files.as_ref().map(|source_files| DeserializeData {
+                                        id_to_source_file: source_files
+                                            .iter()
+                                            .map(|(&k, v)| (k, Arc::new(v.clone())))
+                                            .collect(),
+                                    })
+                            });
                             data = Some(map.next_value()?);
                         }
                         Field::SourceFiles => {
@@ -136,14 +149,14 @@ where
             }
         }
 
-        *DEDUPLICATE_SOURCE_FILES.write().unwrap() = true;
-        *DESERIALIZE_DATA.write().unwrap() = None;
+        DEDUPLICATE_SOURCE_FILES.with(|d| *d.write().unwrap() = true);
+        DESERIALIZE_DATA.with(|d| *d.write().unwrap() = None);
         let res = deserializer.deserialize_struct(
             "SerdeWrapper",
             &["source_files", "data"],
             WrapperVisitor(PhantomData::<T>),
         );
-        *DEDUPLICATE_SOURCE_FILES.write().unwrap() = false;
+        DEDUPLICATE_SOURCE_FILES.with(|d| *d.write().unwrap() = false);
 
         res
     }
@@ -200,9 +213,11 @@ pub mod source_file {
     where
         S: serde::Serializer,
     {
-        if *DEDUPLICATE_SOURCE_FILES.read().unwrap() {
-            let mut data = SERIALIZE_DATA.lock().unwrap();
-            serializer.serialize_u64(data.get_id_of(this))
+        if DEDUPLICATE_SOURCE_FILES.with(|d| *d.read().unwrap()) {
+            SERIALIZE_DATA.with(|d| {
+                let mut data = d.lock().unwrap();
+                serializer.serialize_u64(data.get_id_of(this))
+            })
         } else {
             this.as_ref().serialize(serializer)
         }
@@ -212,17 +227,18 @@ pub mod source_file {
     where
         D: serde::Deserializer<'de>,
     {
-        if *DEDUPLICATE_SOURCE_FILES.read().unwrap() {
+        if DEDUPLICATE_SOURCE_FILES.with(|d| *d.read().unwrap()) {
             let id = u64::deserialize(deserializer)?;
-            Ok(DESERIALIZE_DATA
-                .read()
-                .unwrap()
-                .as_ref()
-                .ok_or_else(|| de::Error::custom("SourceFiles do not have been loaded yet"))?
-                .id_to_source_file
-                .get(&id)
-                .map(Arc::clone)
-                .ok_or_else(|| serde::de::Error::custom("invalid source_file id"))?)
+            Ok(DESERIALIZE_DATA.with(|d| {
+                d.read()
+                    .unwrap()
+                    .as_ref()
+                    .ok_or_else(|| de::Error::custom("SourceFiles do not have been loaded yet"))?
+                    .id_to_source_file
+                    .get(&id)
+                    .map(Arc::clone)
+                    .ok_or_else(|| serde::de::Error::custom("invalid source_file id"))
+            }))?
         } else {
             Ok(Arc::new(SourceFile::deserialize(deserializer)?))
         }
