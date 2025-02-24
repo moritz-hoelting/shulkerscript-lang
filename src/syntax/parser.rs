@@ -7,7 +7,7 @@ use crate::{
     base::{self, Handler},
     lexical::{
         token::{
-            Identifier, Keyword, KeywordKind, MacroStringLiteral, Numeric, Punctuation,
+            Identifier, Integer, Keyword, KeywordKind, MacroStringLiteral, Punctuation,
             StringLiteral, Token,
         },
         token_stream::{Delimited, Delimiter, TokenStream, TokenTree},
@@ -399,16 +399,16 @@ impl<'a> Frame<'a> {
         }
     }
 
-    /// Expects the next [`Token`] to be an [`Numeric`], and returns it.
+    /// Expects the next [`Token`] to be an [`Integer`], and returns it.
     ///
     /// # Errors
     /// If the next [`Token`] is not an [`Identifier`].
-    pub fn parse_numeric(&mut self, handler: &impl Handler<Error>) -> ParseResult<Numeric> {
+    pub fn parse_integer(&mut self, handler: &impl Handler<Error>) -> ParseResult<Integer> {
         match self.next_significant_token() {
-            Reading::Atomic(Token::Numeric(ident)) => Ok(ident),
+            Reading::Atomic(Token::Integer(ident)) => Ok(ident),
             found => {
                 let err = Error::UnexpectedSyntax(UnexpectedSyntax {
-                    expected: SyntaxKind::Numeric,
+                    expected: SyntaxKind::Integer,
                     found: found.into_token(),
                 });
                 handler.receive(err.clone());

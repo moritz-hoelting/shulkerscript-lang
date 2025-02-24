@@ -32,7 +32,8 @@ pub enum SyntaxKind {
     Keyword(KeywordKind),
     Identifier,
     Declaration,
-    Numeric,
+    Integer,
+    Boolean,
     StringLiteral,
     MacroStringLiteral,
     AnyStringLiteral,
@@ -69,7 +70,8 @@ impl SyntaxKind {
             Self::Punctuation(char) => format!("a punctuation token `{char}`"),
             Self::Keyword(keyword) => format!("a keyword token `{}`", keyword.as_str()),
             Self::Declaration => "a declaration token".to_string(),
-            Self::Numeric => "a numeric token".to_string(),
+            Self::Integer => "an integer token".to_string(),
+            Self::Boolean => "a boolean token".to_string(),
             Self::StringLiteral => "a string literal".to_string(),
             Self::MacroStringLiteral => "a macro string literal".to_string(),
             Self::AnyStringLiteral => "a (macro) string literal".to_string(),
@@ -106,7 +108,8 @@ impl Display for UnexpectedSyntax {
             Some(Token::Punctuation(punctuation)) => {
                 format!("a punctuation token `{}`", punctuation.punctuation)
             }
-            Some(Token::Numeric(..)) => "a numeric token".to_string(),
+            Some(Token::Integer(..)) => "an integer token".to_string(),
+            Some(Token::Boolean(..)) => "a boolean token".to_string(),
             Some(Token::CommandLiteral(..)) => "a literal command token".to_string(),
             Some(Token::StringLiteral(..)) => "a string literal token".to_string(),
             Some(Token::MacroStringLiteral(..)) => "a macro string literal token".to_string(),

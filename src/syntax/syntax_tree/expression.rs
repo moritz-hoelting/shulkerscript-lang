@@ -11,7 +11,8 @@ use crate::{
     },
     lexical::{
         token::{
-            Identifier, Keyword, KeywordKind, MacroStringLiteral, Punctuation, StringLiteral, Token,
+            Boolean, Identifier, Integer, Keyword, KeywordKind, MacroStringLiteral, Punctuation,
+            StringLiteral, Token,
         },
         token_stream::Delimiter,
     },
@@ -53,8 +54,10 @@ impl SourceElement for Expression {
 ///
 /// ``` ebnf
 /// Primary:
-///     FunctionCall
+///     Integer
+///     | Boolean
 ///     | StringLiteral
+///     | FunctionCall
 ///     | MacroStringLiteral
 ///     | LuaCode
 /// ```
@@ -62,8 +65,10 @@ impl SourceElement for Expression {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
 pub enum Primary {
-    FunctionCall(FunctionCall),
+    Integer(Integer),
+    Boolean(Boolean),
     StringLiteral(StringLiteral),
+    FunctionCall(FunctionCall),
     MacroStringLiteral(MacroStringLiteral),
     Lua(Box<LuaCode>),
 }
@@ -71,8 +76,10 @@ pub enum Primary {
 impl SourceElement for Primary {
     fn span(&self) -> Span {
         match self {
-            Self::FunctionCall(function_call) => function_call.span(),
+            Self::Integer(int) => int.span(),
+            Self::Boolean(bool) => bool.span(),
             Self::StringLiteral(string_literal) => string_literal.span(),
+            Self::FunctionCall(function_call) => function_call.span(),
             Self::MacroStringLiteral(macro_string_literal) => macro_string_literal.span(),
             Self::Lua(lua_code) => lua_code.span(),
         }
@@ -222,6 +229,22 @@ impl<'a> Parser<'a> {
                         Err(err)
                     }
                 }
+            }
+
+            // integer expression
+            Reading::Atomic(Token::Integer(int)) => {
+                // eat the int
+                self.forward();
+
+                Ok(Primary::Integer(int))
+            }
+
+            // boolean expression
+            Reading::Atomic(Token::Boolean(bool)) => {
+                // eat the bool
+                self.forward();
+
+                Ok(Primary::Boolean(bool))
             }
 
             // string literal expression

@@ -11,7 +11,7 @@ use error::{
 
 use crate::{
     base::{self, source_file::SourceElement as _, Handler},
-    lexical::token::{MacroStringLiteral, MacroStringLiteralPart},
+    lexical::token::{KeywordKind, MacroStringLiteral, MacroStringLiteralPart},
     syntax::syntax_tree::{
         condition::{
             BinaryCondition, Condition, ParenthesizedCondition, PrimaryCondition, UnaryCondition,
@@ -24,7 +24,7 @@ use crate::{
                 Conditional, Else, ExecuteBlock, ExecuteBlockHead, ExecuteBlockHeadItem as _,
                 ExecuteBlockTail,
             },
-            Block, Grouping, Run, Semicolon, Statement,
+            Block, Grouping, Run, Semicolon, SemicolonStatement, Statement, VariableDeclaration,
         },
         AnyStringLiteral,
     },
@@ -291,17 +291,20 @@ impl Semicolon {
         macro_names: &HashSet<String>,
         handler: &impl Handler<base::Error>,
     ) -> Result<(), error::Error> {
-        match self.expression() {
-            Expression::Primary(Primary::FunctionCall(func)) => {
-                func.analyze_semantics(function_names, macro_names, handler)
-            }
-            Expression::Primary(unexpected) => {
-                let error = error::Error::UnexpectedExpression(UnexpectedExpression(
-                    Expression::Primary(unexpected.clone()),
-                ));
-                handler.receive(error.clone());
-                Err(error)
-            }
+        match self.statement() {
+            SemicolonStatement::Expression(expr) => match expr {
+                Expression::Primary(Primary::FunctionCall(func)) => {
+                    func.analyze_semantics(function_names, macro_names, handler)
+                }
+                Expression::Primary(unexpected) => {
+                    let error = error::Error::UnexpectedExpression(UnexpectedExpression(
+                        Expression::Primary(unexpected.clone()),
+                    ));
+                    handler.receive(error.clone());
+                    Err(error)
+                }
+            },
+            SemicolonStatement::VariableDeclaration(decl) => decl.analyze_semantics(handler),
         }
     }
 }
@@ -456,7 +459,7 @@ impl Primary {
             Self::FunctionCall(func) => {
                 func.analyze_semantics(function_names, macro_names, handler)
             }
-            Self::Lua(_) | Self::StringLiteral(_) => Ok(()),
+            Self::Lua(_) | Self::StringLiteral(_) | Self::Integer(_) | Self::Boolean(_) => Ok(()),
             Self::MacroStringLiteral(literal) => literal.analyze_semantics(macro_names, handler),
         }
     }
@@ -510,6 +513,69 @@ impl AnyStringLiteral {
         match self {
             Self::StringLiteral(_) => Ok(()),
             Self::MacroStringLiteral(literal) => literal.analyze_semantics(macro_names, handler),
+        }
+    }
+}
+
+impl VariableDeclaration {
+    /// Analyzes the semantics of a variable declaration.
+    pub fn analyze_semantics(
+        &self,
+        handler: &impl Handler<base::Error>,
+    ) -> Result<(), error::Error> {
+        match self.expression() {
+            Expression::Primary(Primary::Integer(num)) => {
+                if self.variable_type().keyword == KeywordKind::Bool {
+                    let err = error::Error::UnexpectedExpression(UnexpectedExpression(
+                        Expression::Primary(Primary::Integer(num.clone())),
+                    ));
+                    handler.receive(err.clone());
+                    Err(err)
+                } else {
+                    Ok(())
+                }
+            }
+            Expression::Primary(Primary::Boolean(bool)) => {
+                if self.variable_type().keyword == KeywordKind::Int {
+                    let err = error::Error::UnexpectedExpression(UnexpectedExpression(
+                        Expression::Primary(Primary::Boolean(bool.clone())),
+                    ));
+                    handler.receive(err.clone());
+                    Err(err)
+                } else {
+                    Ok(())
+                }
+            }
+            Expression::Primary(Primary::StringLiteral(str)) => {
+                if matches!(
+                    self.variable_type().keyword,
+                    KeywordKind::Int | KeywordKind::Bool
+                ) {
+                    let err = error::Error::UnexpectedExpression(UnexpectedExpression(
+                        Expression::Primary(Primary::StringLiteral(str.clone())),
+                    ));
+                    handler.receive(err.clone());
+                    Err(err)
+                } else {
+                    Ok(())
+                }
+            }
+            Expression::Primary(Primary::MacroStringLiteral(str)) => {
+                if matches!(
+                    self.variable_type().keyword,
+                    KeywordKind::Int | KeywordKind::Bool
+                ) {
+                    let err = error::Error::UnexpectedExpression(UnexpectedExpression(
+                        Expression::Primary(Primary::MacroStringLiteral(str.clone())),
+                    ));
+                    handler.receive(err.clone());
+                    Err(err)
+                } else {
+                    Ok(())
+                }
+            }
+
+            Expression::Primary(_) => Ok(()),
         }
     }
 }

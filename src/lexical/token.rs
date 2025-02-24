@@ -1,6 +1,12 @@
 //! Contains the [`Token`] struct and its related types.
 
-use std::{borrow::Cow, collections::HashMap, fmt::Display, str::FromStr, sync::OnceLock};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    fmt::{Debug, Display},
+    str::FromStr,
+    sync::OnceLock,
+};
 
 use crate::base::{
     self,
@@ -44,6 +50,8 @@ pub enum KeywordKind {
     Tag,
     Of,
     Replace,
+    Int,
+    Bool,
 }
 
 impl Display for KeywordKind {
@@ -107,6 +115,8 @@ impl KeywordKind {
             Self::Tag => "tag",
             Self::Of => "of",
             Self::Replace => "replace",
+            Self::Int => "int",
+            Self::Bool => "bool",
         }
     }
 
@@ -141,7 +151,8 @@ pub enum Token {
     Identifier(Identifier),
     Keyword(Keyword),
     Punctuation(Punctuation),
-    Numeric(Numeric),
+    Integer(Integer),
+    Boolean(Boolean),
     Comment(Comment),
     DocComment(DocComment),
     CommandLiteral(CommandLiteral),
@@ -156,7 +167,8 @@ impl SourceElement for Token {
             Self::Identifier(token) => token.span(),
             Self::Keyword(token) => token.span(),
             Self::Punctuation(token) => token.span(),
-            Self::Numeric(token) => token.span(),
+            Self::Integer(token) => token.span(),
+            Self::Boolean(token) => token.span(),
             Self::Comment(token) => token.span(),
             Self::DocComment(token) => token.span(),
             Self::CommandLiteral(token) => token.span(),
@@ -227,17 +239,69 @@ impl SourceElement for Punctuation {
     }
 }
 
-/// Represents a hardcoded numeric literal value in the source code.
+/// Represents a hardcoded numeric integer literal value in the source code.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Numeric {
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Integer {
     /// Is the span that makes up the token.
     pub span: Span,
 }
 
-impl SourceElement for Numeric {
+impl SourceElement for Integer {
     fn span(&self) -> Span {
         self.span.clone()
+    }
+}
+
+impl Integer {
+    /// Returns the integer value of the token.
+    #[must_use]
+    pub fn as_i64(&self) -> i64 {
+        self.span.str().parse().unwrap()
+    }
+}
+
+impl Debug for Integer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct("Integer");
+        s.field("value", &self.as_i64());
+        s.field("span", &self.span);
+        s.finish()
+    }
+}
+
+/// Represents a hardcoded boolean literal value in the source code.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Boolean {
+    /// Is the span that makes up the token.
+    pub span: Span,
+}
+
+impl SourceElement for Boolean {
+    fn span(&self) -> Span {
+        self.span.clone()
+    }
+}
+
+impl Boolean {
+    /// Returns the boolean value of the token.
+    #[must_use]
+    pub fn value(&self) -> bool {
+        match self.span.str() {
+            "true" => true,
+            "false" => false,
+            _ => unreachable!("Invalid boolean literal"),
+        }
+    }
+}
+
+impl Debug for Boolean {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct("Boolean");
+        s.field("value", &self.value());
+        s.field("span", &self.span);
+        s.finish()
     }
 }
 
@@ -590,16 +654,13 @@ impl Token {
         let word = span.str();
 
         // Checks if the word is a keyword
-        KeywordKind::from_str(word).ok().map_or_else(
-            || Identifier { span: span.clone() }.into(),
-            |kw| {
-                Keyword {
-                    span: span.clone(),
-                    keyword: kw,
-                }
-                .into()
-            },
-        )
+        if let Ok(kw) = KeywordKind::from_str(word) {
+            Keyword { span, keyword: kw }.into()
+        } else if bool::from_str(word).is_ok() {
+            Boolean { span }.into()
+        } else {
+            Identifier { span }.into()
+        }
     }
 
     /// Handles a sequence starting with a slash
@@ -684,11 +745,11 @@ impl Token {
     }
 
     /// Handles a sequence of digits
-    fn handle_numeric_literal(iter: &mut SourceIterator, start: usize) -> Self {
+    fn handle_integer_literal(iter: &mut SourceIterator, start: usize) -> Self {
         // Tokenizes the whole number part
         Self::walk_iter(iter, |character| character.is_ascii_digit());
 
-        Numeric {
+        Integer {
             span: Self::create_span(start, iter),
         }
         .into()
@@ -871,9 +932,9 @@ impl Token {
         else if character == '`' {
             Self::handle_macro_string_literal(iter, start)
         }
-        // Found numeric literal
+        // Found integer literal
         else if character.is_ascii_digit() {
-            Ok(Self::handle_numeric_literal(iter, start))
+            Ok(Self::handle_integer_literal(iter, start))
         }
         // Found a punctuation
         else if character.is_ascii_punctuation() {

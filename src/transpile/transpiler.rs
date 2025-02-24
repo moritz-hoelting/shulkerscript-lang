@@ -392,6 +392,8 @@ impl Transpiler {
                     Expression::Primary(Primary::Lua(lua)) => {
                         lua.eval_string(handler).map(Option::unwrap_or_default)
                     }
+                    Expression::Primary(Primary::Integer(num)) => Ok(num.span.str().to_string()),
+                    Expression::Primary(Primary::Boolean(bool)) => Ok(bool.span.str().to_string()),
                     Expression::Primary(Primary::StringLiteral(string)) => {
                         Ok(string.str_content().to_string())
                     }
@@ -459,6 +461,20 @@ impl Transpiler {
                 Expression::Primary(Primary::FunctionCall(func)) => {
                     self.transpile_function_call(func, handler).map(Some)
                 }
+                Expression::Primary(Primary::Integer(num)) => {
+                    let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
+                        Expression::Primary(Primary::Integer(num.clone())),
+                    ));
+                    handler.receive(error.clone());
+                    Err(error)
+                }
+                Expression::Primary(Primary::Boolean(bool)) => {
+                    let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
+                        Expression::Primary(Primary::Boolean(bool.clone())),
+                    ));
+                    handler.receive(error.clone());
+                    Err(error)
+                }
                 Expression::Primary(Primary::StringLiteral(string)) => {
                     Ok(Some(Command::Raw(string.str_content().to_string())))
                 }
@@ -501,8 +517,9 @@ impl Transpiler {
                     Ok(Some(Command::Group(commands)))
                 }
             }
-            #[allow(clippy::match_wildcard_for_single_variants)]
-            Statement::Semicolon(semi) => match semi.expression() {
+            Statement::Semicolon(semi) => match semi.statement() {
+                #[expect(clippy::match_wildcard_for_single_variants)]
+                SemicolonStatement::Expression(expr) => match expr {
                 Expression::Primary(Primary::FunctionCall(func)) => {
                     self.transpile_function_call(func, handler).map(Some)
                 }
@@ -512,6 +529,10 @@ impl Transpiler {
                     ));
                     handler.receive(error.clone());
                     Err(error)
+                    }
+                },
+                SemicolonStatement::VariableDeclaration(_) => {
+                    todo!("Variable declarations are not yet supported.")
                 }
             },
         }

@@ -12,11 +12,11 @@ use crate::{
         Handler,
     },
     lexical::{
-        token::{CommandLiteral, DocComment, Keyword, KeywordKind, Punctuation, Token},
+        token::{CommandLiteral, DocComment, Identifier, Keyword, KeywordKind, Punctuation, Token},
         token_stream::Delimiter,
     },
     syntax::{
-        error::ParseResult,
+        error::{Error, ParseResult, SyntaxKind, UnexpectedSyntax},
         parser::{Parser, Reading},
     },
 };
@@ -189,7 +189,7 @@ impl SourceElement for Grouping {
 /// Syntax Synopsis:
 /// ``` ebnf
 /// Semicolon:
-///    Expression ';'
+///    SemicolonStatement ';'
 ///   ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -197,7 +197,7 @@ impl SourceElement for Grouping {
 pub struct Semicolon {
     /// The expression of the semicolon statement.
     #[get = "pub"]
-    expression: Expression,
+    statement: SemicolonStatement,
     /// The semicolon of the semicolon statement.
     #[get = "pub"]
     semicolon: Punctuation,
@@ -205,7 +205,7 @@ pub struct Semicolon {
 
 impl SourceElement for Semicolon {
     fn span(&self) -> Span {
-        self.expression
+        self.statement
             .span()
             .join(&self.semicolon.span())
             .expect("The span of the semicolon statement is invalid.")
@@ -215,8 +215,69 @@ impl SourceElement for Semicolon {
 impl Semicolon {
     /// Dissolves the [`Semicolon`] into its components.
     #[must_use]
-    pub fn dissolve(self) -> (Expression, Punctuation) {
-        (self.expression, self.semicolon)
+    pub fn dissolve(self) -> (SemicolonStatement, Punctuation) {
+        (self.statement, self.semicolon)
+    }
+}
+
+/// Represents a statement that ends with a semicolon in the syntax tree.
+///
+/// Syntax Synopsis:
+/// ``` ebnf
+/// SemicolonStatement:
+///    (Expression | VariableDeclaration)
+///    ';'
+///   ;
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SemicolonStatement {
+    /// An expression that ends with a semicolon.
+    Expression(Expression),
+    /// A variable declaration.
+    VariableDeclaration(VariableDeclaration),
+}
+
+impl SourceElement for SemicolonStatement {
+    fn span(&self) -> Span {
+        match self {
+            Self::Expression(expression) => expression.span(),
+            Self::VariableDeclaration(declaration) => declaration.span(),
+        }
+    }
+}
+
+/// Represents a variable declaration in the syntax tree.
+///
+/// Syntax Synopsis:
+///
+/// ```ebnf
+/// LuaCode:
+///     ('int' | 'bool') identifier '=' Expression ';'
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct VariableDeclaration {
+    /// The type of the variable.
+    #[get = "pub"]
+    variable_type: Keyword,
+    /// The identifier of the variable.
+    #[get = "pub"]
+    identifier: Identifier,
+    /// The equals sign of the variable declaration.
+    #[get = "pub"]
+    equals: Punctuation,
+    /// The expression of the variable declaration.
+    #[get = "pub"]
+    expression: Expression,
+}
+
+impl SourceElement for VariableDeclaration {
+    fn span(&self) -> Span {
+        self.variable_type
+            .span()
+            .join(&self.expression.span())
+            .expect("The span of the variable declaration is invalid.")
     }
 }
 
@@ -333,17 +394,77 @@ impl<'a> Parser<'a> {
             }
 
             // semicolon statement
-            _ => {
-                let expression = self.parse_expression(handler)?;
-                let semicolon = self.parse_punctuation(';', true, handler)?;
-
-                tracing::trace!("Parsed semicolon statement: {:?}", expression);
-
-                Ok(Statement::Semicolon(Semicolon {
-                    expression,
-                    semicolon,
-                }))
-            }
+            _ => self.parse_semicolon(handler).map(Statement::Semicolon),
         }
+    }
+
+    /// Parses a [`Semicolon`].
+    #[tracing::instrument(level = "trace", skip_all)]
+    pub fn parse_semicolon(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> ParseResult<Semicolon> {
+        let statement = match self.stop_at_significant() {
+            Reading::Atomic(Token::Keyword(keyword))
+                if matches!(keyword.keyword, KeywordKind::Int | KeywordKind::Bool) =>
+            {
+                self.parse_variable_declaration(handler)
+                    .map(SemicolonStatement::VariableDeclaration)
+            }
+            _ => self
+                .parse_expression(handler)
+                .map(SemicolonStatement::Expression),
+        }?;
+
+        let semicolon = self.parse_punctuation(';', true, handler)?;
+
+        Ok(Semicolon {
+            statement,
+            semicolon,
+        })
+    }
+
+    /// Parses a [`VariableDeclaration`].
+    #[tracing::instrument(level = "trace", skip_all)]
+    pub fn parse_variable_declaration(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> ParseResult<VariableDeclaration> {
+        let variable_type = match self.stop_at_significant() {
+            Reading::Atomic(Token::Keyword(keyword))
+                if matches!(keyword.keyword, KeywordKind::Int | KeywordKind::Bool) =>
+            {
+                self.forward();
+                keyword
+            }
+            unexpected => {
+                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
+                    expected: SyntaxKind::Either(&[
+                        SyntaxKind::Keyword(KeywordKind::Int),
+                        SyntaxKind::Keyword(KeywordKind::Bool),
+                    ]),
+                    found: unexpected.into_token(),
+                });
+                handler.receive(err.clone());
+                return Err(err);
+            }
+        };
+
+        // read identifier
+        self.stop_at_significant();
+        let identifier = self.parse_identifier(handler)?;
+
+        // read equals sign
+        let equals = self.parse_punctuation('=', true, handler)?;
+
+        // read expression
+        let expression = self.parse_expression(handler)?;
+
+        Ok(VariableDeclaration {
+            variable_type,
+            identifier,
+            equals,
+            expression,
+        })
     }
 }
