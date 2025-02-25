@@ -19,6 +19,8 @@ mod transpiler;
 #[cfg(feature = "shulkerbox")]
 #[cfg_attr(feature = "shulkerbox", doc(inline))]
 pub use transpiler::Transpiler;
+#[cfg(feature = "shulkerbox")]
+mod variables;
 
 pub mod util;
 

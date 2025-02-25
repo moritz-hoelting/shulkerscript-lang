@@ -29,6 +29,7 @@ use crate::{
 
 use super::{
     error::{TranspileError, TranspileResult},
+    variables::{Scope, VariableType},
     FunctionData,
 };
 
@@ -74,8 +75,10 @@ impl Transpiler {
     ) -> Result<(), TranspileError> {
         tracing::trace!("Transpiling program declarations");
 
+        let scope = Scope::new();
+
         for program in programs {
-            self.transpile_program_declarations(program, handler);
+            self.transpile_program_declarations(program, &scope, handler);
         }
 
         let mut always_transpile_functions = Vec::new();
@@ -98,7 +101,7 @@ impl Transpiler {
         );
 
         for identifier_span in always_transpile_functions {
-            self.get_or_transpile_function(&identifier_span, None, handler)?;
+            self.get_or_transpile_function(&identifier_span, None, &scope, handler)?;
         }
 
         Ok(())
@@ -108,12 +111,13 @@ impl Transpiler {
     fn transpile_program_declarations(
         &mut self,
         program: &ProgramFile,
+        scope: &Scope,
         handler: &impl Handler<base::Error>,
     ) {
         let namespace = program.namespace();
 
         for declaration in program.declarations() {
-            self.transpile_declaration(declaration, namespace, handler);
+            self.transpile_declaration(declaration, namespace, scope, handler);
         }
     }
 
@@ -123,6 +127,7 @@ impl Transpiler {
         &mut self,
         declaration: &Declaration,
         namespace: &Namespace,
+        _scope: &Scope,
         handler: &impl Handler<base::Error>,
     ) {
         let program_identifier = declaration.span().source_file().identifier().clone();
@@ -143,7 +148,6 @@ impl Transpiler {
                         )
                     })
                     .collect();
-                #[allow(clippy::significant_drop_tightening)]
                 self.functions.insert(
                     (program_identifier, name),
                     FunctionData {
@@ -203,6 +207,7 @@ impl Transpiler {
                 if tag.replace().is_some() {
                     sb_tag.set_replace(true);
                 }
+                // TODO: handle global variables
             }
         };
     }
@@ -215,6 +220,7 @@ impl Transpiler {
         &mut self,
         identifier_span: &Span,
         arguments: Option<&[&Expression]>,
+        scope: &Scope,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<(String, Option<BTreeMap<String, String>>)> {
         let program_identifier = identifier_span.source_file().identifier();
@@ -237,6 +243,8 @@ impl Transpiler {
         if !already_transpiled {
             tracing::trace!("Function not transpiled yet, transpiling.");
 
+            let function_scope = scope.new_child();
+
             let statements = {
                 let functions = &self.functions;
                 let function_data = functions
@@ -257,9 +265,15 @@ impl Transpiler {
                         error
                     })?;
 
+                for (i, param) in function_data.parameters.iter().enumerate() {
+                    function_scope.set_variable(param, VariableType::FunctionArgument { index: i });
+                }
+
                 function_data.statements.clone()
             };
-            let commands = self.transpile_function(&statements, program_identifier, handler)?;
+
+            let commands =
+                self.transpile_function(&statements, program_identifier, &function_scope, handler)?;
 
             let functions = &self.functions;
             let function_data = functions
@@ -369,22 +383,22 @@ impl Transpiler {
             })
             .map(|(s, _)| s.to_owned())?;
 
-        let arg_count = arguments.iter().flat_map(|x| x.iter()).count();
-        if arg_count != parameters.len() {
+        let arg_count = arguments.map(<[&Expression]>::len);
+        if arg_count.is_some_and(|arg_count| arg_count != parameters.len()) {
             let err = TranspileError::InvalidFunctionArguments(InvalidFunctionArguments {
                 expected: parameters.len(),
-                actual: arg_count,
+                actual: arg_count.expect("checked in if condition"),
                 span: identifier_span.clone(),
             });
             handler.receive(err.clone());
             Err(err)
-        } else if arg_count > 0 {
+        } else if arg_count.is_some_and(|arg_count| arg_count > 0) {
             let mut compiled_args = Vec::new();
             let mut errs = Vec::new();
             for expression in arguments.iter().flat_map(|x| x.iter()) {
                 let value = match expression {
                     Expression::Primary(Primary::FunctionCall(func)) => self
-                        .transpile_function_call(func, handler)
+                        .transpile_function_call(func, scope, handler)
                         .map(|cmd| match cmd {
                             Command::Raw(s) => s,
                             _ => unreachable!("Function call should always return a raw command"),
@@ -426,13 +440,14 @@ impl Transpiler {
         &mut self,
         statements: &[Statement],
         program_identifier: &str,
+        scope: &Scope,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Vec<Command>> {
         let mut errors = Vec::new();
         let commands = statements
             .iter()
             .filter_map(|statement| {
-                self.transpile_statement(statement, program_identifier, handler)
+                self.transpile_statement(statement, program_identifier, scope, handler)
                     .unwrap_or_else(|err| {
                         errors.push(err);
                         None
@@ -451,6 +466,7 @@ impl Transpiler {
         &mut self,
         statement: &Statement,
         program_identifier: &str,
+        scope: &Scope,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Option<Command>> {
         match statement {
@@ -459,7 +475,7 @@ impl Transpiler {
             }
             Statement::Run(run) => match run.expression() {
                 Expression::Primary(Primary::FunctionCall(func)) => {
-                    self.transpile_function_call(func, handler).map(Some)
+                    self.transpile_function_call(func, scope, handler).map(Some)
                 }
                 Expression::Primary(Primary::Integer(num)) => {
                     let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
@@ -489,23 +505,30 @@ impl Transpiler {
                 unreachable!("Only literal commands are allowed in functions at this time.")
             }
             Statement::ExecuteBlock(execute) => {
-                self.transpile_execute_block(execute, program_identifier, handler)
+                let child_scope = scope.new_child();
+                self.transpile_execute_block(execute, program_identifier, &child_scope, handler)
             }
             Statement::DocComment(doccomment) => {
                 let content = doccomment.content();
                 Ok(Some(Command::Comment(content.to_string())))
             }
             Statement::Grouping(group) => {
+                let child_scope = scope.new_child();
                 let statements = group.block().statements();
                 let mut errors = Vec::new();
                 let commands = statements
                     .iter()
                     .filter_map(|statement| {
-                        self.transpile_statement(statement, program_identifier, handler)
-                            .unwrap_or_else(|err| {
-                                errors.push(err);
-                                None
-                            })
+                        self.transpile_statement(
+                            statement,
+                            program_identifier,
+                            &child_scope,
+                            handler,
+                        )
+                        .unwrap_or_else(|err| {
+                            errors.push(err);
+                            None
+                        })
                     })
                     .collect::<Vec<_>>();
                 if !errors.is_empty() {
@@ -521,7 +544,7 @@ impl Transpiler {
                 #[expect(clippy::match_wildcard_for_single_variants)]
                 SemicolonStatement::Expression(expr) => match expr {
                     Expression::Primary(Primary::FunctionCall(func)) => {
-                        self.transpile_function_call(func, handler).map(Some)
+                        self.transpile_function_call(func, scope, handler).map(Some)
                     }
                     unexpected => {
                         let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
@@ -531,8 +554,24 @@ impl Transpiler {
                         Err(error)
                     }
                 },
-                SemicolonStatement::VariableDeclaration(_) => {
-                    todo!("Variable declarations are not yet supported.")
+                SemicolonStatement::VariableDeclaration(decl) => {
+                    // let value = match decl {
+                    //     VariableDeclaration::Single(single) => {
+                    //         match single.variable_type().keyword {
+                    //             KeywordKind::Int => {
+                    //                 VariableType::ScoreboardValue { objective: (), name: () }
+                    //             }
+                    //         }
+                    //     }
+                    // }
+                    // TODO: only for demonstration
+                    // scope.set_variable(
+                    //     decl.identifier().span.str(),
+                    //     VariableType::Tag {
+                    //         tag_name: "TODO".to_string(),
+                    //     },
+                    // );
+                    todo!("Variable declarations are not yet supported: {decl:?}")
                 }
             },
         }
@@ -541,14 +580,19 @@ impl Transpiler {
     fn transpile_function_call(
         &mut self,
         func: &FunctionCall,
+        scope: &Scope,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Command> {
         let arguments = func
             .arguments()
             .as_ref()
             .map(|l| l.elements().map(Deref::deref).collect::<Vec<_>>());
-        let (location, arguments) =
-            self.get_or_transpile_function(&func.identifier().span, arguments.as_deref(), handler)?;
+        let (location, arguments) = self.get_or_transpile_function(
+            &func.identifier().span,
+            arguments.as_deref(),
+            scope,
+            handler,
+        )?;
         let mut function_call = format!("function {location}");
         if let Some(arguments) = arguments {
             use std::fmt::Write;
@@ -572,9 +616,10 @@ impl Transpiler {
         &mut self,
         execute: &ExecuteBlock,
         program_identifier: &str,
+        scope: &Scope,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Option<Command>> {
-        self.transpile_execute_block_internal(execute, program_identifier, handler)
+        self.transpile_execute_block_internal(execute, program_identifier, scope, handler)
             .map(|ex| ex.map(Command::Execute))
     }
 
@@ -582,6 +627,7 @@ impl Transpiler {
         &mut self,
         execute: &ExecuteBlock,
         program_identifier: &str,
+        scope: &Scope,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Option<Execute>> {
         match execute {
@@ -593,7 +639,7 @@ impl Transpiler {
                             .statements()
                             .iter()
                             .filter_map(|s| {
-                                self.transpile_statement(s, program_identifier, handler)
+                                self.transpile_statement(s, program_identifier, scope, handler)
                                     .unwrap_or_else(|err| {
                                         errors.push(err);
                                         None
@@ -614,11 +660,12 @@ impl Transpiler {
                         .transpile_execute_block_internal(
                             execute_block,
                             program_identifier,
+                            scope,
                             handler,
                         ),
                 }?;
 
-                self.combine_execute_head_tail(head, tail, program_identifier, handler)
+                self.combine_execute_head_tail(head, tail, program_identifier, scope, handler)
             }
             ExecuteBlock::IfElse(cond, block, el) => {
                 let statements = block.statements();
@@ -629,7 +676,7 @@ impl Transpiler {
                     let commands = statements
                         .iter()
                         .filter_map(|statement| {
-                            self.transpile_statement(statement, program_identifier, handler)
+                            self.transpile_statement(statement, program_identifier, scope, handler)
                                 .unwrap_or_else(|err| {
                                     errors.push(err);
                                     None
@@ -641,7 +688,7 @@ impl Transpiler {
                     }
                     Some(Execute::Runs(commands))
                 } else {
-                    self.transpile_statement(&statements[0], program_identifier, handler)?
+                    self.transpile_statement(&statements[0], program_identifier, scope, handler)?
                         .map(|cmd| Execute::Run(Box::new(cmd)))
                 };
 
@@ -653,6 +700,7 @@ impl Transpiler {
                             then,
                             Some(el),
                             program_identifier,
+                            scope,
                             handler,
                         )
                     },
@@ -667,6 +715,7 @@ impl Transpiler {
         then: Execute,
         el: Option<&Else>,
         program_identifier: &str,
+        scope: &Scope,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Option<Execute>> {
         let (_, cond) = cond.clone().dissolve();
@@ -680,7 +729,7 @@ impl Transpiler {
                 if statements.is_empty() {
                     None
                 } else if statements.len() == 1 {
-                    self.transpile_statement(&statements[0], program_identifier, handler)
+                    self.transpile_statement(&statements[0], program_identifier, scope, handler)
                         .unwrap_or_else(|err| {
                             errors.push(err);
                             None
@@ -690,7 +739,7 @@ impl Transpiler {
                     let commands = statements
                         .iter()
                         .filter_map(|statement| {
-                            self.transpile_statement(statement, program_identifier, handler)
+                            self.transpile_statement(statement, program_identifier, scope, handler)
                                 .unwrap_or_else(|err| {
                                     errors.push(err);
                                     None
@@ -718,12 +767,20 @@ impl Transpiler {
         head: &ExecuteBlockHead,
         tail: Option<Execute>,
         program_identifier: &str,
+        scope: &Scope,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Option<Execute>> {
         Ok(match head {
             ExecuteBlockHead::Conditional(cond) => {
                 if let Some(tail) = tail {
-                    self.transpile_conditional(cond, tail, None, program_identifier, handler)?
+                    self.transpile_conditional(
+                        cond,
+                        tail,
+                        None,
+                        program_identifier,
+                        scope,
+                        handler,
+                    )?
                 } else {
                     None
                 }
