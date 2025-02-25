@@ -21,7 +21,7 @@ use crate::{
         program::{Namespace, ProgramFile},
         statement::{
             execute_block::{Conditional, Else, ExecuteBlock, ExecuteBlockHead, ExecuteBlockTail},
-            Statement,
+            SemicolonStatement, Statement,
         },
     },
     transpile::error::MissingFunctionDeclaration,
@@ -520,15 +520,15 @@ impl Transpiler {
             Statement::Semicolon(semi) => match semi.statement() {
                 #[expect(clippy::match_wildcard_for_single_variants)]
                 SemicolonStatement::Expression(expr) => match expr {
-                Expression::Primary(Primary::FunctionCall(func)) => {
-                    self.transpile_function_call(func, handler).map(Some)
-                }
-                unexpected => {
-                    let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
-                        unexpected.clone(),
-                    ));
-                    handler.receive(error.clone());
-                    Err(error)
+                    Expression::Primary(Primary::FunctionCall(func)) => {
+                        self.transpile_function_call(func, handler).map(Some)
+                    }
+                    unexpected => {
+                        let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
+                            unexpected.clone(),
+                        ));
+                        handler.receive(error.clone());
+                        Err(error)
                     }
                 },
                 SemicolonStatement::VariableDeclaration(_) => {

@@ -47,11 +47,11 @@ pub fn identifier_to_macro(ident: &str) -> std::borrow::Cow<str> {
     if ident.contains("__")
         || ident
             .chars()
-            .any(|c| !(c == '_' && c.is_ascii_alphanumeric()))
+            .any(|c| c == '_' || !c.is_ascii_alphanumeric())
     {
         let new_ident = ident
             .chars()
-            .filter(|c| *c == '_' || c.is_ascii_alphanumeric())
+            .filter(|c| *c != '_' && c.is_ascii_alphanumeric())
             .collect::<String>();
 
         let chksum = md5::hash(ident).to_hex_lowercase();

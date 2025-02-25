@@ -3,16 +3,20 @@
 pub mod execute_block;
 
 use derive_more::From;
+use enum_as_inner::EnumAsInner;
 use getset::Getters;
 
 use crate::{
     base::{
         self,
         source_file::{SourceElement, Span},
-        Handler,
+        Handler, VoidHandler,
     },
     lexical::{
-        token::{CommandLiteral, DocComment, Identifier, Keyword, KeywordKind, Punctuation, Token},
+        token::{
+            CommandLiteral, DocComment, Identifier, Integer, Keyword, KeywordKind, Punctuation,
+            Token,
+        },
         token_stream::Delimiter,
     },
     syntax::{
@@ -23,7 +27,7 @@ use crate::{
 
 use self::execute_block::ExecuteBlock;
 
-use super::expression::Expression;
+use super::{expression::Expression, AnyStringLiteral};
 
 /// Represents a statement in the syntax tree.
 ///
@@ -230,7 +234,7 @@ impl Semicolon {
 ///   ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, From, EnumAsInner)]
 pub enum SemicolonStatement {
     /// An expression that ends with a semicolon.
     Expression(Expression),
@@ -252,18 +256,69 @@ impl SourceElement for SemicolonStatement {
 /// Syntax Synopsis:
 ///
 /// ```ebnf
-/// LuaCode:
-///     ('int' | 'bool') identifier '=' Expression ';'
+/// VariableDeclaration:
+///    SingleVariableDeclaration
+///    | ArrayVariableDeclaration
+///    | ScoreVariableDeclaration
+///    | TagVariableDeclaration
+///    ;
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, From, EnumAsInner)]
+#[allow(missing_docs)]
+pub enum VariableDeclaration {
+    Single(SingleVariableDeclaration),
+    Array(ArrayVariableDeclaration),
+    Score(ScoreVariableDeclaration),
+    Tag(TagVariableDeclaration),
+}
+
+impl SourceElement for VariableDeclaration {
+    fn span(&self) -> Span {
+        match self {
+            Self::Single(declaration) => declaration.span(),
+            Self::Array(declaration) => declaration.span(),
+            Self::Score(declaration) => declaration.span(),
+            Self::Tag(declaration) => declaration.span(),
+        }
+    }
+}
+
+impl VariableDeclaration {
+    /// Get the identifier of the variable declaration
+    #[must_use]
+    pub fn identifier(&self) -> &Identifier {
+        match self {
+            Self::Single(declaration) => &declaration.identifier,
+            Self::Array(declaration) => &declaration.identifier,
+            Self::Score(declaration) => &declaration.identifier,
+            Self::Tag(declaration) => &declaration.identifier,
+        }
+    }
+
+    /// Get the type of the variable declaration
+    #[must_use]
+    pub fn variable_type(&self) -> &Keyword {
+        match self {
+            Self::Single(declaration) => &declaration.variable_type,
+            Self::Array(declaration) => &declaration.variable_type,
+            Self::Score(declaration) => &declaration.int_keyword,
+            Self::Tag(declaration) => &declaration.bool_keyword,
+        }
+    }
+}
+
+/// Represents a variable assignment.
+///
+/// Syntax Synopsis:
+///
+/// ```ebnf
+/// VariableDeclarationAssignment:
+///     '=' Expression
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
-pub struct VariableDeclaration {
-    /// The type of the variable.
-    #[get = "pub"]
-    variable_type: Keyword,
-    /// The identifier of the variable.
-    #[get = "pub"]
-    identifier: Identifier,
+pub struct VariableDeclarationAssignment {
     /// The equals sign of the variable declaration.
     #[get = "pub"]
     equals: Punctuation,
@@ -272,12 +327,265 @@ pub struct VariableDeclaration {
     expression: Expression,
 }
 
-impl SourceElement for VariableDeclaration {
+impl SourceElement for VariableDeclarationAssignment {
+    fn span(&self) -> Span {
+        self.equals
+            .span()
+            .join(&self.expression.span())
+            .expect("The span of the variable declaration assignment is invalid.")
+    }
+}
+
+impl VariableDeclarationAssignment {
+    /// Dissolves the [`VariableDeclarationAssignment`] into its components.
+    #[must_use]
+    pub fn dissolve(self) -> (Punctuation, Expression) {
+        (self.equals, self.expression)
+    }
+}
+
+/// Represents a single variable declaration in the syntax tree.
+///
+/// Syntax Synopsis:
+///
+/// ```ebnf
+/// SingleVariableDeclaration:
+///     ('int' | 'bool') identifier VariableDeclarationAssignment?
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct SingleVariableDeclaration {
+    /// The type of the variable.
+    #[get = "pub"]
+    variable_type: Keyword,
+    /// The identifier of the variable.
+    #[get = "pub"]
+    identifier: Identifier,
+    /// The optional assignment of the variable.
+    #[get = "pub"]
+    assignment: Option<VariableDeclarationAssignment>,
+}
+
+impl SourceElement for SingleVariableDeclaration {
     fn span(&self) -> Span {
         self.variable_type
             .span()
-            .join(&self.expression.span())
-            .expect("The span of the variable declaration is invalid.")
+            .join(
+                &self
+                    .assignment
+                    .as_ref()
+                    .map_or_else(|| self.identifier.span(), SourceElement::span),
+            )
+            .expect("The span of the single variable declaration is invalid.")
+    }
+}
+
+impl SingleVariableDeclaration {
+    /// Dissolves the [`SingleVariableDeclaration`] into its components.
+    #[must_use]
+    pub fn dissolve(self) -> (Keyword, Identifier, Option<VariableDeclarationAssignment>) {
+        (self.variable_type, self.identifier, self.assignment)
+    }
+}
+
+/// Represents an array variable declaration in the syntax tree.
+///
+/// Syntax Synopsis:
+///
+/// ```ebnf
+/// ArrayVariableDeclaration:
+///     ('int' | 'bool') identifier '[' integer ']' VariableDeclarationAssignment?
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct ArrayVariableDeclaration {
+    /// The type of the variable.
+    #[get = "pub"]
+    variable_type: Keyword,
+    /// The identifier of the variable.
+    #[get = "pub"]
+    identifier: Identifier,
+    /// The opening bracket of the array.
+    #[get = "pub"]
+    open_bracket: Punctuation,
+    /// The array size
+    #[get = "pub"]
+    size: Integer,
+    /// The closing bracket of the array.
+    #[get = "pub"]
+    close_bracket: Punctuation,
+    /// The optional assignment of the variable.
+    #[get = "pub"]
+    assignment: Option<VariableDeclarationAssignment>,
+}
+
+impl SourceElement for ArrayVariableDeclaration {
+    fn span(&self) -> Span {
+        self.variable_type
+            .span()
+            .join(
+                &self
+                    .assignment
+                    .as_ref()
+                    .map_or_else(|| self.close_bracket.span(), SourceElement::span),
+            )
+            .expect("The span of the array variable declaration is invalid.")
+    }
+}
+
+impl ArrayVariableDeclaration {
+    /// Dissolves the [`ArrayVariableDeclaration`] into its components.
+    #[must_use]
+    pub fn dissolve(
+        self,
+    ) -> (
+        Keyword,
+        Identifier,
+        Punctuation,
+        Integer,
+        Punctuation,
+        Option<VariableDeclarationAssignment>,
+    ) {
+        (
+            self.variable_type,
+            self.identifier,
+            self.open_bracket,
+            self.size,
+            self.close_bracket,
+            self.assignment,
+        )
+    }
+}
+
+type CriteriaSelection = (Punctuation, AnyStringLiteral, Punctuation);
+
+/// Represents a scoreboard variable declaration in the syntax tree.
+///
+/// Syntax Synopsis:
+///
+/// ```ebnf
+/// ScoreVariableDeclaration:
+///     'int' ('<' AnyStringLiteral '>')? identifier '[' AnyStringLiteral? ']' VariableDeclarationAssignment?
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct ScoreVariableDeclaration {
+    /// `int` keyword
+    #[get = "pub"]
+    int_keyword: Keyword,
+    /// The scoreboard criteria
+    #[get = "pub"]
+    criteria: Option<CriteriaSelection>,
+    /// The identifier of the variable.
+    #[get = "pub"]
+    identifier: Identifier,
+    /// Opening bracket of the score variable
+    #[get = "pub"]
+    open_bracket: Punctuation,
+    /// Closing bracket of the score variable
+    #[get = "pub"]
+    close_bracket: Punctuation,
+    /// The optional assignment of the variable.
+    #[get = "pub"]
+    target_assignment: Option<(AnyStringLiteral, VariableDeclarationAssignment)>,
+}
+
+impl SourceElement for ScoreVariableDeclaration {
+    fn span(&self) -> Span {
+        self.int_keyword
+            .span()
+            .join(&self.target_assignment.as_ref().map_or_else(
+                || self.close_bracket.span(),
+                |(_, assignment)| assignment.span(),
+            ))
+            .expect("The span of the score variable declaration is invalid.")
+    }
+}
+
+impl ScoreVariableDeclaration {
+    /// Dissolves the [`ScoreVariableDeclaration`] into its components.
+    #[expect(clippy::type_complexity)]
+    #[must_use]
+    pub fn dissolve(
+        self,
+    ) -> (
+        Keyword,
+        Option<CriteriaSelection>,
+        Identifier,
+        Punctuation,
+        Punctuation,
+        Option<(AnyStringLiteral, VariableDeclarationAssignment)>,
+    ) {
+        (
+            self.int_keyword,
+            self.criteria,
+            self.identifier,
+            self.open_bracket,
+            self.close_bracket,
+            self.target_assignment,
+        )
+    }
+}
+
+/// Represents a tag variable declaration in the syntax tree.
+///
+/// Syntax Synopsis:
+///
+/// ```ebnf
+/// TagVariableDeclaration:
+///     'bool' identifier '[' AnyStringLiteral? ']' VariableDeclarationAssignment?
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct TagVariableDeclaration {
+    /// `bool` keyword
+    #[get = "pub"]
+    bool_keyword: Keyword,
+    /// The identifier of the variable.
+    #[get = "pub"]
+    identifier: Identifier,
+    /// Opening bracket of the score variable
+    #[get = "pub"]
+    open_bracket: Punctuation,
+    /// Closing bracket of the score variable
+    #[get = "pub"]
+    close_bracket: Punctuation,
+    /// The optional assignment of the variable.
+    #[get = "pub"]
+    target_assignment: Option<(AnyStringLiteral, VariableDeclarationAssignment)>,
+}
+
+impl SourceElement for TagVariableDeclaration {
+    fn span(&self) -> Span {
+        self.bool_keyword
+            .span()
+            .join(&self.target_assignment.as_ref().map_or_else(
+                || self.close_bracket.span(),
+                |(_, assignment)| assignment.span(),
+            ))
+            .expect("The span of the tag variable declaration is invalid.")
+    }
+}
+
+impl TagVariableDeclaration {
+    /// Dissolves the [`TagVariableDeclaration`] into its components.
+    #[must_use]
+    pub fn dissolve(
+        self,
+    ) -> (
+        Keyword,
+        Identifier,
+        Punctuation,
+        Punctuation,
+        Option<(AnyStringLiteral, VariableDeclarationAssignment)>,
+    ) {
+        (
+            self.bool_keyword,
+            self.identifier,
+            self.open_bracket,
+            self.close_bracket,
+            self.target_assignment,
+        )
     }
 }
 
@@ -430,6 +738,12 @@ impl<'a> Parser<'a> {
         &mut self,
         handler: &impl Handler<base::Error>,
     ) -> ParseResult<VariableDeclaration> {
+        enum IndexingType {
+            IntegerSize(Integer),
+            AnyString(AnyStringLiteral),
+            None,
+        }
+
         let variable_type = match self.stop_at_significant() {
             Reading::Atomic(Token::Keyword(keyword))
                 if matches!(keyword.keyword, KeywordKind::Int | KeywordKind::Bool) =>
@@ -450,21 +764,163 @@ impl<'a> Parser<'a> {
             }
         };
 
+        let criteria_selection = if variable_type.keyword == KeywordKind::Int {
+            self.try_parse(|p| {
+                let open = p.parse_punctuation('<', true, &VoidHandler)?;
+                let criteria = p.parse_any_string_literal(&VoidHandler)?;
+                let close = p.parse_punctuation('>', true, &VoidHandler)?;
+                Ok((open, criteria, close))
+            })
+            .ok()
+        } else {
+            None
+        };
+
         // read identifier
         self.stop_at_significant();
         let identifier = self.parse_identifier(handler)?;
 
-        // read equals sign
-        let equals = self.parse_punctuation('=', true, handler)?;
+        match self.stop_at_significant() {
+            Reading::IntoDelimited(punc) if punc.punctuation == '[' => {
+                let tree = self.step_into(
+                    Delimiter::Bracket,
+                    |p| {
+                        let res = match p.stop_at_significant() {
+                            Reading::Atomic(Token::Integer(int)) => {
+                                p.forward();
+                                IndexingType::IntegerSize(int)
+                            }
 
-        // read expression
-        let expression = self.parse_expression(handler)?;
+                            Reading::Atomic(Token::StringLiteral(s)) => {
+                                let selector = AnyStringLiteral::from(s);
+                                p.forward();
+                                IndexingType::AnyString(selector)
+                            }
+                            Reading::Atomic(Token::MacroStringLiteral(s)) => {
+                                let selector = AnyStringLiteral::from(s);
+                                p.forward();
+                                IndexingType::AnyString(selector)
+                            }
 
-        Ok(VariableDeclaration {
-            variable_type,
-            identifier,
-            equals,
-            expression,
-        })
+                            Reading::DelimitedEnd(punc) if punc.punctuation == ']' => {
+                                IndexingType::None
+                            }
+
+                            unexpected => {
+                                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
+                                    expected: SyntaxKind::Either(&[
+                                        SyntaxKind::Integer,
+                                        SyntaxKind::AnyStringLiteral,
+                                    ]),
+                                    found: unexpected.into_token(),
+                                });
+                                handler.receive(err.clone());
+                                return Err(err);
+                            }
+                        };
+
+                        Ok(res)
+                    },
+                    handler,
+                )?;
+
+                let open_bracket = tree.open;
+                let close_bracket = tree.close;
+                let inner = tree.tree?;
+
+                match inner {
+                    IndexingType::IntegerSize(size) => {
+                        let assignment = self
+                            .try_parse(|p| {
+                                // read equals sign
+                                let equals = p.parse_punctuation('=', true, handler)?;
+
+                                // read expression
+                                let expression = p.parse_expression(handler)?;
+
+                                Ok(VariableDeclarationAssignment { equals, expression })
+                            })
+                            .ok();
+
+                        Ok(VariableDeclaration::Array(ArrayVariableDeclaration {
+                            variable_type,
+                            identifier,
+                            open_bracket,
+                            size,
+                            close_bracket,
+                            assignment,
+                        }))
+                    }
+                    IndexingType::AnyString(selector) => {
+                        let equals = self.parse_punctuation('=', true, handler)?;
+                        let expression = self.parse_expression(handler)?;
+
+                        let assignment = VariableDeclarationAssignment { equals, expression };
+
+                        match variable_type.keyword {
+                            KeywordKind::Int => {
+                                Ok(VariableDeclaration::Score(ScoreVariableDeclaration {
+                                    int_keyword: variable_type,
+                                    criteria: criteria_selection,
+                                    identifier,
+                                    open_bracket,
+                                    close_bracket,
+                                    target_assignment: Some((selector, assignment)),
+                                }))
+                            }
+                            KeywordKind::Bool => {
+                                Ok(VariableDeclaration::Tag(TagVariableDeclaration {
+                                    bool_keyword: variable_type,
+                                    identifier,
+                                    open_bracket,
+                                    close_bracket,
+                                    target_assignment: Some((selector, assignment)),
+                                }))
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    IndexingType::None => match variable_type.keyword {
+                        KeywordKind::Int => {
+                            Ok(VariableDeclaration::Score(ScoreVariableDeclaration {
+                                int_keyword: variable_type,
+                                criteria: criteria_selection,
+                                identifier,
+                                open_bracket,
+                                close_bracket,
+                                target_assignment: None,
+                            }))
+                        }
+                        KeywordKind::Bool => Ok(VariableDeclaration::Tag(TagVariableDeclaration {
+                            bool_keyword: variable_type,
+                            identifier,
+                            open_bracket,
+                            close_bracket,
+                            target_assignment: None,
+                        })),
+                        _ => unreachable!(),
+                    },
+                }
+            }
+            // SingleVariableDeclaration with Assignment
+            Reading::Atomic(Token::Punctuation(punc)) if punc.punctuation == '=' => {
+                self.forward();
+                let equals = punc;
+                let expression = self.parse_expression(handler)?;
+                let assignment = VariableDeclarationAssignment { equals, expression };
+
+                Ok(VariableDeclaration::Single(SingleVariableDeclaration {
+                    variable_type,
+                    identifier,
+                    assignment: Some(assignment),
+                }))
+            }
+            // SingleVariableDeclaration without Assignment
+            _ => Ok(VariableDeclaration::Single(SingleVariableDeclaration {
+                variable_type,
+                identifier,
+                assignment: None,
+            })),
+        }
     }
 }

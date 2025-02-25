@@ -304,7 +304,9 @@ impl Semicolon {
                     Err(error)
                 }
             },
-            SemicolonStatement::VariableDeclaration(decl) => decl.analyze_semantics(handler),
+            SemicolonStatement::VariableDeclaration(decl) => {
+                decl.analyze_semantics(function_names, macro_names, handler)
+            }
         }
     }
 }
@@ -521,61 +523,87 @@ impl VariableDeclaration {
     /// Analyzes the semantics of a variable declaration.
     pub fn analyze_semantics(
         &self,
+        function_names: &HashSet<String>,
+        macro_names: &HashSet<String>,
         handler: &impl Handler<base::Error>,
     ) -> Result<(), error::Error> {
-        match self.expression() {
-            Expression::Primary(Primary::Integer(num)) => {
-                if self.variable_type().keyword == KeywordKind::Bool {
-                    let err = error::Error::UnexpectedExpression(UnexpectedExpression(
-                        Expression::Primary(Primary::Integer(num.clone())),
-                    ));
-                    handler.receive(err.clone());
-                    Err(err)
+        match self {
+            Self::Array(array) => array.assignment().as_ref().map_or(Ok(()), |assignment| {
+                assignment
+                    .expression()
+                    .analyze_semantics(function_names, macro_names, handler)
+            }),
+            Self::Single(single) => {
+                if let Some(assignment) = single.assignment() {
+                    let err = match single.variable_type().keyword {
+                        KeywordKind::Int => !matches!(
+                            assignment.expression(),
+                            // TODO: also allow macro identifier but not macro string literal
+                            Expression::Primary(
+                                Primary::Integer(_) | Primary::Lua(_) | Primary::FunctionCall(_)
+                            )
+                        ),
+                        KeywordKind::Bool => !matches!(
+                            assignment.expression(),
+                            Expression::Primary(Primary::Boolean(_) | Primary::Lua(_))
+                        ),
+                        _ => false,
+                    };
+                    if err {
+                        let err = error::Error::UnexpectedExpression(UnexpectedExpression(
+                            assignment.expression().clone(),
+                        ));
+                        handler.receive(err.clone());
+                        return Err(err);
+                    }
+                    assignment
+                        .expression()
+                        .analyze_semantics(function_names, macro_names, handler)
                 } else {
                     Ok(())
                 }
             }
-            Expression::Primary(Primary::Boolean(bool)) => {
-                if self.variable_type().keyword == KeywordKind::Int {
-                    let err = error::Error::UnexpectedExpression(UnexpectedExpression(
-                        Expression::Primary(Primary::Boolean(bool.clone())),
-                    ));
-                    handler.receive(err.clone());
-                    Err(err)
+            Self::Score(score) => {
+                if let Some((_, assignment)) = score.target_assignment() {
+                    // TODO: also allow macro identifier but not macro string literal
+                    if !matches!(
+                        assignment.expression(),
+                        Expression::Primary(
+                            Primary::Integer(_) | Primary::Lua(_) | Primary::FunctionCall(_)
+                        )
+                    ) {
+                        let err = error::Error::UnexpectedExpression(UnexpectedExpression(
+                            assignment.expression().clone(),
+                        ));
+                        handler.receive(err.clone());
+                        return Err(err);
+                    }
+                    assignment
+                        .expression()
+                        .analyze_semantics(function_names, macro_names, handler)
                 } else {
                     Ok(())
                 }
             }
-            Expression::Primary(Primary::StringLiteral(str)) => {
-                if matches!(
-                    self.variable_type().keyword,
-                    KeywordKind::Int | KeywordKind::Bool
-                ) {
-                    let err = error::Error::UnexpectedExpression(UnexpectedExpression(
-                        Expression::Primary(Primary::StringLiteral(str.clone())),
-                    ));
-                    handler.receive(err.clone());
-                    Err(err)
+            Self::Tag(tag) => {
+                if let Some((_, assignment)) = tag.target_assignment() {
+                    if !matches!(
+                        assignment.expression(),
+                        Expression::Primary(Primary::Boolean(_) | Primary::Lua(_))
+                    ) {
+                        let err = error::Error::UnexpectedExpression(UnexpectedExpression(
+                            assignment.expression().clone(),
+                        ));
+                        handler.receive(err.clone());
+                        return Err(err);
+                    }
+                    assignment
+                        .expression()
+                        .analyze_semantics(function_names, macro_names, handler)
                 } else {
                     Ok(())
                 }
             }
-            Expression::Primary(Primary::MacroStringLiteral(str)) => {
-                if matches!(
-                    self.variable_type().keyword,
-                    KeywordKind::Int | KeywordKind::Bool
-                ) {
-                    let err = error::Error::UnexpectedExpression(UnexpectedExpression(
-                        Expression::Primary(Primary::MacroStringLiteral(str.clone())),
-                    ));
-                    handler.receive(err.clone());
-                    Err(err)
-                } else {
-                    Ok(())
-                }
-            }
-
-            Expression::Primary(_) => Ok(()),
         }
     }
 }
