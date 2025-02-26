@@ -1,6 +1,6 @@
 //! Errors that can occur during transpilation.
 
-use std::{collections::BTreeMap, fmt::Display};
+use std::{fmt::Display, sync::Arc};
 
 use getset::Getters;
 use itertools::Itertools;
@@ -13,7 +13,10 @@ use crate::{
     semantic::error::{ConflictingFunctionNames, InvalidFunctionArguments, UnexpectedExpression},
 };
 
-use super::FunctionData;
+use super::{
+    variables::{Scope, VariableType},
+    FunctionData,
+};
 
 /// Errors that can occur during transpilation.
 #[allow(clippy::module_name_repetitions, missing_docs)]
@@ -47,20 +50,21 @@ pub struct MissingFunctionDeclaration {
 
 impl MissingFunctionDeclaration {
     #[cfg_attr(not(feature = "shulkerbox"), expect(unused))]
-    pub(super) fn from_context(
-        identifier_span: Span,
-        functions: &BTreeMap<(String, String), FunctionData>,
-    ) -> Self {
+    pub(super) fn from_scope(identifier_span: Span, scope: &Arc<Scope>) -> Self {
         let own_name = identifier_span.str();
-        let own_program_identifier = identifier_span.source_file().identifier();
-        let alternatives = functions
+        let alternatives = scope
+            .get_variables()
+            .read()
+            .unwrap()
             .iter()
-            .filter_map(|((program_identifier, function_name), data)| {
-                let normalized_distance =
-                    strsim::normalized_damerau_levenshtein(own_name, function_name);
-                (program_identifier == own_program_identifier
-                    && (normalized_distance > 0.8
-                        || strsim::damerau_levenshtein(own_name, function_name) < 3))
+            .filter_map(|(name, value)| {
+                let data = match value.as_ref() {
+                    VariableType::Function { function_data, .. } => function_data,
+                    _ => return None,
+                };
+
+                let normalized_distance = strsim::normalized_damerau_levenshtein(own_name, name);
+                (normalized_distance > 0.8 || strsim::damerau_levenshtein(own_name, name) < 3)
                     .then_some((normalized_distance, data))
             })
             .sorted_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))

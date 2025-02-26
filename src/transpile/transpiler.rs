@@ -4,6 +4,7 @@ use chksum_md5 as md5;
 use std::{
     collections::{BTreeMap, HashMap},
     ops::Deref,
+    sync::{Arc, OnceLock},
 };
 
 use shulkerbox::datapack::{self, Command, Datapack, Execute};
@@ -37,10 +38,10 @@ use super::{
 #[derive(Debug)]
 pub struct Transpiler {
     datapack: shulkerbox::datapack::Datapack,
+    /// Top-level [`Scope`] for each program identifier
+    scopes: BTreeMap<String, Arc<Scope<'static>>>,
     /// Key: (program identifier, function name)
     functions: BTreeMap<(String, String), FunctionData>,
-    /// Key: (program identifier, function name), Value: (function location, public)
-    function_locations: HashMap<(String, String), (String, bool)>,
     /// Key: alias, Value: target
     aliases: HashMap<(String, String), (String, String)>,
 }
@@ -51,8 +52,8 @@ impl Transpiler {
     pub fn new(pack_format: u8) -> Self {
         Self {
             datapack: shulkerbox::datapack::Datapack::new(pack_format),
+            scopes: BTreeMap::new(),
             functions: BTreeMap::new(),
-            function_locations: HashMap::new(),
             aliases: HashMap::new(),
         }
     }
@@ -74,10 +75,18 @@ impl Transpiler {
         handler: &impl Handler<base::Error>,
     ) -> Result<(), TranspileError> {
         tracing::trace!("Transpiling program declarations");
-
-        let scope = Scope::new();
-
         for program in programs {
+            let program_identifier = program
+                .namespace()
+                .span()
+                .source_file()
+                .identifier()
+                .clone();
+            let scope = self
+                .scopes
+                .entry(program_identifier)
+                .or_insert_with(Scope::new)
+                .to_owned();
             self.transpile_program_declarations(program, &scope, handler);
         }
 
@@ -101,6 +110,11 @@ impl Transpiler {
         );
 
         for identifier_span in always_transpile_functions {
+            let scope = self
+                .scopes
+                .entry(identifier_span.source_file().identifier().to_owned())
+                .or_insert_with(Scope::new)
+                .to_owned();
             self.get_or_transpile_function(&identifier_span, None, &scope, handler)?;
         }
 
@@ -111,7 +125,7 @@ impl Transpiler {
     fn transpile_program_declarations(
         &mut self,
         program: &ProgramFile,
-        scope: &Scope,
+        scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) {
         let namespace = program.namespace();
@@ -127,7 +141,7 @@ impl Transpiler {
         &mut self,
         declaration: &Declaration,
         namespace: &Namespace,
-        _scope: &Scope,
+        scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) {
         let program_identifier = declaration.span().source_file().identifier().clone();
@@ -148,25 +162,31 @@ impl Transpiler {
                         )
                     })
                     .collect();
-                self.functions.insert(
-                    (program_identifier, name),
-                    FunctionData {
-                        namespace: namespace.namespace_name().str_content().to_string(),
-                        identifier_span: identifier_span.clone(),
-                        parameters: function
-                            .parameters()
-                            .as_ref()
-                            .map(|l| {
-                                l.elements()
-                                    .map(|i| i.span.str().to_string())
-                                    .collect::<Vec<_>>()
-                            })
-                            .unwrap_or_default(),
-                        statements,
-                        public: function.is_public(),
-                        annotations,
+                let function_data = FunctionData {
+                    namespace: namespace.namespace_name().str_content().to_string(),
+                    identifier_span: identifier_span.clone(),
+                    parameters: function
+                        .parameters()
+                        .as_ref()
+                        .map(|l| {
+                            l.elements()
+                                .map(|i| i.span.str().to_string())
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default(),
+                    statements,
+                    public: function.is_public(),
+                    annotations,
+                };
+                scope.set_variable(
+                    &name,
+                    VariableType::Function {
+                        function_data: function_data.clone(),
+                        path: OnceLock::new(),
                     },
                 );
+                self.functions
+                    .insert((program_identifier, name), function_data);
             }
             Declaration::Import(import) => {
                 let path = import.module().str_content();
@@ -220,7 +240,7 @@ impl Transpiler {
         &mut self,
         identifier_span: &Span,
         arguments: Option<&[&Expression]>,
-        scope: &Scope,
+        scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<(String, Option<BTreeMap<String, String>>)> {
         let program_identifier = identifier_span.source_file().identifier();
@@ -229,70 +249,56 @@ impl Transpiler {
             identifier_span.str().to_string(),
         );
         let alias_query = self.aliases.get(&program_query).cloned();
-        let already_transpiled = {
-            let locations = &self.function_locations;
-            locations
-                .get(&program_query)
-                .or_else(|| {
-                    alias_query
-                        .clone()
-                        .and_then(|q| locations.get(&q).filter(|(_, p)| *p))
-                })
-                .is_some()
+        let already_transpiled = match scope
+            .get_variable(identifier_span.str())
+            .expect("called function should be in scope")
+            .as_ref()
+        {
+            VariableType::Function { path, .. } => Some(path.get().is_some()),
+            _ => None,
+        }
+        .expect("called variable should be of type function");
+
+        let function_data = scope
+            .get_variable(identifier_span.str())
+            .or_else(|| {
+                alias_query
+                    .clone()
+                    .and_then(|(alias_program_identifier, alias_function_name)| {
+                        self.scopes
+                            .get(&alias_program_identifier)
+                            .and_then(|s| s.get_variable(&alias_function_name))
+                    })
+            })
+            .ok_or_else(|| {
+                let error = TranspileError::MissingFunctionDeclaration(
+                    MissingFunctionDeclaration::from_scope(identifier_span.clone(), scope),
+                );
+                handler.receive(error.clone());
+                error
+            })?;
+
+        let (function_data, function_path) = match function_data.as_ref() {
+            VariableType::Function {
+                function_data,
+                path,
+            } => (function_data, path),
+            _ => todo!("correctly throw error on wrong type"),
         };
+
         if !already_transpiled {
             tracing::trace!("Function not transpiled yet, transpiling.");
 
-            let function_scope = scope.new_child();
+            let function_scope = Scope::with_parent(scope);
 
-            let statements = {
-                let functions = &self.functions;
-                let function_data = functions
-                    .get(&program_query)
-                    .or_else(|| {
-                        alias_query
-                            .clone()
-                            .and_then(|q| functions.get(&q).filter(|f| f.public))
-                    })
-                    .ok_or_else(|| {
-                        let error = TranspileError::MissingFunctionDeclaration(
-                            MissingFunctionDeclaration::from_context(
-                                identifier_span.clone(),
-                                functions,
-                            ),
-                        );
-                        handler.receive(error.clone());
-                        error
-                    })?;
+            for (i, param) in function_data.parameters.iter().enumerate() {
+                function_scope.set_variable(param, VariableType::FunctionArgument { index: i });
+            }
 
-                for (i, param) in function_data.parameters.iter().enumerate() {
-                    function_scope.set_variable(param, VariableType::FunctionArgument { index: i });
-                }
-
-                function_data.statements.clone()
-            };
+            let statements = function_data.statements.clone();
 
             let commands =
                 self.transpile_function(&statements, program_identifier, &function_scope, handler)?;
-
-            let functions = &self.functions;
-            let function_data = functions
-                .get(&program_query)
-                .or_else(|| {
-                    alias_query
-                        .clone()
-                        .and_then(|q| functions.get(&q).filter(|f| f.public))
-                })
-                .ok_or_else(|| {
-                    let error = TranspileError::MissingFunctionDeclaration(
-                        MissingFunctionDeclaration::from_context(
-                            identifier_span.clone(),
-                            functions,
-                        ),
-                    );
-                    handler.receive(error.clone());
-                    error
-                })?;
 
             let modified_name = function_data
                 .annotations
@@ -333,55 +339,30 @@ impl Transpiler {
                 self.datapack.add_load(&function_location);
             }
 
-            self.function_locations.insert(
-                (
-                    program_identifier.to_string(),
-                    identifier_span.str().to_string(),
-                ),
-                (function_location, function_data.public),
-            );
+            match scope
+                .get_variable(identifier_span.str())
+                .expect("variable should be in scope if called")
+                .as_ref()
+            {
+                VariableType::Function { path, .. } => {
+                    path.set(function_location.clone()).unwrap();
+                }
+                _ => todo!("implement error handling")
+            }
         }
 
-        let parameters = {
-            let function_data = self
-                .functions
-                .get(&program_query)
-                .or_else(|| {
-                    alias_query
-                        .clone()
-                        .and_then(|q| self.functions.get(&q).filter(|f| f.public))
-                })
-                .ok_or_else(|| {
-                    let error = TranspileError::MissingFunctionDeclaration(
-                        MissingFunctionDeclaration::from_context(
-                            identifier_span.clone(),
-                            &self.functions,
-                        ),
-                    );
-                    handler.receive(error.clone());
-                    error
-                })?;
+        let parameters = function_data.parameters.clone();
 
-            function_data.parameters.clone()
-        };
-
-        let function_location = self
-            .function_locations
-            .get(&program_query)
-            .or_else(|| {
-                alias_query.and_then(|q| self.function_locations.get(&q).filter(|(_, p)| *p))
-            })
+        let function_location = function_path
+            .get()
             .ok_or_else(|| {
                 let error = TranspileError::MissingFunctionDeclaration(
-                    MissingFunctionDeclaration::from_context(
-                        identifier_span.clone(),
-                        &self.functions,
-                    ),
+                    MissingFunctionDeclaration::from_scope(identifier_span.clone(), scope),
                 );
                 handler.receive(error.clone());
                 error
             })
-            .map(|(s, _)| s.to_owned())?;
+            .map(|s| s.to_owned())?;
 
         let arg_count = arguments.map(<[&Expression]>::len);
         if arg_count.is_some_and(|arg_count| arg_count != parameters.len()) {
@@ -440,7 +421,7 @@ impl Transpiler {
         &mut self,
         statements: &[Statement],
         program_identifier: &str,
-        scope: &Scope,
+        scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Vec<Command>> {
         let mut errors = Vec::new();
@@ -466,7 +447,7 @@ impl Transpiler {
         &mut self,
         statement: &Statement,
         program_identifier: &str,
-        scope: &Scope,
+        scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Option<Command>> {
         match statement {
@@ -505,7 +486,7 @@ impl Transpiler {
                 unreachable!("Only literal commands are allowed in functions at this time.")
             }
             Statement::ExecuteBlock(execute) => {
-                let child_scope = scope.new_child();
+                let child_scope = Scope::with_parent(scope);
                 self.transpile_execute_block(execute, program_identifier, &child_scope, handler)
             }
             Statement::DocComment(doccomment) => {
@@ -513,7 +494,7 @@ impl Transpiler {
                 Ok(Some(Command::Comment(content.to_string())))
             }
             Statement::Grouping(group) => {
-                let child_scope = scope.new_child();
+                let child_scope = Scope::with_parent(scope);
                 let statements = group.block().statements();
                 let mut errors = Vec::new();
                 let commands = statements
@@ -580,7 +561,7 @@ impl Transpiler {
     fn transpile_function_call(
         &mut self,
         func: &FunctionCall,
-        scope: &Scope,
+        scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Command> {
         let arguments = func
@@ -616,7 +597,7 @@ impl Transpiler {
         &mut self,
         execute: &ExecuteBlock,
         program_identifier: &str,
-        scope: &Scope,
+        scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Option<Command>> {
         self.transpile_execute_block_internal(execute, program_identifier, scope, handler)
@@ -627,7 +608,7 @@ impl Transpiler {
         &mut self,
         execute: &ExecuteBlock,
         program_identifier: &str,
-        scope: &Scope,
+        scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Option<Execute>> {
         match execute {
@@ -715,7 +696,7 @@ impl Transpiler {
         then: Execute,
         el: Option<&Else>,
         program_identifier: &str,
-        scope: &Scope,
+        scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Option<Execute>> {
         let (_, cond) = cond.clone().dissolve();
@@ -767,7 +748,7 @@ impl Transpiler {
         head: &ExecuteBlockHead,
         tail: Option<Execute>,
         program_identifier: &str,
-        scope: &Scope,
+        scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Option<Execute>> {
         Ok(match head {

@@ -1,11 +1,20 @@
 #![expect(unused)]
 
-use std::{collections::HashMap, sync::RwLock};
+use std::{
+    collections::HashMap,
+    sync::{Arc, OnceLock, RwLock},
+};
 
-use super::Transpiler;
+use strum::EnumIs;
 
-#[derive(Debug, Clone)]
+use super::{FunctionData, Transpiler};
+
+#[derive(Debug, Clone, EnumIs)]
 pub enum VariableType {
+    Function {
+        function_data: FunctionData,
+        path: OnceLock<String>,
+    },
     FunctionArgument {
         index: usize,
     },
@@ -35,28 +44,30 @@ pub enum VariableType {
 
 #[derive(Debug, Default)]
 pub struct Scope<'a> {
-    parent: Option<&'a Scope<'a>>,
-    variables: RwLock<HashMap<String, VariableType>>,
+    parent: Option<&'a Arc<Self>>,
+    variables: RwLock<HashMap<String, Arc<VariableType>>>,
 }
 
 impl<'a> Scope<'a> {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
     }
 
-    pub fn new_child(&'a self) -> Self {
-        Self {
-            parent: Some(self),
-            variables: RwLock::new(HashMap::new()),
-        }
+    pub fn with_parent(parent: &'a Arc<Self>) -> Arc<Self> {
+        Arc::new(Self {
+            parent: Some(parent),
+            ..Default::default()
+        })
     }
 
-    pub fn get_variable(&self, name: &str) -> Option<VariableType> {
+    pub fn get_variable(&self, name: &str) -> Option<Arc<VariableType>> {
         let var = self.variables.read().unwrap().get(name).cloned();
         if var.is_some() {
             var
         } else {
-            self.parent.and_then(|parent| parent.get_variable(name))
+            self.parent
+                .as_ref()
+                .and_then(|parent| parent.get_variable(name))
         }
     }
 
@@ -64,11 +75,15 @@ impl<'a> Scope<'a> {
         self.variables
             .write()
             .unwrap()
-            .insert(name.to_string(), var);
+            .insert(name.to_string(), Arc::new(var));
     }
 
-    pub fn get_parent(&self) -> Option<&'a Self> {
-        self.parent
+    pub fn get_variables(&self) -> &RwLock<HashMap<String, Arc<VariableType>>> {
+        &self.variables
+    }
+
+    pub fn get_parent(&self) -> Option<Arc<Self>> {
+        self.parent.map(|v| v.clone())
     }
 }
 
@@ -81,37 +96,39 @@ mod tests {
     #[test]
     fn test_scope() {
         let scope = Scope::new();
-        {
-            let mut variables = scope.variables.write().unwrap();
-            variables.insert(
-                "test".to_string(),
-                VariableType::Scoreboard {
-                    objective: "test".to_string(),
-                },
-            );
-        }
-        match scope.get_variable("test") {
-            Some(VariableType::Scoreboard { objective }) => assert_eq!(objective, "test"),
-            _ => panic!("Incorrect Variable"),
+        scope.set_variable(
+            "test",
+            VariableType::Scoreboard {
+                objective: "test".to_string(),
+            },
+        );
+        if let Some(var) = scope.get_variable("test") {
+            match var.as_ref() {
+                VariableType::Scoreboard { objective } => assert_eq!(objective, "test"),
+                _ => panic!("Incorrect Variable"),
+            }
+        } else {
+            panic!("Variable missing")
         }
     }
 
     #[test]
     fn test_parent() {
         let scope = Scope::new();
-        {
-            let mut variables = scope.variables.write().unwrap();
-            variables.insert(
-                "test".to_string(),
-                VariableType::Scoreboard {
-                    objective: "test".to_string(),
-                },
-            );
-        }
-        let child = scope.new_child();
-        match child.get_variable("test") {
-            Some(VariableType::Scoreboard { objective }) => assert_eq!(objective, "test"),
-            _ => panic!("Incorrect Variable"),
+        scope.set_variable(
+            "test",
+            VariableType::Scoreboard {
+                objective: "test".to_string(),
+            },
+        );
+        let child = Scope::with_parent(&scope);
+        if let Some(var) = child.get_variable("test") {
+            match var.as_ref() {
+                VariableType::Scoreboard { objective } => assert_eq!(objective, "test"),
+                _ => panic!("Incorrect Variable"),
+            }
+        } else {
+            panic!("Variable missing")
         }
     }
 }
