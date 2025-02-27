@@ -102,7 +102,7 @@ where
                             .into_iter()
                             .map(|(k, v)| (k, Arc::new(v)))
                             .collect(),
-                    })
+                    });
                 });
                 let data = seq
                     .next_element()?
@@ -131,7 +131,7 @@ where
                                             .iter()
                                             .map(|(&k, v)| (k, Arc::new(v.clone())))
                                             .collect(),
-                                    })
+                                    });
                             });
                             data = Some(map.next_value()?);
                         }

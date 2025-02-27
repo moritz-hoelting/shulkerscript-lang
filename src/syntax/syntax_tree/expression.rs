@@ -7,7 +7,7 @@ use crate::{
     base::{
         self,
         source_file::{SourceElement, Span},
-        Handler,
+        Handler, VoidHandler,
     },
     lexical::{
         token::{
@@ -44,6 +44,24 @@ impl SourceElement for Expression {
     fn span(&self) -> Span {
         match self {
             Self::Primary(primary) => primary.span(),
+        }
+    }
+}
+
+impl Expression {
+    /// Checks if the expression is compile-time.
+    #[must_use]
+    pub fn is_comptime(&self) -> bool {
+        match self {
+            Self::Primary(primary) => primary.is_comptime(),
+        }
+    }
+
+    /// Evaluate at compile-time to a string.
+    #[must_use]
+    pub fn comptime_eval(&self) -> Option<String> {
+        match self {
+            Self::Primary(primary) => primary.comptime_eval(),
         }
     }
 }
@@ -86,6 +104,38 @@ impl SourceElement for Primary {
     }
 }
 
+impl Primary {
+    /// Checks if the primary expression is compile-time.
+    #[must_use]
+    pub fn is_comptime(&self) -> bool {
+        match self {
+            Self::Boolean(_)
+            | Self::Integer(_)
+            | Self::StringLiteral(_)
+            | Self::MacroStringLiteral(_)
+            | Self::Lua(_) => true,
+            Self::FunctionCall(func) => func.is_comptime(),
+        }
+    }
+
+    /// Evaluate at compile-time to a string.
+    #[must_use]
+    pub fn comptime_eval(&self) -> Option<String> {
+        match self {
+            Self::Boolean(boolean) => Some(boolean.span.str().to_string()),
+            Self::Integer(int) => Some(int.span.str().to_string()),
+            Self::StringLiteral(string_literal) => Some(string_literal.str_content().to_string()),
+            // TODO: correctly evaluate lua code
+            Self::Lua(lua) => lua.eval_string(&VoidHandler).ok().flatten(),
+            Self::MacroStringLiteral(macro_string_literal) => {
+                Some(macro_string_literal.str_content())
+            }
+            // TODO: correctly evaluate function calls
+            Self::FunctionCall(_) => None,
+        }
+    }
+}
+
 /// Represents a function call in the syntax tree.
 ///
 /// Syntax Synopsis:
@@ -118,6 +168,16 @@ impl SourceElement for FunctionCall {
             .span()
             .join(&self.right_parenthesis.span)
             .unwrap()
+    }
+}
+
+impl FunctionCall {
+    /// Checks if the function call is compile-time.
+    #[must_use]
+    pub fn is_comptime(&self) -> bool {
+        self.arguments
+            .as_ref()
+            .map_or(true, |args| args.elements().all(|elem| elem.is_comptime()))
     }
 }
 

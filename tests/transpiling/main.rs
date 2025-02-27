@@ -13,13 +13,14 @@ fn transpile_test1() {
     let transpiled = shulkerscript::transpile(
         &PrintHandler::default(),
         &dir,
+        "main",
         48,
         &[("test1".to_string(), "./test1.shu")],
     )
     .expect("Failed to transpile");
 
     let expected = {
-        let mut dp = Datapack::new(48);
+        let mut dp = Datapack::new("main", 48);
 
         let namespace = dp.namespace_mut("transpiling-test");
 

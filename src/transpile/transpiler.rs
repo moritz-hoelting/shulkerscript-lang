@@ -15,6 +15,7 @@ use crate::{
         source_file::{SourceElement, Span},
         Handler,
     },
+    lexical::token::KeywordKind,
     semantic::error::{ConflictingFunctionNames, InvalidFunctionArguments, UnexpectedExpression},
     syntax::syntax_tree::{
         declaration::{Declaration, ImportItems},
@@ -22,16 +23,17 @@ use crate::{
         program::{Namespace, ProgramFile},
         statement::{
             execute_block::{Conditional, Else, ExecuteBlock, ExecuteBlockHead, ExecuteBlockTail},
-            SemicolonStatement, Statement,
+            SemicolonStatement, SingleVariableDeclaration, Statement, VariableDeclaration,
         },
+        AnnotationAssignment,
     },
-    transpile::error::MissingFunctionDeclaration,
+    transpile::error::{IllegalAnnotationContent, MissingFunctionDeclaration},
 };
 
 use super::{
     error::{TranspileError, TranspileResult},
     variables::{Scope, VariableType},
-    FunctionData,
+    FunctionData, TranspileAnnotationValue,
 };
 
 /// A transpiler for `Shulkerscript`.
@@ -49,9 +51,9 @@ pub struct Transpiler {
 impl Transpiler {
     /// Creates a new transpiler.
     #[must_use]
-    pub fn new(pack_format: u8) -> Self {
+    pub fn new(main_namespace_name: impl Into<String>, pack_format: u8) -> Self {
         Self {
-            datapack: shulkerbox::datapack::Datapack::new(pack_format),
+            datapack: shulkerbox::datapack::Datapack::new(main_namespace_name, pack_format),
             scopes: BTreeMap::new(),
             functions: BTreeMap::new(),
             aliases: HashMap::new(),
@@ -85,7 +87,7 @@ impl Transpiler {
             let scope = self
                 .scopes
                 .entry(program_identifier)
-                .or_insert_with(Scope::new)
+                .or_default()
                 .to_owned();
             self.transpile_program_declarations(program, &scope, handler);
         }
@@ -113,7 +115,7 @@ impl Transpiler {
             let scope = self
                 .scopes
                 .entry(identifier_span.source_file().identifier().to_owned())
-                .or_insert_with(Scope::new)
+                .or_default()
                 .to_owned();
             self.get_or_transpile_function(&identifier_span, None, &scope, handler)?;
         }
@@ -154,11 +156,13 @@ impl Transpiler {
                     .annotations()
                     .iter()
                     .map(|annotation| {
-                        let key = annotation.identifier();
-                        let value = annotation.value();
+                        let AnnotationAssignment {
+                            identifier: key,
+                            value,
+                        } = annotation.assignment();
                         (
                             key.span().str().to_string(),
-                            value.as_ref().map(|(_, ref v)| v.str_content().to_string()),
+                            TranspileAnnotationValue::from(value.clone()),
                         )
                     })
                     .collect();
@@ -278,12 +282,12 @@ impl Transpiler {
                 error
             })?;
 
-        let (function_data, function_path) = match function_data.as_ref() {
-            VariableType::Function {
-                function_data,
-                path,
-            } => (function_data, path),
-            _ => todo!("correctly throw error on wrong type"),
+        let VariableType::Function {
+            function_data,
+            path: function_path,
+        } = function_data.as_ref()
+        else {
+            unreachable!("must be of correct type, otherwise errored out before");
         };
 
         if !already_transpiled {
@@ -300,18 +304,37 @@ impl Transpiler {
             let commands =
                 self.transpile_function(&statements, program_identifier, &function_scope, handler)?;
 
-            let modified_name = function_data
-                .annotations
-                .get("deobfuscate")
-                .map_or_else(
-                    || {
-                        let hash_data =
-                            program_identifier.to_string() + "\0" + identifier_span.str();
-                        Some("shu/".to_string() + &md5::hash(hash_data).to_hex_lowercase())
-                    },
-                    Clone::clone,
-                )
-                .unwrap_or_else(|| identifier_span.str().to_string());
+            let modified_name = function_data.annotations.get("deobfuscate").map_or_else(
+                || {
+                    let hash_data = program_identifier.to_string() + "\0" + identifier_span.str();
+                    Ok("shu/".to_string() + &md5::hash(hash_data).to_hex_lowercase())
+                },
+                |val| match val {
+                    TranspileAnnotationValue::None => Ok(identifier_span.str().to_string()),
+                    TranspileAnnotationValue::Expression(expr) => {
+                        expr.comptime_eval().ok_or_else(|| {
+                            let err = TranspileError::IllegalAnnotationContent(
+                                IllegalAnnotationContent {
+                                    annotation: identifier_span.clone(),
+                                    message: "Cannot evaluate annotation at compile time"
+                                        .to_string(),
+                                },
+                            );
+                            handler.receive(err.clone());
+                            err
+                        })
+                    }
+                    TranspileAnnotationValue::Map(_) => {
+                        let err =
+                            TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                                annotation: identifier_span.clone(),
+                                message: "Deobfuscate annotation cannot be a map.".to_string(),
+                            });
+                        handler.receive(err.clone());
+                        Err(err)
+                    }
+                },
+            )?;
 
             let namespace = self.datapack.namespace_mut(&function_data.namespace);
 
@@ -339,16 +362,7 @@ impl Transpiler {
                 self.datapack.add_load(&function_location);
             }
 
-            match scope
-                .get_variable(identifier_span.str())
-                .expect("variable should be in scope if called")
-                .as_ref()
-            {
-                VariableType::Function { path, .. } => {
-                    path.set(function_location.clone()).unwrap();
-                }
-                _ => todo!("implement error handling")
-            }
+            function_path.set(function_location.clone()).unwrap();
         }
 
         let parameters = function_data.parameters.clone();
@@ -362,7 +376,7 @@ impl Transpiler {
                 handler.receive(error.clone());
                 error
             })
-            .map(|s| s.to_owned())?;
+            .map(String::to_owned)?;
 
         let arg_count = arguments.map(<[&Expression]>::len);
         if arg_count.is_some_and(|arg_count| arg_count != parameters.len()) {
@@ -536,23 +550,7 @@ impl Transpiler {
                     }
                 },
                 SemicolonStatement::VariableDeclaration(decl) => {
-                    // let value = match decl {
-                    //     VariableDeclaration::Single(single) => {
-                    //         match single.variable_type().keyword {
-                    //             KeywordKind::Int => {
-                    //                 VariableType::ScoreboardValue { objective: (), name: () }
-                    //             }
-                    //         }
-                    //     }
-                    // }
-                    // TODO: only for demonstration
-                    // scope.set_variable(
-                    //     decl.identifier().span.str(),
-                    //     VariableType::Tag {
-                    //         tag_name: "TODO".to_string(),
-                    //     },
-                    // );
-                    todo!("Variable declarations are not yet supported: {decl:?}")
+                    self.transpile_variable_declaration(decl, program_identifier, scope, handler)
                 }
             },
         }
@@ -582,7 +580,7 @@ impl Transpiler {
                 .map(|(ident, v)| {
                     format!(
                         r#"{macro_name}:"{escaped}""#,
-                        macro_name = super::util::identifier_to_macro(ident),
+                        macro_name = crate::util::identifier_to_macro(ident),
                         escaped = crate::util::escape_str(v)
                     )
                 })
@@ -591,6 +589,158 @@ impl Transpiler {
             write!(function_call, " {{{arguments}}}").unwrap();
         }
         Ok(Command::Raw(function_call))
+    }
+
+    fn transpile_variable_declaration(
+        &mut self,
+        declaration: &VariableDeclaration,
+        program_identifier: &str,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> TranspileResult<Option<Command>> {
+        match declaration {
+            VariableDeclaration::Single(single) => self.transpile_single_variable_declaration(
+                single,
+                program_identifier,
+                scope,
+                handler,
+            ),
+            _ => todo!("declarations not supported yet: {declaration:?}"),
+        }
+    }
+
+    #[expect(clippy::too_many_lines)]
+    fn transpile_single_variable_declaration(
+        &mut self,
+        single: &SingleVariableDeclaration,
+        program_identifier: &str,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> TranspileResult<Option<Command>> {
+        let mut deobfuscate_annotations = single
+            .annotations()
+            .iter()
+            .filter(|a| a.has_identifier("deobfuscate"));
+
+        let variable_type = single.variable_type().keyword;
+
+        let deobfuscate_annotation = deobfuscate_annotations.next();
+
+        if let Some(duplicate) = deobfuscate_annotations.next() {
+            let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                annotation: duplicate.span(),
+                message: "Multiple deobfuscate annotations are not allowed.".to_string(),
+            });
+            handler.receive(error.clone());
+            return Err(error);
+        }
+        let (name, target) = if let Some(deobfuscate_annotation) = deobfuscate_annotation {
+            let deobfuscate_annotation_value =
+                TranspileAnnotationValue::from(deobfuscate_annotation.assignment().value.clone());
+
+            if let TranspileAnnotationValue::Map(map) = deobfuscate_annotation_value {
+                if map.len() > 2 {
+                    let error =
+                        TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                            annotation: deobfuscate_annotation.span(),
+                            message: "Deobfuscate annotation must have at most 2 key-value pairs."
+                                .to_string(),
+                        });
+                    handler.receive(error.clone());
+                    return Err(error);
+                }
+                if let (Some(name), Some(target)) = (map.get("name"), map.get("target")) {
+                    if let (
+                        TranspileAnnotationValue::Expression(objective),
+                        TranspileAnnotationValue::Expression(target),
+                    ) = (name, target)
+                    {
+                        if let (Some(name_eval), Some(target_eval)) =
+                            (objective.comptime_eval(), target.comptime_eval())
+                        {
+                            // TODO: change invalid criteria if boolean
+                            if !crate::util::is_valid_scoreboard_name(&name_eval) {
+                                let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                                            annotation: deobfuscate_annotation.span(),
+                                            message: "Deobfuscate annotation 'name' must be a valid scoreboard name.".to_string()
+                                        });
+                                handler.receive(error.clone());
+                                return Err(error);
+                            }
+                            if !crate::util::is_valid_player_name(&target_eval) {
+                                let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                                            annotation: deobfuscate_annotation.span(),
+                                            message: "Deobfuscate annotation 'target' must be a valid player name.".to_string()
+                                        });
+                                handler.receive(error.clone());
+                                return Err(error);
+                            }
+                            (name_eval, target_eval)
+                        } else {
+                            let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                                        annotation: deobfuscate_annotation.span(),
+                                        message: "Deobfuscate annotation 'name' or 'target' could not have been evaluated at compile time.".to_string()
+                                    });
+                            handler.receive(error.clone());
+                            return Err(error);
+                        }
+                    } else {
+                        let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                                    annotation: deobfuscate_annotation.span(),
+                                    message: "Deobfuscate annotation 'name' and 'target' must be compile time expressions.".to_string()
+                                });
+                        handler.receive(error.clone());
+                        return Err(error);
+                    }
+                } else {
+                    let error =
+                        TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                            annotation: deobfuscate_annotation.span(),
+                            message:
+                                "Deobfuscate annotation must have both 'name' and 'target' keys."
+                                    .to_string(),
+                        });
+                    handler.receive(error.clone());
+                    return Err(error);
+                }
+            } else {
+                let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                    annotation: deobfuscate_annotation.span(),
+                    message: "Deobfuscate annotation must be a map.".to_string(),
+                });
+                handler.receive(error.clone());
+                return Err(error);
+            }
+        } else {
+            let name =
+                "shu_values_".to_string() + &md5::hash(program_identifier).to_hex_lowercase();
+            let target = md5::hash((Arc::as_ptr(scope) as usize).to_le_bytes())
+                .to_hex_lowercase()
+                .split_off(16);
+
+            (name, target)
+        };
+
+        if variable_type == KeywordKind::Int {
+            if !self.datapack.scoreboards().contains_key(&name) {
+                self.datapack.register_scoreboard(&name, None, None);
+            }
+
+            scope.set_variable(
+                &name,
+                VariableType::ScoreboardValue {
+                    objective: name.clone(),
+                    target,
+                },
+            );
+        } else {
+            todo!("implement other variable types")
+        }
+
+        Ok(single
+            .assignment()
+            .is_some()
+            .then(|| todo!("transpile assignment")))
     }
 
     fn transpile_execute_block(

@@ -1,9 +1,8 @@
 //! Errors that can occur during transpilation.
 
-use std::{fmt::Display, sync::Arc};
+use std::fmt::Display;
 
 use getset::Getters;
-use itertools::Itertools;
 
 use crate::{
     base::{
@@ -13,10 +12,7 @@ use crate::{
     semantic::error::{ConflictingFunctionNames, InvalidFunctionArguments, UnexpectedExpression},
 };
 
-use super::{
-    variables::{Scope, VariableType},
-    FunctionData,
-};
+use super::FunctionData;
 
 /// Errors that can occur during transpilation.
 #[allow(clippy::module_name_repetitions, missing_docs)]
@@ -34,6 +30,8 @@ pub enum TranspileError {
     ConflictingFunctionNames(#[from] ConflictingFunctionNames),
     #[error(transparent)]
     InvalidFunctionArguments(#[from] InvalidFunctionArguments),
+    #[error(transparent)]
+    IllegalAnnotationContent(#[from] IllegalAnnotationContent),
 }
 
 /// The result of a transpilation operation.
@@ -49,8 +47,13 @@ pub struct MissingFunctionDeclaration {
 }
 
 impl MissingFunctionDeclaration {
-    #[cfg_attr(not(feature = "shulkerbox"), expect(unused))]
-    pub(super) fn from_scope(identifier_span: Span, scope: &Arc<Scope>) -> Self {
+    #[cfg(feature = "shulkerbox")]
+    pub(super) fn from_scope(
+        identifier_span: Span,
+        scope: &std::sync::Arc<super::variables::Scope>,
+    ) -> Self {
+        use itertools::Itertools as _;
+
         let own_name = identifier_span.str();
         let alternatives = scope
             .get_variables()
@@ -58,9 +61,12 @@ impl MissingFunctionDeclaration {
             .unwrap()
             .iter()
             .filter_map(|(name, value)| {
-                let data = match value.as_ref() {
-                    VariableType::Function { function_data, .. } => function_data,
-                    _ => return None,
+                let super::variables::VariableType::Function {
+                    function_data: data,
+                    ..
+                } = value.as_ref()
+                else {
+                    return None;
                 };
 
                 let normalized_distance = strsim::normalized_damerau_levenshtein(own_name, name);
@@ -150,3 +156,29 @@ impl LuaRuntimeError {
         }
     }
 }
+
+/// An error that occurs when an annotation has an illegal content.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IllegalAnnotationContent {
+    pub annotation: Span,
+    pub message: String,
+}
+
+impl Display for IllegalAnnotationContent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = format!(
+            "illegal content in annotation `{}`: {}",
+            self.annotation.str(),
+            self.message
+        );
+        write!(f, "{}", Message::new(Severity::Error, message))?;
+
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(&self.annotation, Option::<u8>::None)
+        )
+    }
+}
+
+impl std::error::Error for IllegalAnnotationContent {}

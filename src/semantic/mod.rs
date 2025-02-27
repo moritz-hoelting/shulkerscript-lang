@@ -156,11 +156,11 @@ impl Function {
             if let Some(incompatible) = self
                 .annotations()
                 .iter()
-                .find(|a| ["tick", "load"].contains(&a.identifier().span.str()))
+                .find(|a| ["tick", "load"].contains(&a.assignment().identifier.span.str()))
             {
                 let err =
                     error::Error::IncompatibleFunctionAnnotation(IncompatibleFunctionAnnotation {
-                        span: incompatible.identifier().span(),
+                        span: incompatible.assignment().identifier.span(),
                         reason:
                             "functions with the `tick` or `load` annotation cannot have parameters"
                                 .to_string(),

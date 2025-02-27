@@ -130,6 +130,7 @@ pub fn parse(
 /// let datapack = transpile(
 ///     &PrintHandler::new(),
 ///     &FsProvider::default(),
+///     "main",
 ///     48,
 ///     &[
 ///         (String::from("fileA"), Path::new("path/to/fileA.shu")),
@@ -141,6 +142,7 @@ pub fn parse(
 pub fn transpile<F, P>(
     handler: &impl Handler<base::Error>,
     file_provider: &F,
+    main_namespace_name: impl Into<String>,
     pack_format: u8,
     script_paths: &[(String, P)],
 ) -> Result<Datapack>
@@ -174,7 +176,7 @@ where
 
     tracing::info!("Transpiling the source code.");
 
-    let mut transpiler = Transpiler::new(pack_format);
+    let mut transpiler = Transpiler::new(main_namespace_name, pack_format);
     transpiler.transpile(&programs, handler)?;
     let datapack = transpiler.into_datapack();
 
@@ -203,6 +205,7 @@ where
 /// let vfolder = compile(
 ///     &PrintHandler::new(),
 ///     &FsProvider::default(),
+///     "main",
 ///     48,
 ///     &[
 ///         (String::from("fileA"), Path::new("path/to/fileA.shu")),
@@ -214,6 +217,7 @@ where
 pub fn compile<F, P>(
     handler: &impl Handler<base::Error>,
     file_provider: &F,
+    main_namespace_name: impl Into<String>,
     pack_format: u8,
     script_paths: &[(String, P)],
 ) -> Result<VFolder>
@@ -223,7 +227,13 @@ where
 {
     use shulkerbox::prelude::CompileOptions;
 
-    let datapack = transpile(handler, file_provider, pack_format, script_paths)?;
+    let datapack = transpile(
+        handler,
+        file_provider,
+        main_namespace_name,
+        pack_format,
+        script_paths,
+    )?;
 
     tracing::info!("Compiling the source code.");
 

@@ -36,6 +36,62 @@ pub fn unescape_macro_string(s: &str) -> Cow<str> {
     }
 }
 
+/// Transforms an identifier to a macro name that only contains `a-zA-Z0-9_`.
+#[cfg(feature = "shulkerbox")]
+#[must_use]
+pub fn identifier_to_macro(ident: &str) -> std::borrow::Cow<str> {
+    if ident.contains("__")
+        || ident
+            .chars()
+            .any(|c| c == '_' || !c.is_ascii_alphanumeric())
+    {
+        let new_ident = ident
+            .chars()
+            .filter(|c| *c != '_' && c.is_ascii_alphanumeric())
+            .collect::<String>();
+
+        let chksum = chksum_md5::hash(ident).to_hex_lowercase();
+
+        std::borrow::Cow::Owned(new_ident + "__" + &chksum[..8])
+    } else {
+        std::borrow::Cow::Borrowed(ident)
+    }
+}
+
+/// Transforms an identifier to a macro name that only contains `a-zA-Z0-9_`.
+/// Does only strip invalid characters if the `shulkerbox` feature is not enabled.
+#[cfg(not(feature = "shulkerbox"))]
+#[must_use]
+pub fn identifier_to_macro(ident: &str) -> std::borrow::Cow<str> {
+    if ident.contains("__")
+        || ident
+            .chars()
+            .any(|c| c == '_' || !c.is_ascii_alphanumeric())
+    {
+        let new_ident = ident
+            .chars()
+            .filter(|c| *c != '_' && c.is_ascii_alphanumeric())
+            .collect::<String>();
+
+        std::borrow::Cow::Owned(new_ident)
+    } else {
+        std::borrow::Cow::Borrowed(ident)
+    }
+}
+
+/// Returns whether a string is a valid scoreboard name.
+#[must_use]
+pub fn is_valid_scoreboard_name(name: &str) -> bool {
+    name.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '+' | '.'))
+}
+
+/// Returns whether a string is a valid player name.
+#[must_use]
+pub fn is_valid_player_name(name: &str) -> bool {
+    (3..=16).contains(&name.len()) && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

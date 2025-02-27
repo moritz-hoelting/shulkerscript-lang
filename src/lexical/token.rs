@@ -353,7 +353,6 @@ pub struct MacroStringLiteral {
 
 impl MacroStringLiteral {
     /// Returns the string content without escapement characters, leading and trailing double quotes.
-    #[cfg(feature = "shulkerbox")]
     #[must_use]
     pub fn str_content(&self) -> String {
         use std::fmt::Write;
@@ -369,7 +368,7 @@ impl MacroStringLiteral {
                     write!(
                         content,
                         "$({})",
-                        crate::transpile::util::identifier_to_macro(identifier.span.str())
+                        crate::util::identifier_to_macro(identifier.span.str())
                     )
                     .expect("can always write to string");
                 }
@@ -949,7 +948,7 @@ impl Token {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "shulkerbox"))]
 mod tests {
     use crate::base::source_file::SourceFile;
     use shulkerbox::virtual_fs::{VFile, VFolder};

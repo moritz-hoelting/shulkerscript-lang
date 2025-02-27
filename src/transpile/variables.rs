@@ -23,11 +23,11 @@ pub enum VariableType {
     },
     ScoreboardValue {
         objective: String,
-        name: String,
+        target: String,
     },
     ScoreboardArray {
         objective: String,
-        names: Vec<String>,
+        targets: Vec<String>,
     },
     Tag {
         tag_name: String,
@@ -83,7 +83,7 @@ impl<'a> Scope<'a> {
     }
 
     pub fn get_parent(&self) -> Option<Arc<Self>> {
-        self.parent.map(|v| v.clone())
+        self.parent.cloned()
     }
 }
 

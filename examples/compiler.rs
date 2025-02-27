@@ -8,19 +8,19 @@ use shulkerscript::{
     compile,
 };
 
-#[cfg(not(feature = "shulkerbox"))]
-compile_error!("Need feature 'shulkerbox' to compile this example");
-
 fn main() {
     let mut args = std::env::args();
     let _ = args.next().unwrap();
     let input = args.next().expect("Expect path to shulkerscript file");
+
+    let main_namespace = args.next().expect("Expect main namespace name");
 
     let output = args.next().expect("Expect path to output directory");
 
     let code = compile(
         &PrintHandler::new(),
         &FsProvider::default(),
+        main_namespace,
         shulkerbox::datapack::Datapack::LATEST_FORMAT,
         &[("main".to_string(), &input)],
     )

@@ -71,7 +71,7 @@ impl From<&MacroStringLiteral> for MacroString {
                         ),
                         MacroStringLiteralPart::MacroUsage { identifier, .. } => {
                             MacroStringPart::MacroUsage(
-                                super::util::identifier_to_macro(identifier.span.str()).to_string(),
+                                crate::util::identifier_to_macro(identifier.span.str()).to_string(),
                             )
                         }
                     })

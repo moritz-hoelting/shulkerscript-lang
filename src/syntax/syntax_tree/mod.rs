@@ -1,7 +1,9 @@
 //! Contains the syntax tree nodes that represent the structure of the source code.
 
 use derive_more::derive::From;
+use expression::Expression;
 use getset::Getters;
+use strum::EnumIs;
 
 use crate::{
     base::{
@@ -10,13 +12,16 @@ use crate::{
         Handler, VoidHandler,
     },
     lexical::{
-        token::{MacroStringLiteral, Punctuation, StringLiteral, Token},
+        token::{Identifier, MacroStringLiteral, Punctuation, StringLiteral, Token},
         token_stream::Delimiter,
     },
     syntax::parser::Reading,
 };
 
-use super::{error::ParseResult, parser::Parser};
+use super::{
+    error::{ParseResult, SyntaxKind, UnexpectedSyntax},
+    parser::Parser,
+};
 
 pub mod condition;
 pub mod declaration;
@@ -85,6 +90,142 @@ impl SourceElement for AnyStringLiteral {
             Self::StringLiteral(string_literal) => string_literal.span(),
             Self::MacroStringLiteral(macro_string_literal) => macro_string_literal.span(),
         }
+    }
+}
+
+/// Represents an Annotation with optional value.
+///
+/// Syntax Synopsis:
+///
+/// ``` ebnf
+/// Annotation:
+///     '#[' AnnotationAssignment ']'
+///     ;
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct Annotation {
+    /// The pound sign of the annotation.
+    #[get = "pub"]
+    pound_sign: Punctuation,
+    /// The open bracket of the annotation.
+    #[get = "pub"]
+    open_bracket: Punctuation,
+    /// The assignment inside the annotation.
+    #[get = "pub"]
+    assignment: AnnotationAssignment,
+    /// The close bracket of the annotation.
+    #[get = "pub"]
+    close_bracket: Punctuation,
+}
+
+impl Annotation {
+    /// Dissolves the [`Annotation`] into its components.
+    #[must_use]
+    pub fn dissolve(self) -> (Punctuation, Punctuation, AnnotationAssignment, Punctuation) {
+        (
+            self.pound_sign,
+            self.open_bracket,
+            self.assignment,
+            self.close_bracket,
+        )
+    }
+
+    /// Checks if the annotation has the given identifier.
+    #[must_use]
+    pub fn has_identifier(&self, identifier: &str) -> bool {
+        self.assignment.identifier.span().str() == identifier
+    }
+}
+impl SourceElement for Annotation {
+    fn span(&self) -> Span {
+        self.pound_sign
+            .span
+            .join(&self.close_bracket.span())
+            .unwrap()
+    }
+}
+
+/// Represents a value of an annotation.
+///
+/// Syntax Synopsis:
+///
+/// ``` ebnf
+/// AnnotationValue:
+///     '=' Expression
+///     | '(' AnnotationAssignment ( ',' AnnotationAssignment )* ')'
+///     ;
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumIs)]
+pub enum AnnotationValue {
+    /// A single value assignment.
+    ///
+    /// '=' Expression
+    Single {
+        /// The equal sign of the assignment.
+        equal_sign: Punctuation,
+        /// The value of the assignment.
+        value: Expression,
+    },
+    /// A multiple value assignment.
+    ///
+    /// '(' [`AnnotationAssignment`] ( ',' [`AnnotationAssignment`] )* ')'
+    Multiple {
+        /// The opening parenthesis of the assignment.
+        opening_parenthesis: Punctuation,
+        /// The list of assignments.
+        list: Box<ConnectedList<AnnotationAssignment, Punctuation>>,
+        /// The closing parenthesis of the assignment.
+        closing_parenthesis: Punctuation,
+    },
+}
+
+impl SourceElement for AnnotationValue {
+    fn span(&self) -> Span {
+        match self {
+            Self::Single { equal_sign, value } => equal_sign.span().join(&value.span()).unwrap(),
+            Self::Multiple {
+                opening_parenthesis,
+                closing_parenthesis,
+                ..
+            } => opening_parenthesis
+                .span()
+                .join(&closing_parenthesis.span())
+                .unwrap(),
+        }
+    }
+}
+
+/// Represents an assignment inside an annotation.
+///
+/// Syntax Synopsis:
+///
+/// ``` ebnf
+/// AnnotationAssignment:
+///     Identifier AnnotationValue
+///     ;
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct AnnotationAssignment {
+    /// The identifier of the assignment.
+    pub identifier: Identifier,
+    /// The value of the assignment.
+    pub value: Option<AnnotationValue>,
+}
+
+impl SourceElement for AnnotationAssignment {
+    fn span(&self) -> Span {
+        self.identifier
+            .span()
+            .join(
+                &self
+                    .value
+                    .as_ref()
+                    .map_or_else(|| self.identifier.span(), AnnotationValue::span),
+            )
+            .unwrap()
     }
 }
 
@@ -213,6 +354,95 @@ impl<'a> Parser<'a> {
             rest,
             trailing_separator: None,
         })
+    }
+
+    /// Parses an annotation.
+    ///
+    /// # Errors
+    /// - if the parser position is not at an annotation.
+    /// - if the parsing of the annotation fails
+    pub fn parse_annotation(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> ParseResult<Annotation> {
+        match self.stop_at_significant() {
+            Reading::Atomic(Token::Punctuation(punctuation)) if punctuation.punctuation == '#' => {
+                // eat the pound sign
+                self.forward();
+
+                // step into the brackets
+                let content = self.step_into(
+                    Delimiter::Bracket,
+                    |parser| parser.parse_annotation_assignment(handler),
+                    handler,
+                )?;
+
+                Ok(Annotation {
+                    pound_sign: punctuation,
+                    open_bracket: content.open,
+                    assignment: content.tree?,
+                    close_bracket: content.close,
+                })
+            }
+            unexpected => {
+                let err = super::error::Error::UnexpectedSyntax(UnexpectedSyntax {
+                    expected: SyntaxKind::Punctuation('#'),
+                    found: unexpected.into_token(),
+                });
+                handler.receive(err.clone());
+                Err(err)
+            }
+        }
+    }
+
+    fn parse_annotation_assignment(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> ParseResult<AnnotationAssignment> {
+        let identifier = self.parse_identifier(handler)?;
+
+        match self.stop_at_significant() {
+            Reading::Atomic(Token::Punctuation(punc)) if punc.punctuation == '=' => {
+                // eat the equals sign
+                self.forward();
+
+                let value = self.parse_expression(handler)?;
+
+                Ok(AnnotationAssignment {
+                    identifier,
+                    value: Some(AnnotationValue::Single {
+                        equal_sign: punc,
+                        value,
+                    }),
+                })
+            }
+            Reading::IntoDelimited(delim) if delim.punctuation == '(' => {
+                let tree = self.step_into(
+                    Delimiter::Parenthesis,
+                    |p| {
+                        p.parse_connected_list(
+                            ',',
+                            |pp| pp.parse_annotation_assignment(handler),
+                            handler,
+                        )
+                    },
+                    handler,
+                )?;
+
+                Ok(AnnotationAssignment {
+                    identifier,
+                    value: Some(AnnotationValue::Multiple {
+                        opening_parenthesis: tree.open,
+                        list: Box::new(tree.tree?),
+                        closing_parenthesis: tree.close,
+                    }),
+                })
+            }
+            _ => Ok(AnnotationAssignment {
+                identifier,
+                value: None,
+            }),
+        }
     }
 }
 

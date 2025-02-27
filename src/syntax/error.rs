@@ -21,6 +21,8 @@ pub enum Error {
     UnexpectedSyntax(#[from] UnexpectedSyntax),
     #[error(transparent)]
     InvalidArgument(#[from] InvalidArgument),
+    #[error(transparent)]
+    InvalidAnnotation(#[from] InvalidAnnotation),
 }
 
 /// Enumeration containing all kinds of syntax that can be failed to parse.
@@ -154,3 +156,36 @@ impl Display for InvalidArgument {
 }
 
 impl std::error::Error for InvalidArgument {}
+
+/// An error that occurred due to an invalid annotation.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InvalidAnnotation {
+    /// The invalid annotation identifier.
+    pub annotation: Span,
+    /// The target of the annotation.
+    pub target: String,
+}
+
+impl Display for InvalidAnnotation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            Message::new(
+                Severity::Error,
+                format!(
+                    "Annotation '{}' cannot be applied to {}",
+                    self.annotation.str(),
+                    self.target
+                )
+            )
+        )?;
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(&self.annotation, Option::<u8>::None)
+        )
+    }
+}
+
+impl std::error::Error for InvalidAnnotation {}

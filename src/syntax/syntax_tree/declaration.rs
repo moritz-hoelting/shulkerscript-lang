@@ -2,6 +2,8 @@
 
 #![allow(missing_docs)]
 
+use std::collections::VecDeque;
+
 use getset::Getters;
 
 use crate::{
@@ -15,12 +17,12 @@ use crate::{
         token_stream::Delimiter,
     },
     syntax::{
-        error::{Error, ParseResult, SyntaxKind, UnexpectedSyntax},
+        error::{Error, InvalidAnnotation, ParseResult, SyntaxKind, UnexpectedSyntax},
         parser::{Parser, Reading},
     },
 };
 
-use super::{statement::Block, ConnectedList, DelimitedList};
+use super::{statement::Block, Annotation, ConnectedList, DelimitedList};
 
 /// Represents a declaration in the syntax tree.
 ///
@@ -49,57 +51,29 @@ impl SourceElement for Declaration {
         }
     }
 }
-/// Represents an Annotation with optional value.
-///
-/// Syntax Synopsis:
-///
-/// ``` ebnf
-/// Annotation:
-///     '#[' Identifier ('=' StringLiteral)? ']'
-///     ;
-/// ```
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
-pub struct Annotation {
-    #[get = "pub"]
-    pound_sign: Punctuation,
-    #[get = "pub"]
-    open_bracket: Punctuation,
-    #[get = "pub"]
-    identifier: Identifier,
-    #[get = "pub"]
-    value: Option<(Punctuation, StringLiteral)>,
-    #[get = "pub"]
-    close_bracket: Punctuation,
-}
 
-impl Annotation {
-    /// Dissolves the [`Annotation`] into its components.
-    #[must_use]
-    pub fn dissolve(
-        self,
-    ) -> (
-        Punctuation,
-        Punctuation,
-        Identifier,
-        Option<(Punctuation, StringLiteral)>,
-        Punctuation,
-    ) {
-        (
-            self.pound_sign,
-            self.open_bracket,
-            self.identifier,
-            self.value,
-            self.close_bracket,
-        )
-    }
-}
-impl SourceElement for Annotation {
-    fn span(&self) -> Span {
-        self.pound_sign
-            .span
-            .join(&self.close_bracket.span())
-            .unwrap()
+impl Declaration {
+    /// Adds an annotation to the declaration.
+    ///
+    /// # Errors
+    /// - if the annotation is invalid for the target declaration.
+    pub fn with_annotation(self, annotation: Annotation) -> ParseResult<Self> {
+        #[expect(clippy::single_match_else)]
+        match self {
+            Self::Function(mut function) => {
+                function.annotations.push_front(annotation);
+
+                Ok(Self::Function(function))
+            }
+            _ => {
+                let err = Error::InvalidAnnotation(InvalidAnnotation {
+                    annotation: annotation.assignment.identifier.span,
+                    target: "declarations except functions".to_string(),
+                });
+
+                Err(err)
+            }
+        }
     }
 }
 
@@ -122,7 +96,7 @@ pub struct Function {
     #[get = "pub"]
     public_keyword: Option<Keyword>,
     #[get = "pub"]
-    annotations: Vec<Annotation>,
+    annotations: VecDeque<Annotation>,
     #[get = "pub"]
     function_keyword: Keyword,
     #[get = "pub"]
@@ -145,7 +119,7 @@ impl Function {
         self,
     ) -> (
         Option<Keyword>,
-        Vec<Annotation>,
+        VecDeque<Annotation>,
         Keyword,
         Identifier,
         Punctuation,
@@ -313,67 +287,6 @@ impl SourceElement for Tag {
 }
 
 impl<'a> Parser<'a> {
-    /// Parses an annotation.
-    ///
-    /// # Errors
-    /// - if the parser position is not at an annotation.
-    /// - if the parsing of the annotation fails
-    pub fn parse_annotation(
-        &mut self,
-        handler: &impl Handler<base::Error>,
-    ) -> ParseResult<Annotation> {
-        match self.stop_at_significant() {
-            Reading::Atomic(Token::Punctuation(punctuation)) if punctuation.punctuation == '#' => {
-                // eat the pound sign
-                self.forward();
-
-                // step into the brackets
-                let content = self.step_into(
-                    Delimiter::Bracket,
-                    |parser| {
-                        let identifier = parser.parse_identifier(handler)?;
-
-                        let value = match parser.stop_at_significant() {
-                            Reading::Atomic(Token::Punctuation(punc))
-                                if punc.punctuation == '=' =>
-                            {
-                                // eat the equals sign
-                                parser.forward();
-
-                                // parse the string literal
-                                let string_literal = parser.parse_string_literal(handler)?;
-
-                                Some((punc, string_literal))
-                            }
-                            _ => None,
-                        };
-
-                        Ok((identifier, value))
-                    },
-                    handler,
-                )?;
-
-                let (identifier, value) = content.tree?;
-
-                Ok(Annotation {
-                    pound_sign: punctuation,
-                    open_bracket: content.open,
-                    identifier,
-                    value,
-                    close_bracket: content.close,
-                })
-            }
-            unexpected => {
-                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
-                    expected: SyntaxKind::Punctuation('#'),
-                    found: unexpected.into_token(),
-                });
-                handler.receive(err.clone());
-                Err(err)
-            }
-        }
-    }
-
     #[tracing::instrument(level = "trace", skip_all)]
     pub fn parse_declaration(
         &mut self,
@@ -403,18 +316,12 @@ impl<'a> Parser<'a> {
             // parse annotations
             Reading::Atomic(Token::Punctuation(punctuation)) if punctuation.punctuation == '#' => {
                 // parse the annotation
-                let mut annotations = Vec::new();
+                let annotation = self.parse_annotation(handler)?;
+                let declaration = self.parse_declaration(handler)?;
 
-                while let Ok(annotation) =
-                    self.try_parse(|parser| parser.parse_annotation(&VoidHandler))
-                {
-                    annotations.push(annotation);
-                }
-
-                self.parse_function(handler).map(|mut function| {
-                    function.annotations.extend(annotations);
-                    Declaration::Function(function)
-                })
+                declaration
+                    .with_annotation(annotation)
+                    .inspect_err(|err| handler.receive(err.clone()))
             }
 
             Reading::Atomic(Token::Keyword(from_keyword))
@@ -553,7 +460,7 @@ impl<'a> Parser<'a> {
 
                 Ok(Function {
                     public_keyword: pub_keyword.ok(),
-                    annotations: Vec::new(),
+                    annotations: VecDeque::new(),
                     function_keyword,
                     identifier,
                     open_paren: delimited_tree.open,

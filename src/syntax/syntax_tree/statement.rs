@@ -2,6 +2,8 @@
 
 pub mod execute_block;
 
+use std::collections::VecDeque;
+
 use derive_more::From;
 use enum_as_inner::EnumAsInner;
 use getset::Getters;
@@ -20,14 +22,14 @@ use crate::{
         token_stream::Delimiter,
     },
     syntax::{
-        error::{Error, ParseResult, SyntaxKind, UnexpectedSyntax},
+        error::{Error, InvalidAnnotation, ParseResult, SyntaxKind, UnexpectedSyntax},
         parser::{Parser, Reading},
     },
 };
 
 use self::execute_block::ExecuteBlock;
 
-use super::{expression::Expression, AnyStringLiteral};
+use super::{expression::Expression, Annotation, AnyStringLiteral};
 
 /// Represents a statement in the syntax tree.
 ///
@@ -67,6 +69,47 @@ impl SourceElement for Statement {
             Self::DocComment(doc_comment) => doc_comment.span(),
             Self::Semicolon(semi) => semi.span(),
             Self::Run(run) => run.span(),
+        }
+    }
+}
+
+impl Statement {
+    /// Adds an annotation to the statement.
+    ///
+    /// # Errors
+    /// - if the annotation is invalid for the statement.
+    pub fn with_annotation(self, annotation: Annotation) -> ParseResult<Self> {
+        #[expect(clippy::single_match_else)]
+        match self {
+            Self::Semicolon(Semicolon {
+                statement,
+                semicolon,
+            }) => match statement {
+                SemicolonStatement::VariableDeclaration(decl) => {
+                    decl.with_annotation(annotation).map(|decl| {
+                        Self::Semicolon(Semicolon {
+                            statement: SemicolonStatement::VariableDeclaration(decl),
+                            semicolon,
+                        })
+                    })
+                }
+                SemicolonStatement::Expression(_) => {
+                    let err = Error::InvalidAnnotation(InvalidAnnotation {
+                        annotation: annotation.assignment.identifier.span,
+                        target: "expressions".to_string(),
+                    });
+
+                    Err(err)
+                }
+            },
+            _ => {
+                let err = Error::InvalidAnnotation(InvalidAnnotation {
+                    annotation: annotation.assignment.identifier.span,
+                    target: "statements except variable declarations".to_string(),
+                });
+
+                Err(err)
+            }
         }
     }
 }
@@ -306,6 +349,31 @@ impl VariableDeclaration {
             Self::Tag(declaration) => &declaration.bool_keyword,
         }
     }
+
+    /// Adds an annotation to the variable declaration.
+    ///
+    /// # Errors
+    /// - if the annotation is invalid for the variable declaration.
+    pub fn with_annotation(self, annotation: Annotation) -> ParseResult<Self> {
+        match self {
+            Self::Single(mut declaration) => {
+                declaration.annotations.push_front(annotation);
+                Ok(Self::Single(declaration))
+            }
+            Self::Array(mut declaration) => {
+                declaration.annotations.push_front(annotation);
+                Ok(Self::Array(declaration))
+            }
+            Self::Score(mut declaration) => {
+                declaration.annotations.push_front(annotation);
+                Ok(Self::Score(declaration))
+            }
+            Self::Tag(mut declaration) => {
+                declaration.annotations.push_front(annotation);
+                Ok(Self::Tag(declaration))
+            }
+        }
+    }
 }
 
 /// Represents a variable assignment.
@@ -364,6 +432,9 @@ pub struct SingleVariableDeclaration {
     /// The optional assignment of the variable.
     #[get = "pub"]
     assignment: Option<VariableDeclarationAssignment>,
+    /// The annotations of the variable declaration.
+    #[get = "pub"]
+    annotations: VecDeque<Annotation>,
 }
 
 impl SourceElement for SingleVariableDeclaration {
@@ -417,6 +488,9 @@ pub struct ArrayVariableDeclaration {
     /// The optional assignment of the variable.
     #[get = "pub"]
     assignment: Option<VariableDeclarationAssignment>,
+    /// The annotations of the variable declaration.
+    #[get = "pub"]
+    annotations: VecDeque<Annotation>,
 }
 
 impl SourceElement for ArrayVariableDeclaration {
@@ -488,6 +562,9 @@ pub struct ScoreVariableDeclaration {
     /// The optional assignment of the variable.
     #[get = "pub"]
     target_assignment: Option<(AnyStringLiteral, VariableDeclarationAssignment)>,
+    /// The annotations of the variable declaration.
+    #[get = "pub"]
+    annotations: VecDeque<Annotation>,
 }
 
 impl SourceElement for ScoreVariableDeclaration {
@@ -553,6 +630,9 @@ pub struct TagVariableDeclaration {
     /// The optional assignment of the variable.
     #[get = "pub"]
     target_assignment: Option<(AnyStringLiteral, VariableDeclarationAssignment)>,
+    /// The annotations of the variable declaration.
+    #[get = "pub"]
+    annotations: VecDeque<Annotation>,
 }
 
 impl SourceElement for TagVariableDeclaration {
@@ -638,6 +718,15 @@ impl<'a> Parser<'a> {
         handler: &impl Handler<base::Error>,
     ) -> ParseResult<Statement> {
         match self.stop_at_significant() {
+            // annotations
+            Reading::Atomic(Token::Punctuation(punc)) if punc.punctuation == '#' => {
+                let annotation = self.parse_annotation(handler)?;
+                let statement = self.parse_statement(handler)?;
+
+                statement
+                    .with_annotation(annotation)
+                    .inspect_err(|err| handler.receive(err.clone()))
+            }
             // variable declaration
             Reading::Atomic(Token::CommandLiteral(command)) => {
                 self.forward();
@@ -849,6 +938,7 @@ impl<'a> Parser<'a> {
                             size,
                             close_bracket,
                             assignment,
+                            annotations: VecDeque::new(),
                         }))
                     }
                     IndexingType::AnyString(selector) => {
@@ -866,6 +956,7 @@ impl<'a> Parser<'a> {
                                     open_bracket,
                                     close_bracket,
                                     target_assignment: Some((selector, assignment)),
+                                    annotations: VecDeque::new(),
                                 }))
                             }
                             KeywordKind::Bool => {
@@ -875,6 +966,7 @@ impl<'a> Parser<'a> {
                                     open_bracket,
                                     close_bracket,
                                     target_assignment: Some((selector, assignment)),
+                                    annotations: VecDeque::new(),
                                 }))
                             }
                             _ => unreachable!(),
@@ -889,6 +981,7 @@ impl<'a> Parser<'a> {
                                 open_bracket,
                                 close_bracket,
                                 target_assignment: None,
+                                annotations: VecDeque::new(),
                             }))
                         }
                         KeywordKind::Bool => Ok(VariableDeclaration::Tag(TagVariableDeclaration {
@@ -897,6 +990,7 @@ impl<'a> Parser<'a> {
                             open_bracket,
                             close_bracket,
                             target_assignment: None,
+                            annotations: VecDeque::new(),
                         })),
                         _ => unreachable!(),
                     },
@@ -913,6 +1007,7 @@ impl<'a> Parser<'a> {
                     variable_type,
                     identifier,
                     assignment: Some(assignment),
+                    annotations: VecDeque::new(),
                 }))
             }
             // SingleVariableDeclaration without Assignment
@@ -920,6 +1015,7 @@ impl<'a> Parser<'a> {
                 variable_type,
                 identifier,
                 assignment: None,
+                annotations: VecDeque::new(),
             })),
         }
     }

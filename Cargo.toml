@@ -38,7 +38,7 @@ path-absolutize = "3.1.1"
 pathdiff = "0.2.3"
 serde = { version = "1.0.217", features = ["derive"], optional = true }
 # shulkerbox = { version = "0.1.0", default-features = false, optional = true }
-shulkerbox = { git = "https://github.com/moritz-hoelting/shulkerbox", rev = "76d58c0766518fe5ab2635de60ba40972565a3e0", default-features = false, optional = true }
+shulkerbox = { git = "https://github.com/moritz-hoelting/shulkerbox", rev = "811d71508208f8415d881f7c4d73429f1a73f36a", default-features = false, optional = true }
 strsim = "0.11.1"
 strum = { version = "0.27.0", features = ["derive"] }
 thiserror = "2.0.11"
@@ -46,3 +46,15 @@ tracing = "0.1.41"
 
 [dev-dependencies]
 serde_json = "1.0.138"
+
+[[example]]
+name = "compiler"
+required-features = ["fs_access", "shulkerbox"]
+
+[[test]]
+name = "parsing"
+required-features = ["shulkerbox"]
+
+[[test]]
+name = "transpiling"
+required-features = ["shulkerbox"]
