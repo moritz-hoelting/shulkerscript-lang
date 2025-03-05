@@ -727,7 +727,7 @@ impl Transpiler {
             }
 
             scope.set_variable(
-                &name,
+                single.identifier().span.str(),
                 VariableType::ScoreboardValue {
                     objective: name.clone(),
                     target,

@@ -2,6 +2,8 @@
 
 use std::{
     collections::HashMap,
+    fmt::Debug,
+    ops::Deref,
     sync::{Arc, OnceLock, RwLock},
 };
 
@@ -42,7 +44,7 @@ pub enum VariableType {
     },
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Scope<'a> {
     parent: Option<&'a Arc<Self>>,
     variables: RwLock<HashMap<String, Arc<VariableType>>>,
@@ -84,6 +86,24 @@ impl<'a> Scope<'a> {
 
     pub fn get_parent(&self) -> Option<Arc<Self>> {
         self.parent.cloned()
+    }
+}
+
+impl<'a> Debug for Scope<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct("Scope");
+        s.field("parent", &self.parent);
+
+        struct VariableWrapper<'a>(&'a RwLock<HashMap<String, Arc<VariableType>>>);
+        impl<'a> Debug for VariableWrapper<'a> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let s = self.0.read().unwrap();
+                s.deref().fmt(f)
+            }
+        }
+
+        s.field("variables", &VariableWrapper(&self.variables));
+        s.finish()
     }
 }
 

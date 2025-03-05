@@ -1,9 +1,12 @@
 //! The transpile module is responsible for transpiling the abstract syntax tree into a data pack.
 
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Debug,
+};
 
 use crate::{
-    base::source_file::Span,
+    base::source_file::{SourceElement, Span},
     syntax::syntax_tree::{expression::Expression, statement::Statement, AnnotationValue},
 };
 
@@ -28,7 +31,7 @@ mod variables;
 
 pub mod util;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(super) struct FunctionData {
     pub(super) namespace: String,
     pub(super) identifier_span: Span,
@@ -67,5 +70,57 @@ impl From<Option<AnnotationValue>> for TranspileAnnotationValue {
                 Self::Map(map)
             }
         }
+    }
+}
+
+impl Debug for FunctionData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct("FunctionData");
+
+        struct HiddenList;
+        impl Debug for HiddenList {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let mut list = f.debug_list();
+                list.finish_non_exhaustive()
+            }
+        }
+
+        struct AnnotationsWrapper<'a, I>(&'a I);
+        impl<'a, I> Debug for AnnotationsWrapper<'a, I>
+        where
+            &'a I: IntoIterator<Item = (&'a String, &'a TranspileAnnotationValue)>,
+        {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                struct AnnotationValueWrapper<'a>(&'a TranspileAnnotationValue);
+                impl<'a> Debug for AnnotationValueWrapper<'a> {
+                    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        match self.0 {
+                            TranspileAnnotationValue::None => None::<u8>.fmt(f),
+                            TranspileAnnotationValue::Expression(expr) => expr.span().str().fmt(f),
+                            TranspileAnnotationValue::Map(map) => AnnotationsWrapper(map).fmt(f),
+                        }
+                    }
+                }
+
+                let mut m = f.debug_map();
+
+                m.entries(
+                    self.0
+                        .into_iter()
+                        .map(|(k, v)| (k, AnnotationValueWrapper(v))),
+                );
+
+                m.finish()
+            }
+        }
+
+        s.field("namespace", &self.namespace);
+        s.field("identifier", &self.identifier_span.str());
+        s.field("public", &self.public);
+        s.field("parameters", &self.parameters);
+        s.field("statements", &HiddenList);
+        s.field("annotations", &AnnotationsWrapper(&self.annotations));
+
+        s.finish()
     }
 }
