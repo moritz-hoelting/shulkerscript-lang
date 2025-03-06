@@ -545,7 +545,9 @@ impl VariableDeclaration {
                         ),
                         KeywordKind::Bool => !matches!(
                             assignment.expression(),
-                            Expression::Primary(Primary::Boolean(_) | Primary::Lua(_))
+                            Expression::Primary(
+                                Primary::Boolean(_) | Primary::Lua(_) | Primary::FunctionCall(_)
+                            )
                         ),
                         _ => false,
                     };

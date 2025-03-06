@@ -15,7 +15,6 @@ use crate::{
         source_file::{SourceElement, Span},
         Handler,
     },
-    lexical::token::KeywordKind,
     semantic::error::{ConflictingFunctionNames, InvalidFunctionArguments, UnexpectedExpression},
     syntax::syntax_tree::{
         declaration::{Declaration, ImportItems},
@@ -23,7 +22,7 @@ use crate::{
         program::{Namespace, ProgramFile},
         statement::{
             execute_block::{Conditional, Else, ExecuteBlock, ExecuteBlockHead, ExecuteBlockTail},
-            SemicolonStatement, SingleVariableDeclaration, Statement, VariableDeclaration,
+            SemicolonStatement, Statement,
         },
         AnnotationAssignment,
     },
@@ -32,14 +31,14 @@ use crate::{
 
 use super::{
     error::{TranspileError, TranspileResult},
-    variables::{Scope, VariableType},
+    variables::{Scope, VariableData},
     FunctionData, TranspileAnnotationValue,
 };
 
 /// A transpiler for `Shulkerscript`.
 #[derive(Debug)]
 pub struct Transpiler {
-    datapack: shulkerbox::datapack::Datapack,
+    pub(super) datapack: shulkerbox::datapack::Datapack,
     /// Top-level [`Scope`] for each program identifier
     scopes: BTreeMap<String, Arc<Scope<'static>>>,
     /// Key: (program identifier, function name)
@@ -184,7 +183,7 @@ impl Transpiler {
                 };
                 scope.set_variable(
                     &name,
-                    VariableType::Function {
+                    VariableData::Function {
                         function_data: function_data.clone(),
                         path: OnceLock::new(),
                     },
@@ -240,7 +239,7 @@ impl Transpiler {
     /// Returns the location of the function or None if the function does not exist.
     #[allow(clippy::significant_drop_tightening)]
     #[tracing::instrument(level = "trace", skip(self, handler))]
-    fn get_or_transpile_function(
+    pub(super) fn get_or_transpile_function(
         &mut self,
         identifier_span: &Span,
         arguments: Option<&[&Expression]>,
@@ -258,7 +257,7 @@ impl Transpiler {
             .expect("called function should be in scope")
             .as_ref()
         {
-            VariableType::Function { path, .. } => Some(path.get().is_some()),
+            VariableData::Function { path, .. } => Some(path.get().is_some()),
             _ => None,
         }
         .expect("called variable should be of type function");
@@ -282,7 +281,7 @@ impl Transpiler {
                 error
             })?;
 
-        let VariableType::Function {
+        let VariableData::Function {
             function_data,
             path: function_path,
         } = function_data.as_ref()
@@ -296,7 +295,7 @@ impl Transpiler {
             let function_scope = Scope::with_parent(scope);
 
             for (i, param) in function_data.parameters.iter().enumerate() {
-                function_scope.set_variable(param, VariableType::FunctionArgument { index: i });
+                function_scope.set_variable(param, VariableData::FunctionArgument { index: i });
             }
 
             let statements = function_data.statements.clone();
@@ -441,11 +440,11 @@ impl Transpiler {
         let mut errors = Vec::new();
         let commands = statements
             .iter()
-            .filter_map(|statement| {
+            .flat_map(|statement| {
                 self.transpile_statement(statement, program_identifier, scope, handler)
                     .unwrap_or_else(|err| {
                         errors.push(err);
-                        None
+                        Vec::new()
                     })
             })
             .collect();
@@ -463,15 +462,15 @@ impl Transpiler {
         program_identifier: &str,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<Option<Command>> {
+    ) -> TranspileResult<Vec<Command>> {
         match statement {
             Statement::LiteralCommand(literal_command) => {
-                Ok(Some(literal_command.clean_command().into()))
+                Ok(vec![literal_command.clean_command().into()])
             }
             Statement::Run(run) => match run.expression() {
-                Expression::Primary(Primary::FunctionCall(func)) => {
-                    self.transpile_function_call(func, scope, handler).map(Some)
-                }
+                Expression::Primary(Primary::FunctionCall(func)) => self
+                    .transpile_function_call(func, scope, handler)
+                    .map(|cmd| vec![cmd]),
                 Expression::Primary(Primary::Integer(num)) => {
                     let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
                         Expression::Primary(Primary::Integer(num.clone())),
@@ -487,25 +486,27 @@ impl Transpiler {
                     Err(error)
                 }
                 Expression::Primary(Primary::StringLiteral(string)) => {
-                    Ok(Some(Command::Raw(string.str_content().to_string())))
+                    Ok(vec![Command::Raw(string.str_content().to_string())])
                 }
                 Expression::Primary(Primary::MacroStringLiteral(string)) => {
-                    Ok(Some(Command::UsesMacro(string.into())))
+                    Ok(vec![Command::UsesMacro(string.into())])
                 }
-                Expression::Primary(Primary::Lua(code)) => {
-                    Ok(code.eval_string(handler)?.map(Command::Raw))
-                }
+                Expression::Primary(Primary::Lua(code)) => Ok(code
+                    .eval_string(handler)?
+                    .map_or_else(Vec::new, |cmd| vec![Command::Raw(cmd)])),
             },
             Statement::Block(_) => {
                 unreachable!("Only literal commands are allowed in functions at this time.")
             }
             Statement::ExecuteBlock(execute) => {
                 let child_scope = Scope::with_parent(scope);
-                self.transpile_execute_block(execute, program_identifier, &child_scope, handler)
+                Ok(self
+                    .transpile_execute_block(execute, program_identifier, &child_scope, handler)?
+                    .map_or_else(Vec::new, |cmd| vec![cmd]))
             }
             Statement::DocComment(doccomment) => {
                 let content = doccomment.content();
-                Ok(Some(Command::Comment(content.to_string())))
+                Ok(vec![Command::Comment(content.to_string())])
             }
             Statement::Grouping(group) => {
                 let child_scope = Scope::with_parent(scope);
@@ -513,7 +514,7 @@ impl Transpiler {
                 let mut errors = Vec::new();
                 let commands = statements
                     .iter()
-                    .filter_map(|statement| {
+                    .flat_map(|statement| {
                         self.transpile_statement(
                             statement,
                             program_identifier,
@@ -522,7 +523,7 @@ impl Transpiler {
                         )
                         .unwrap_or_else(|err| {
                             errors.push(err);
-                            None
+                            Vec::new()
                         })
                     })
                     .collect::<Vec<_>>();
@@ -530,17 +531,17 @@ impl Transpiler {
                     return Err(errors.remove(0));
                 }
                 if commands.is_empty() {
-                    Ok(None)
+                    Ok(Vec::new())
                 } else {
-                    Ok(Some(Command::Group(commands)))
+                    Ok(vec![Command::Group(commands)])
                 }
             }
             Statement::Semicolon(semi) => match semi.statement() {
                 #[expect(clippy::match_wildcard_for_single_variants)]
                 SemicolonStatement::Expression(expr) => match expr {
-                    Expression::Primary(Primary::FunctionCall(func)) => {
-                        self.transpile_function_call(func, scope, handler).map(Some)
-                    }
+                    Expression::Primary(Primary::FunctionCall(func)) => self
+                        .transpile_function_call(func, scope, handler)
+                        .map(|cmd| vec![cmd]),
                     unexpected => {
                         let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
                             unexpected.clone(),
@@ -556,7 +557,7 @@ impl Transpiler {
         }
     }
 
-    fn transpile_function_call(
+    pub(super) fn transpile_function_call(
         &mut self,
         func: &FunctionCall,
         scope: &Arc<Scope>,
@@ -591,158 +592,6 @@ impl Transpiler {
         Ok(Command::Raw(function_call))
     }
 
-    fn transpile_variable_declaration(
-        &mut self,
-        declaration: &VariableDeclaration,
-        program_identifier: &str,
-        scope: &Arc<Scope>,
-        handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<Option<Command>> {
-        match declaration {
-            VariableDeclaration::Single(single) => self.transpile_single_variable_declaration(
-                single,
-                program_identifier,
-                scope,
-                handler,
-            ),
-            _ => todo!("declarations not supported yet: {declaration:?}"),
-        }
-    }
-
-    #[expect(clippy::too_many_lines)]
-    fn transpile_single_variable_declaration(
-        &mut self,
-        single: &SingleVariableDeclaration,
-        program_identifier: &str,
-        scope: &Arc<Scope>,
-        handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<Option<Command>> {
-        let mut deobfuscate_annotations = single
-            .annotations()
-            .iter()
-            .filter(|a| a.has_identifier("deobfuscate"));
-
-        let variable_type = single.variable_type().keyword;
-
-        let deobfuscate_annotation = deobfuscate_annotations.next();
-
-        if let Some(duplicate) = deobfuscate_annotations.next() {
-            let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                annotation: duplicate.span(),
-                message: "Multiple deobfuscate annotations are not allowed.".to_string(),
-            });
-            handler.receive(error.clone());
-            return Err(error);
-        }
-        let (name, target) = if let Some(deobfuscate_annotation) = deobfuscate_annotation {
-            let deobfuscate_annotation_value =
-                TranspileAnnotationValue::from(deobfuscate_annotation.assignment().value.clone());
-
-            if let TranspileAnnotationValue::Map(map) = deobfuscate_annotation_value {
-                if map.len() > 2 {
-                    let error =
-                        TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                            annotation: deobfuscate_annotation.span(),
-                            message: "Deobfuscate annotation must have at most 2 key-value pairs."
-                                .to_string(),
-                        });
-                    handler.receive(error.clone());
-                    return Err(error);
-                }
-                if let (Some(name), Some(target)) = (map.get("name"), map.get("target")) {
-                    if let (
-                        TranspileAnnotationValue::Expression(objective),
-                        TranspileAnnotationValue::Expression(target),
-                    ) = (name, target)
-                    {
-                        if let (Some(name_eval), Some(target_eval)) =
-                            (objective.comptime_eval(), target.comptime_eval())
-                        {
-                            // TODO: change invalid criteria if boolean
-                            if !crate::util::is_valid_scoreboard_name(&name_eval) {
-                                let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                                            annotation: deobfuscate_annotation.span(),
-                                            message: "Deobfuscate annotation 'name' must be a valid scoreboard name.".to_string()
-                                        });
-                                handler.receive(error.clone());
-                                return Err(error);
-                            }
-                            if !crate::util::is_valid_player_name(&target_eval) {
-                                let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                                            annotation: deobfuscate_annotation.span(),
-                                            message: "Deobfuscate annotation 'target' must be a valid player name.".to_string()
-                                        });
-                                handler.receive(error.clone());
-                                return Err(error);
-                            }
-                            (name_eval, target_eval)
-                        } else {
-                            let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                                        annotation: deobfuscate_annotation.span(),
-                                        message: "Deobfuscate annotation 'name' or 'target' could not have been evaluated at compile time.".to_string()
-                                    });
-                            handler.receive(error.clone());
-                            return Err(error);
-                        }
-                    } else {
-                        let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                                    annotation: deobfuscate_annotation.span(),
-                                    message: "Deobfuscate annotation 'name' and 'target' must be compile time expressions.".to_string()
-                                });
-                        handler.receive(error.clone());
-                        return Err(error);
-                    }
-                } else {
-                    let error =
-                        TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                            annotation: deobfuscate_annotation.span(),
-                            message:
-                                "Deobfuscate annotation must have both 'name' and 'target' keys."
-                                    .to_string(),
-                        });
-                    handler.receive(error.clone());
-                    return Err(error);
-                }
-            } else {
-                let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                    annotation: deobfuscate_annotation.span(),
-                    message: "Deobfuscate annotation must be a map.".to_string(),
-                });
-                handler.receive(error.clone());
-                return Err(error);
-            }
-        } else {
-            let name =
-                "shu_values_".to_string() + &md5::hash(program_identifier).to_hex_lowercase();
-            let target = md5::hash((Arc::as_ptr(scope) as usize).to_le_bytes())
-                .to_hex_lowercase()
-                .split_off(16);
-
-            (name, target)
-        };
-
-        if variable_type == KeywordKind::Int {
-            if !self.datapack.scoreboards().contains_key(&name) {
-                self.datapack.register_scoreboard(&name, None, None);
-            }
-
-            scope.set_variable(
-                single.identifier().span.str(),
-                VariableType::ScoreboardValue {
-                    objective: name.clone(),
-                    target,
-                },
-            );
-        } else {
-            todo!("implement other variable types")
-        }
-
-        Ok(single
-            .assignment()
-            .is_some()
-            .then(|| todo!("transpile assignment")))
-    }
-
     fn transpile_execute_block(
         &mut self,
         execute: &ExecuteBlock,
@@ -769,11 +618,11 @@ impl Transpiler {
                         let commands = block
                             .statements()
                             .iter()
-                            .filter_map(|s| {
+                            .flat_map(|s| {
                                 self.transpile_statement(s, program_identifier, scope, handler)
                                     .unwrap_or_else(|err| {
                                         errors.push(err);
-                                        None
+                                        Vec::new()
                                     })
                             })
                             .collect::<Vec<_>>();
@@ -806,11 +655,11 @@ impl Transpiler {
                     let mut errors = Vec::new();
                     let commands = statements
                         .iter()
-                        .filter_map(|statement| {
+                        .flat_map(|statement| {
                             self.transpile_statement(statement, program_identifier, scope, handler)
                                 .unwrap_or_else(|err| {
                                     errors.push(err);
-                                    None
+                                    Vec::new()
                                 })
                         })
                         .collect();
@@ -819,8 +668,19 @@ impl Transpiler {
                     }
                     Some(Execute::Runs(commands))
                 } else {
-                    self.transpile_statement(&statements[0], program_identifier, scope, handler)?
-                        .map(|cmd| Execute::Run(Box::new(cmd)))
+                    let cmds = self.transpile_statement(
+                        &statements[0],
+                        program_identifier,
+                        scope,
+                        handler,
+                    )?;
+                    if cmds.len() > 1 {
+                        Some(Execute::Runs(cmds))
+                    } else {
+                        cmds.into_iter()
+                            .next()
+                            .map(|cmd| Execute::Run(Box::new(cmd)))
+                    }
                 };
 
                 then.map_or_else(
@@ -857,27 +717,23 @@ impl Transpiler {
             .and_then(|el| {
                 let (_, block) = el.clone().dissolve();
                 let statements = block.statements();
-                if statements.is_empty() {
-                    None
-                } else if statements.len() == 1 {
-                    self.transpile_statement(&statements[0], program_identifier, scope, handler)
-                        .unwrap_or_else(|err| {
-                            errors.push(err);
-                            None
-                        })
-                        .map(|cmd| Execute::Run(Box::new(cmd)))
-                } else {
-                    let commands = statements
-                        .iter()
-                        .filter_map(|statement| {
-                            self.transpile_statement(statement, program_identifier, scope, handler)
-                                .unwrap_or_else(|err| {
-                                    errors.push(err);
-                                    None
-                                })
-                        })
-                        .collect();
-                    Some(Execute::Runs(commands))
+                let cmds = statements
+                    .iter()
+                    .flat_map(|statement| {
+                        self.transpile_statement(statement, program_identifier, scope, handler)
+                            .unwrap_or_else(|err| {
+                                errors.push(err);
+                                Vec::new()
+                            })
+                    })
+                    .collect::<Vec<_>>();
+
+                match cmds.len() {
+                    0 => None,
+                    1 => Some(Execute::Run(Box::new(
+                        cmds.into_iter().next().expect("length is 1"),
+                    ))),
+                    _ => Some(Execute::Runs(cmds)),
                 }
             })
             .map(Box::new);

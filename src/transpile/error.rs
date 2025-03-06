@@ -12,7 +12,7 @@ use crate::{
     semantic::error::{ConflictingFunctionNames, InvalidFunctionArguments, UnexpectedExpression},
 };
 
-use super::FunctionData;
+use super::{expression::ValueType, FunctionData};
 
 /// Errors that can occur during transpilation.
 #[allow(clippy::module_name_repetitions, missing_docs)]
@@ -32,6 +32,10 @@ pub enum TranspileError {
     InvalidFunctionArguments(#[from] InvalidFunctionArguments),
     #[error(transparent)]
     IllegalAnnotationContent(#[from] IllegalAnnotationContent),
+    #[error(transparent)]
+    MismatchedTypes(#[from] MismatchedTypes),
+    #[error(transparent)]
+    FunctionArgumentsNotAllowed(#[from] FunctionArgumentsNotAllowed),
 }
 
 /// The result of a transpilation operation.
@@ -56,12 +60,10 @@ impl MissingFunctionDeclaration {
 
         let own_name = identifier_span.str();
         let alternatives = scope
-            .get_variables()
-            .read()
-            .unwrap()
+            .get_all_variables()
             .iter()
             .filter_map(|(name, value)| {
-                let super::variables::VariableType::Function {
+                let super::variables::VariableData::Function {
                     function_data: data,
                     ..
                 } = value.as_ref()
@@ -182,3 +184,46 @@ impl Display for IllegalAnnotationContent {
 }
 
 impl std::error::Error for IllegalAnnotationContent {}
+
+/// An error that occurs when an expression can not evaluate to the wanted type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MismatchedTypes {
+    pub expression: Span,
+    pub expected_type: ValueType,
+}
+
+impl Display for MismatchedTypes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = format!("expression can not evaluate to type {}", self.expected_type);
+        write!(f, "{}", Message::new(Severity::Error, message))?;
+
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(&self.expression, Option::<u8>::None)
+        )
+    }
+}
+
+impl std::error::Error for MismatchedTypes {}
+
+/// An error that occurs when an expression can not evaluate to the wanted type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionArgumentsNotAllowed {
+    pub arguments: Span,
+    pub message: String,
+}
+
+impl Display for FunctionArgumentsNotAllowed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", Message::new(Severity::Error, &self.message))?;
+
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(&self.arguments, Option::<u8>::None)
+        )
+    }
+}
+
+impl std::error::Error for FunctionArgumentsNotAllowed {}

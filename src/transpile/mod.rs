@@ -15,6 +15,8 @@ use crate::{
 pub mod conversions;
 mod error;
 
+pub mod expression;
+
 #[doc(inline)]
 #[allow(clippy::module_name_repetitions)]
 pub use error::{TranspileError, TranspileResult};
@@ -26,13 +28,17 @@ use strum::EnumIs;
 #[cfg(feature = "shulkerbox")]
 #[cfg_attr(feature = "shulkerbox", doc(inline))]
 pub use transpiler::Transpiler;
+
 #[cfg(feature = "shulkerbox")]
 mod variables;
+#[cfg(feature = "shulkerbox")]
+pub use variables::{Scope, VariableData};
 
 pub mod util;
 
+/// Data of a function.
 #[derive(Clone, PartialEq, Eq)]
-pub(super) struct FunctionData {
+pub struct FunctionData {
     pub(super) namespace: String,
     pub(super) identifier_span: Span,
     pub(super) parameters: Vec<String>,
@@ -75,13 +81,12 @@ impl From<Option<AnnotationValue>> for TranspileAnnotationValue {
 
 impl Debug for FunctionData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut s = f.debug_struct("FunctionData");
-
         struct HiddenList;
         impl Debug for HiddenList {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let mut list = f.debug_list();
-                list.finish_non_exhaustive()
+                list.entry(&..);
+                list.finish()
             }
         }
 
@@ -113,6 +118,8 @@ impl Debug for FunctionData {
                 m.finish()
             }
         }
+
+        let mut s = f.debug_struct("FunctionData");
 
         s.field("namespace", &self.namespace);
         s.field("identifier", &self.identifier_span.str());
