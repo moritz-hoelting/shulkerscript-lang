@@ -88,6 +88,8 @@ pub struct Scope<'a> {
     parent: Option<&'a Arc<Self>>,
     /// Variables stored in the scope.
     variables: RwLock<HashMap<String, Arc<VariableData>>>,
+    /// How many times the variable has been shadowed in the current scope.
+    shadowed: RwLock<HashMap<String, usize>>,
 }
 
 impl<'a> Scope<'a> {
@@ -118,12 +120,35 @@ impl<'a> Scope<'a> {
         }
     }
 
+    /// Gets the number of times a variable has been shadowed.
+    pub fn get_variable_shadow_count(&self, name: &str) -> usize {
+        let count = self
+            .shadowed
+            .read()
+            .unwrap()
+            .get(name)
+            .copied()
+            .unwrap_or(0);
+        self.parent.as_ref().map_or(count, |parent| {
+            count
+                + parent.get_variable_shadow_count(name)
+                + usize::from(parent.get_variable(name).is_some())
+        })
+    }
+
     /// Sets a variable in the scope.
     pub fn set_variable(&self, name: &str, var: VariableData) {
-        self.variables
+        let prev = self
+            .variables
             .write()
             .unwrap()
             .insert(name.to_string(), Arc::new(var));
+        *self
+            .shadowed
+            .write()
+            .unwrap()
+            .entry(name.to_string())
+            .or_default() += 1;
     }
 
     /// Gets the variables stored in the current scope.
@@ -162,6 +187,7 @@ impl<'a> Debug for Scope<'a> {
         s.field("parent", &self.parent);
 
         s.field("variables", &VariableWrapper(&self.variables));
+        s.field("shadowed", &self.shadowed);
         s.finish()
     }
 }
@@ -313,6 +339,7 @@ impl Transpiler {
     }
 }
 
+#[expect(clippy::too_many_lines)]
 fn get_single_data_location_identifiers(
     single: &SingleVariableDeclaration,
     program_identifier: &str,
@@ -413,7 +440,14 @@ fn get_single_data_location_identifiers(
     } else {
         let hashed = md5::hash(program_identifier).to_hex_lowercase();
         let name = "shu_values_".to_string() + &hashed;
-        let mut target = md5::hash((Arc::as_ptr(scope) as usize).to_le_bytes()).to_hex_lowercase();
+        let identifier_name = single.identifier().span.str();
+        // TODO: generate same name each time (not dependent on pointer)
+        let mut target = md5::hash(format!(
+            "{scope}\0{identifier_name}\0{shadowed}",
+            scope = Arc::as_ptr(scope) as usize,
+            shadowed = scope.get_variable_shadow_count(identifier_name)
+        ))
+        .to_hex_lowercase();
 
         if matches!(variable_type, KeywordKind::Int) {
             target.split_off(16);
@@ -464,5 +498,24 @@ mod tests {
         } else {
             panic!("Variable missing")
         }
+    }
+
+    #[test]
+    fn test_shadowed_count() {
+        let scope = Scope::new();
+        scope.set_variable(
+            "test",
+            VariableData::Scoreboard {
+                objective: "test1".to_string(),
+            },
+        );
+        let child = Scope::with_parent(&scope);
+        child.set_variable(
+            "test",
+            VariableData::Scoreboard {
+                objective: "test2".to_string(),
+            },
+        );
+        assert_eq!(child.get_variable_shadow_count("test"), 1);
     }
 }
