@@ -254,22 +254,6 @@ impl Transpiler {
                 );
             }
             KeywordKind::Bool => {
-                let setup_cmd = Command::Execute(Execute::If(
-                    Condition::Not(Box::new(Condition::Atom(
-                        format!(
-                            "data storage {namespace}:{name} {target}",
-                            namespace = self.main_namespace_name
-                        )
-                        .into(),
-                    ))),
-                    Box::new(Execute::Run(Box::new(Command::Raw(format!(
-                        r#"data merge storage {namespace}:{name} {{"{target}": 0b}}"#,
-                        namespace = self.main_namespace_name
-                    ))))),
-                    None,
-                ));
-                self.setup_cmds.push(setup_cmd);
-
                 scope.set_variable(
                     single.identifier().span.str(),
                     VariableData::BooleanStorage {
@@ -294,7 +278,7 @@ impl Transpiler {
         )
     }
 
-    fn transpile_assignment(
+    pub(super) fn transpile_assignment(
         &mut self,
         identifier: &Identifier,
         expression: &crate::syntax::syntax_tree::expression::Expression,

@@ -307,6 +307,10 @@ impl Semicolon {
             SemicolonStatement::VariableDeclaration(decl) => {
                 decl.analyze_semantics(function_names, macro_names, handler)
             }
+            SemicolonStatement::Assignment(_assignment) => {
+                // TODO: correctly analyze the semantics of the assignment
+                Ok(())
+            }
         }
     }
 }

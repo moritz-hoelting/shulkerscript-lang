@@ -566,6 +566,12 @@ impl Transpiler {
                 SemicolonStatement::VariableDeclaration(decl) => {
                     self.transpile_variable_declaration(decl, program_identifier, scope, handler)
                 }
+                SemicolonStatement::Assignment(assignment) => self.transpile_assignment(
+                    assignment.identifier(),
+                    assignment.expression(),
+                    scope,
+                    handler,
+                ),
             },
         }
     }

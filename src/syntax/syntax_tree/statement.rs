@@ -93,6 +93,14 @@ impl Statement {
                         })
                     })
                 }
+                SemicolonStatement::Assignment(_) => {
+                    let err = Error::InvalidAnnotation(InvalidAnnotation {
+                        annotation: annotation.assignment.identifier.span,
+                        target: "assignments".to_string(),
+                    });
+
+                    Err(err)
+                }
                 SemicolonStatement::Expression(_) => {
                     let err = Error::InvalidAnnotation(InvalidAnnotation {
                         annotation: annotation.assignment.identifier.span,
@@ -272,7 +280,7 @@ impl Semicolon {
 /// Syntax Synopsis:
 /// ``` ebnf
 /// SemicolonStatement:
-///    (Expression | VariableDeclaration)
+///    (Expression | VariableDeclaration | Assignment)
 ///    ';'
 ///   ;
 /// ```
@@ -283,6 +291,8 @@ pub enum SemicolonStatement {
     Expression(Expression),
     /// A variable declaration.
     VariableDeclaration(VariableDeclaration),
+    /// An assignment.
+    Assignment(Assignment),
 }
 
 impl SourceElement for SemicolonStatement {
@@ -290,6 +300,7 @@ impl SourceElement for SemicolonStatement {
         match self {
             Self::Expression(expression) => expression.span(),
             Self::VariableDeclaration(declaration) => declaration.span(),
+            Self::Assignment(assignment) => assignment.span(),
         }
     }
 }
@@ -669,6 +680,44 @@ impl TagVariableDeclaration {
     }
 }
 
+/// Represents an assignment in the syntax tree.
+///
+/// Syntax Synopsis:
+/// ```ebnf
+/// Assignment:
+///    Identifier '=' Expression
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct Assignment {
+    /// The identifier of the assignment.
+    #[get = "pub"]
+    identifier: Identifier,
+    /// The equals sign of the assignment.
+    #[get = "pub"]
+    equals: Punctuation,
+    /// The expression of the assignment.
+    #[get = "pub"]
+    expression: Expression,
+}
+
+impl SourceElement for Assignment {
+    fn span(&self) -> Span {
+        self.identifier
+            .span()
+            .join(&self.expression.span())
+            .expect("The span of the assignment is invalid.")
+    }
+}
+
+impl Assignment {
+    /// Dissolves the [`Assignment`] into its components.
+    #[must_use]
+    pub fn dissolve(self) -> (Identifier, Punctuation, Expression) {
+        (self.identifier, self.equals, self.expression)
+    }
+}
+
 impl<'a> Parser<'a> {
     /// Parses a [`Block`].
     ///
@@ -808,9 +857,27 @@ impl<'a> Parser<'a> {
                 self.parse_variable_declaration(handler)
                     .map(SemicolonStatement::VariableDeclaration)
             }
-            _ => self
-                .parse_expression(handler)
-                .map(SemicolonStatement::Expression),
+            _ => {
+                // try to parse assignment
+                // TODO: improve
+                #[expect(clippy::option_if_let_else)]
+                if let Ok(assignment) = self.try_parse(|p| {
+                    let identifier = p.parse_identifier(&VoidHandler)?;
+                    let equals = p.parse_punctuation('=', true, &VoidHandler)?;
+                    let expression = p.parse_expression(&VoidHandler)?;
+
+                    Ok(SemicolonStatement::Assignment(Assignment {
+                        identifier,
+                        equals,
+                        expression,
+                    }))
+                }) {
+                    Ok(assignment)
+                } else {
+                    self.parse_expression(handler)
+                        .map(SemicolonStatement::Expression)
+                }
+            }
         }?;
 
         let semicolon = self.parse_punctuation(';', true, handler)?;
