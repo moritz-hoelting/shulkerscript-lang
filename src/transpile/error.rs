@@ -36,6 +36,8 @@ pub enum TranspileError {
     MismatchedTypes(#[from] MismatchedTypes),
     #[error(transparent)]
     FunctionArgumentsNotAllowed(#[from] FunctionArgumentsNotAllowed),
+    #[error(transparent)]
+    AssignmentError(#[from] AssignmentError),
 }
 
 /// The result of a transpilation operation.
@@ -227,3 +229,25 @@ impl Display for FunctionArgumentsNotAllowed {
 }
 
 impl std::error::Error for FunctionArgumentsNotAllowed {}
+
+/// An error that occurs when an expression can not evaluate to the wanted type.
+#[expect(clippy::module_name_repetitions)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssignmentError {
+    pub identifier: Span,
+    pub message: String,
+}
+
+impl Display for AssignmentError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", Message::new(Severity::Error, &self.message))?;
+
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(&self.identifier, Option::<u8>::None)
+        )
+    }
+}
+
+impl std::error::Error for AssignmentError {}

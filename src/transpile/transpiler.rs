@@ -38,7 +38,9 @@ use super::{
 /// A transpiler for `Shulkerscript`.
 #[derive(Debug)]
 pub struct Transpiler {
+    pub(super) main_namespace_name: String,
     pub(super) datapack: shulkerbox::datapack::Datapack,
+    pub(super) setup_cmds: Vec<Command>,
     /// Top-level [`Scope`] for each program identifier
     scopes: BTreeMap<String, Arc<Scope<'static>>>,
     /// Key: (program identifier, function name)
@@ -51,8 +53,11 @@ impl Transpiler {
     /// Creates a new transpiler.
     #[must_use]
     pub fn new(main_namespace_name: impl Into<String>, pack_format: u8) -> Self {
+        let main_namespace_name = main_namespace_name.into();
         Self {
+            main_namespace_name: main_namespace_name.clone(),
             datapack: shulkerbox::datapack::Datapack::new(main_namespace_name, pack_format),
+            setup_cmds: Vec::new(),
             scopes: BTreeMap::new(),
             functions: BTreeMap::new(),
             aliases: HashMap::new(),
@@ -117,6 +122,14 @@ impl Transpiler {
                 .or_default()
                 .to_owned();
             self.get_or_transpile_function(&identifier_span, None, &scope, handler)?;
+        }
+
+        if !self.setup_cmds.is_empty() {
+            let main_namespace = self.datapack.namespace_mut(&self.main_namespace_name);
+            let setup_fn = main_namespace.function_mut("shu/setup");
+            setup_fn.get_commands_mut().extend(self.setup_cmds.clone());
+            self.datapack
+                .add_load(format!("{}:shu/setup", self.main_namespace_name));
         }
 
         Ok(())
@@ -218,8 +231,8 @@ impl Transpiler {
             Declaration::Tag(tag) => {
                 let namespace = self
                     .datapack
-                    .namespace_mut(&namespace.namespace_name().str_content());
-                let sb_tag = namespace.tag_mut(&tag.name().str_content(), tag.tag_type());
+                    .namespace_mut(namespace.namespace_name().str_content());
+                let sb_tag = namespace.tag_mut(tag.name().str_content(), tag.tag_type());
 
                 if let Some(list) = &tag.entries().list {
                     for value in list.elements() {
