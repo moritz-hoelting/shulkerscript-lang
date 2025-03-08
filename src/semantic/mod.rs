@@ -6,12 +6,12 @@ use std::collections::HashSet;
 
 use error::{
     IncompatibleFunctionAnnotation, InvalidNamespaceName, MissingFunctionDeclaration,
-    UnexpectedExpression, UnresolvedMacroUsage,
+    UnresolvedMacroUsage,
 };
 
 use crate::{
     base::{self, source_file::SourceElement as _, Handler},
-    lexical::token::{KeywordKind, MacroStringLiteral, MacroStringLiteralPart},
+    lexical::token::{MacroStringLiteral, MacroStringLiteralPart},
     syntax::syntax_tree::{
         condition::{
             BinaryCondition, Condition, ParenthesizedCondition, PrimaryCondition, UnaryCondition,
@@ -292,18 +292,9 @@ impl Semicolon {
         handler: &impl Handler<base::Error>,
     ) -> Result<(), error::Error> {
         match self.statement() {
-            SemicolonStatement::Expression(expr) => match expr {
-                Expression::Primary(Primary::FunctionCall(func)) => {
-                    func.analyze_semantics(function_names, macro_names, handler)
-                }
-                Expression::Primary(unexpected) => {
-                    let error = error::Error::UnexpectedExpression(UnexpectedExpression(
-                        Expression::Primary(unexpected.clone()),
-                    ));
-                    handler.receive(error.clone());
-                    Err(error)
-                }
-            },
+            SemicolonStatement::Expression(expr) => {
+                expr.analyze_semantics(function_names, macro_names, handler)
+            }
             SemicolonStatement::VariableDeclaration(decl) => {
                 decl.analyze_semantics(function_names, macro_names, handler)
             }
@@ -449,6 +440,10 @@ impl Expression {
     ) -> Result<(), error::Error> {
         match self {
             Self::Primary(prim) => prim.analyze_semantics(function_names, macro_names, handler),
+            Self::Binary(_bin) => {
+                // TODO: correctly analyze the semantics of the binary expression
+                Ok(())
+            }
         }
     }
 }
@@ -527,90 +522,96 @@ impl VariableDeclaration {
     /// Analyzes the semantics of a variable declaration.
     pub fn analyze_semantics(
         &self,
-        function_names: &HashSet<String>,
-        macro_names: &HashSet<String>,
-        handler: &impl Handler<base::Error>,
+        _function_names: &HashSet<String>,
+        _macro_names: &HashSet<String>,
+        _handler: &impl Handler<base::Error>,
     ) -> Result<(), error::Error> {
-        match self {
-            Self::Array(array) => array.assignment().as_ref().map_or(Ok(()), |assignment| {
-                assignment
-                    .expression()
-                    .analyze_semantics(function_names, macro_names, handler)
-            }),
-            Self::Single(single) => {
-                if let Some(assignment) = single.assignment() {
-                    let err = match single.variable_type().keyword {
-                        KeywordKind::Int => !matches!(
-                            assignment.expression(),
-                            // TODO: also allow macro identifier but not macro string literal
-                            Expression::Primary(
-                                Primary::Integer(_) | Primary::Lua(_) | Primary::FunctionCall(_)
-                            )
-                        ),
-                        KeywordKind::Bool => !matches!(
-                            assignment.expression(),
-                            Expression::Primary(
-                                Primary::Boolean(_) | Primary::Lua(_) | Primary::FunctionCall(_)
-                            )
-                        ),
-                        _ => false,
-                    };
-                    if err {
-                        let err = error::Error::UnexpectedExpression(UnexpectedExpression(
-                            assignment.expression().clone(),
-                        ));
-                        handler.receive(err.clone());
-                        return Err(err);
-                    }
-                    assignment
-                        .expression()
-                        .analyze_semantics(function_names, macro_names, handler)
-                } else {
-                    Ok(())
-                }
-            }
-            Self::Score(score) => {
-                if let Some((_, assignment)) = score.target_assignment() {
-                    // TODO: also allow macro identifier but not macro string literal
-                    if !matches!(
-                        assignment.expression(),
-                        Expression::Primary(
-                            Primary::Integer(_) | Primary::Lua(_) | Primary::FunctionCall(_)
-                        )
-                    ) {
-                        let err = error::Error::UnexpectedExpression(UnexpectedExpression(
-                            assignment.expression().clone(),
-                        ));
-                        handler.receive(err.clone());
-                        return Err(err);
-                    }
-                    assignment
-                        .expression()
-                        .analyze_semantics(function_names, macro_names, handler)
-                } else {
-                    Ok(())
-                }
-            }
-            Self::Tag(tag) => {
-                if let Some((_, assignment)) = tag.target_assignment() {
-                    if !matches!(
-                        assignment.expression(),
-                        Expression::Primary(Primary::Boolean(_) | Primary::Lua(_))
-                    ) {
-                        let err = error::Error::UnexpectedExpression(UnexpectedExpression(
-                            assignment.expression().clone(),
-                        ));
-                        handler.receive(err.clone());
-                        return Err(err);
-                    }
-                    assignment
-                        .expression()
-                        .analyze_semantics(function_names, macro_names, handler)
-                } else {
-                    Ok(())
-                }
-            }
-        }
+        // match self {
+        //     Self::Array(array) => array.assignment().as_ref().map_or(Ok(()), |assignment| {
+        //         assignment
+        //             .expression()
+        //             .analyze_semantics(function_names, macro_names, handler)
+        //     }),
+        //     Self::Single(single) => {
+        //         if let Some(assignment) = single.assignment() {
+        //             let err = match single.variable_type().keyword {
+        //                 KeywordKind::Int => {
+        //                     !matches!(
+        //                         assignment.expression(),
+        //                         // TODO: also allow macro identifier but not macro string literal
+        //                         Expression::Primary(
+        //                             Primary::Integer(_)
+        //                                 | Primary::Lua(_)
+        //                                 | Primary::FunctionCall(_)
+        //                         )
+        //                     ) && !matches!(assignment.expression(), Expression::Binary(..))
+        //                 }
+        //                 KeywordKind::Bool => !matches!(
+        //                     assignment.expression(),
+        //                     Expression::Primary(
+        //                         Primary::Boolean(_) | Primary::Lua(_) | Primary::FunctionCall(_)
+        //                     )
+        //                 ),
+        //                 _ => false,
+        //             };
+        //             if err {
+        //                 let err = error::Error::UnexpectedExpression(UnexpectedExpression(
+        //                     assignment.expression().clone(),
+        //                 ));
+        //                 handler.receive(err.clone());
+        //                 return Err(err);
+        //             }
+        //             assignment
+        //                 .expression()
+        //                 .analyze_semantics(function_names, macro_names, handler)
+        //         } else {
+        //             Ok(())
+        //         }
+        //     }
+        //     Self::Score(score) => {
+        //         if let Some((_, assignment)) = score.target_assignment() {
+        //             // TODO: also allow macro identifier but not macro string literal
+        //             if !matches!(
+        //                 assignment.expression(),
+        //                 Expression::Primary(
+        //                     Primary::Integer(_) | Primary::Lua(_) | Primary::FunctionCall(_)
+        //                 )
+        //             ) {
+        //                 let err = error::Error::UnexpectedExpression(UnexpectedExpression(
+        //                     assignment.expression().clone(),
+        //                 ));
+        //                 handler.receive(err.clone());
+        //                 return Err(err);
+        //             }
+        //             assignment
+        //                 .expression()
+        //                 .analyze_semantics(function_names, macro_names, handler)
+        //         } else {
+        //             Ok(())
+        //         }
+        //     }
+        //     Self::Tag(tag) => {
+        //         if let Some((_, assignment)) = tag.target_assignment() {
+        //             if !matches!(
+        //                 assignment.expression(),
+        //                 Expression::Primary(Primary::Boolean(_) | Primary::Lua(_))
+        //             ) {
+        //                 let err = error::Error::UnexpectedExpression(UnexpectedExpression(
+        //                     assignment.expression().clone(),
+        //                 ));
+        //                 handler.receive(err.clone());
+        //                 return Err(err);
+        //             }
+        //             assignment
+        //                 .expression()
+        //                 .analyze_semantics(function_names, macro_names, handler)
+        //         } else {
+        //             Ok(())
+        //         }
+        //     }
+        // }
+        // TODO: correctly analyze the semantics of the variable declaration
+        Ok(())
     }
 }
 

@@ -22,7 +22,7 @@ use crate::{
 
 use super::{
     error::{AssignmentError, IllegalAnnotationContent},
-    expression::DataLocation,
+    expression::{ComptimeValue, DataLocation},
     FunctionData, TranspileAnnotationValue, TranspileError, TranspileResult, Transpiler,
 };
 
@@ -367,9 +367,10 @@ fn get_single_data_location_identifiers(
                     TranspileAnnotationValue::Expression(target),
                 ) = (name, target)
                 {
-                    if let (Some(name_eval), Some(target_eval)) =
-                        (objective.comptime_eval(), target.comptime_eval())
-                    {
+                    if let (Some(name_eval), Some(target_eval)) = (
+                        objective.comptime_eval().map(|val| val.to_string()),
+                        target.comptime_eval().map(|val| val.to_string()),
+                    ) {
                         // TODO: change invalid criteria if boolean
                         if !crate::util::is_valid_scoreboard_name(&name_eval) {
                             let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {

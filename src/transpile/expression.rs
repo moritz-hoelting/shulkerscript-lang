@@ -2,11 +2,15 @@
 
 use std::fmt::Display;
 
-use crate::syntax::syntax_tree::expression::{Expression, Primary};
+use crate::{
+    base::VoidHandler,
+    syntax::syntax_tree::expression::{Binary, BinaryOperator, Expression, Primary},
+};
 
 #[cfg(feature = "shulkerbox")]
 use std::sync::Arc;
 
+use derive_more::From;
 #[cfg(feature = "shulkerbox")]
 use shulkerbox::prelude::{Command, Condition, Execute};
 
@@ -18,6 +22,25 @@ use crate::{
     semantic::error::UnexpectedExpression,
     transpile::{error::FunctionArgumentsNotAllowed, TranspileError},
 };
+
+/// Compile-time evaluated value
+#[allow(missing_docs)]
+#[derive(Debug, Clone, PartialEq, Eq, From)]
+pub enum ComptimeValue {
+    Boolean(bool),
+    Integer(i64),
+    String(String),
+}
+
+impl Display for ComptimeValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Boolean(boolean) => write!(f, "{boolean}"),
+            Self::Integer(int) => write!(f, "{int}"),
+            Self::String(string) => write!(f, "{string}"),
+        }
+    }
+}
 
 /// The type of an expression.
 #[allow(missing_docs)]
@@ -100,6 +123,16 @@ impl Expression {
     pub fn can_yield_type(&self, r#type: ValueType) -> bool {
         match self {
             Self::Primary(primary) => primary.can_yield_type(r#type),
+            Self::Binary(_binary) => todo!(),
+        }
+    }
+
+    /// Evaluate at compile-time.
+    #[must_use]
+    pub fn comptime_eval(&self) -> Option<ComptimeValue> {
+        match self {
+            Self::Primary(primary) => primary.comptime_eval(),
+            Self::Binary(binary) => binary.comptime_eval(),
         }
     }
 }
@@ -121,6 +154,86 @@ impl Primary {
             Self::StringLiteral(_) | Self::MacroStringLiteral(_) => false,
         }
     }
+
+    /// Evaluate at compile-time.
+    #[must_use]
+    pub fn comptime_eval(&self) -> Option<ComptimeValue> {
+        match self {
+            Self::Boolean(boolean) => Some(ComptimeValue::Boolean(boolean.value())),
+            Self::Integer(int) => Some(ComptimeValue::Integer(int.as_i64())),
+            Self::StringLiteral(string_literal) => Some(ComptimeValue::String(
+                string_literal.str_content().to_string(),
+            )),
+            // TODO: correctly evaluate lua code
+            Self::Lua(lua) => lua
+                .eval_string(&VoidHandler)
+                .ok()
+                .flatten()
+                .map(ComptimeValue::String),
+            Self::MacroStringLiteral(macro_string_literal) => {
+                // TODO: mark as containing macros
+                Some(ComptimeValue::String(macro_string_literal.str_content()))
+            }
+            // TODO: correctly evaluate function calls
+            Self::FunctionCall(_) => None,
+        }
+    }
+}
+
+impl Binary {
+    /// Evaluate at compile-time.
+    #[must_use]
+    pub fn comptime_eval(&self) -> Option<ComptimeValue> {
+        let left = self.left_operand().comptime_eval()?;
+        let right = self.right_operand().comptime_eval()?;
+
+        match (left, right) {
+            (ComptimeValue::Boolean(left), ComptimeValue::Boolean(right)) => {
+                match self.operator() {
+                    BinaryOperator::Equal(..) => Some(ComptimeValue::Boolean(left == right)),
+                    BinaryOperator::NotEqual(..) => Some(ComptimeValue::Boolean(left != right)),
+                    BinaryOperator::LogicalAnd(..) => Some(ComptimeValue::Boolean(left && right)),
+                    BinaryOperator::LogicalOr(..) => Some(ComptimeValue::Boolean(left || right)),
+                    _ => None,
+                }
+            }
+            (ComptimeValue::Integer(left), ComptimeValue::Integer(right)) => {
+                match self.operator() {
+                    BinaryOperator::Add(..) => left.checked_add(right).map(ComptimeValue::Integer),
+                    BinaryOperator::Subtract(..) => {
+                        left.checked_sub(right).map(ComptimeValue::Integer)
+                    }
+                    BinaryOperator::Multiply(..) => {
+                        left.checked_mul(right).map(ComptimeValue::Integer)
+                    }
+                    BinaryOperator::Divide(..) => {
+                        left.checked_div(right).map(ComptimeValue::Integer)
+                    }
+                    BinaryOperator::Modulo(..) => {
+                        left.checked_rem(right).map(ComptimeValue::Integer)
+                    }
+                    BinaryOperator::Equal(..) => Some(ComptimeValue::Boolean(left == right)),
+                    BinaryOperator::NotEqual(..) => Some(ComptimeValue::Boolean(left != right)),
+                    BinaryOperator::LessThan(..) => Some(ComptimeValue::Boolean(left < right)),
+                    BinaryOperator::LessThanOrEqual(..) => {
+                        Some(ComptimeValue::Boolean(left <= right))
+                    }
+                    BinaryOperator::GreaterThan(..) => Some(ComptimeValue::Boolean(left > right)),
+                    BinaryOperator::GreaterThanOrEqual(..) => {
+                        Some(ComptimeValue::Boolean(left >= right))
+                    }
+                    _ => None,
+                }
+            }
+            (ComptimeValue::String(left), ComptimeValue::String(right)) => match self.operator() {
+                BinaryOperator::Add(..) => Some(ComptimeValue::String(left + &right)),
+                BinaryOperator::Equal(..) => Some(ComptimeValue::Boolean(left == right)),
+                BinaryOperator::NotEqual(..) => Some(ComptimeValue::Boolean(left != right)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 #[cfg(feature = "shulkerbox")]
@@ -136,6 +249,9 @@ impl Transpiler {
         match expression {
             Expression::Primary(primary) => {
                 self.transpile_primary_expression(primary, target, scope, handler)
+            }
+            Expression::Binary(binary) => {
+                self.transpile_binary_expression(binary, target, scope, handler)
             }
         }
     }
@@ -298,6 +414,103 @@ impl Transpiler {
                     },
                     expression: primary.span(),
                 }))
+            }
+        }
+    }
+
+    #[expect(clippy::needless_pass_by_ref_mut)]
+    fn transpile_binary_expression(
+        &mut self,
+        binary: &Binary,
+        target: &DataLocation,
+        _scope: &Arc<super::Scope>,
+        _handler: &impl Handler<base::Error>,
+    ) -> TranspileResult<Vec<Command>> {
+        match binary.comptime_eval() {
+            Some(ComptimeValue::Integer(value)) => match target {
+                DataLocation::ScoreboardValue { objective, target } => Ok(vec![Command::Raw(
+                    format!("scoreboard players set {target} {objective} {value}"),
+                )]),
+                DataLocation::Tag { .. } => Err(TranspileError::MismatchedTypes(MismatchedTypes {
+                    expected_type: ValueType::Tag,
+                    expression: binary.span(),
+                })),
+                DataLocation::Storage {
+                    storage_name,
+                    path,
+                    r#type,
+                } => {
+                    if matches!(
+                        r#type,
+                        StorageType::Byte
+                            | StorageType::Double
+                            | StorageType::Int
+                            | StorageType::Long
+                    ) {
+                        Ok(vec![Command::Raw(format!(
+                            "data modify storage {storage_name} {path} set value {value}{suffix}",
+                            suffix = r#type.suffix(),
+                        ))])
+                    } else {
+                        Err(TranspileError::MismatchedTypes(MismatchedTypes {
+                            expression: binary.span(),
+                            expected_type: ValueType::NumberStorage,
+                        }))
+                    }
+                }
+            },
+            Some(ComptimeValue::Boolean(value)) => match target {
+                DataLocation::ScoreboardValue { objective, target } => {
+                    Ok(vec![Command::Raw(format!(
+                        "scoreboard players set {target} {objective} {value}",
+                        value = u8::from(value)
+                    ))])
+                }
+                DataLocation::Tag { tag_name, entity } => Ok(vec![Command::Raw(format!(
+                    "tag {entity} {op} {tag_name}",
+                    op = if value { "add" } else { "remove" }
+                ))]),
+                DataLocation::Storage {
+                    storage_name,
+                    path,
+                    r#type,
+                } => {
+                    if matches!(r#type, StorageType::Boolean) {
+                        Ok(vec![Command::Raw(format!(
+                            "data modify storage {storage_name} {path} set value {value}{suffix}",
+                            value = u8::from(value),
+                            suffix = r#type.suffix(),
+                        ))])
+                    } else {
+                        Err(TranspileError::MismatchedTypes(MismatchedTypes {
+                            expression: binary.span(),
+                            expected_type: ValueType::NumberStorage,
+                        }))
+                    }
+                }
+            },
+            Some(ComptimeValue::String(_)) => {
+                Err(TranspileError::MismatchedTypes(MismatchedTypes {
+                    expected_type: match target {
+                        DataLocation::ScoreboardValue { .. } => ValueType::ScoreboardValue,
+                        DataLocation::Tag { .. } => ValueType::Tag,
+                        DataLocation::Storage { .. } => ValueType::NumberStorage,
+                    },
+                    expression: binary.span(),
+                }))
+            }
+            None => {
+                let _left = binary.left_operand();
+                let _right = binary.right_operand();
+                let operator = binary.operator();
+
+                match operator {
+                    BinaryOperator::Add(_) => {
+                        // let temp_name
+                        todo!()
+                    }
+                    _ => todo!(),
+                }
             }
         }
     }

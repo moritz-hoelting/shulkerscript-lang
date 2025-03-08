@@ -323,8 +323,10 @@ impl Transpiler {
                 },
                 |val| match val {
                     TranspileAnnotationValue::None => Ok(identifier_span.str().to_string()),
-                    TranspileAnnotationValue::Expression(expr) => {
-                        expr.comptime_eval().ok_or_else(|| {
+                    TranspileAnnotationValue::Expression(expr) => expr
+                        .comptime_eval()
+                        .map(|val| val.to_string())
+                        .ok_or_else(|| {
                             let err = TranspileError::IllegalAnnotationContent(
                                 IllegalAnnotationContent {
                                     annotation: identifier_span.clone(),
@@ -334,8 +336,7 @@ impl Transpiler {
                             );
                             handler.receive(err.clone());
                             err
-                        })
-                    }
+                        }),
                     TranspileAnnotationValue::Map(_) => {
                         let err =
                             TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
@@ -421,6 +422,7 @@ impl Transpiler {
                     Expression::Primary(Primary::MacroStringLiteral(literal)) => {
                         Ok(literal.str_content())
                     }
+                    Expression::Binary(_) => todo!("allow binary expressions as arguments"),
                 };
 
                 match value {
@@ -507,6 +509,7 @@ impl Transpiler {
                 Expression::Primary(Primary::Lua(code)) => Ok(code
                     .eval_string(handler)?
                     .map_or_else(Vec::new, |cmd| vec![Command::Raw(cmd)])),
+                Expression::Binary(_) => todo!("transpile binary expression in run statement"),
             },
             Statement::Block(_) => {
                 unreachable!("Only literal commands are allowed in functions at this time.")
@@ -550,7 +553,6 @@ impl Transpiler {
                 }
             }
             Statement::Semicolon(semi) => match semi.statement() {
-                #[expect(clippy::match_wildcard_for_single_variants)]
                 SemicolonStatement::Expression(expr) => match expr {
                     Expression::Primary(Primary::FunctionCall(func)) => self
                         .transpile_function_call(func, scope, handler)

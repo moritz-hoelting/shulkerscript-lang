@@ -1,5 +1,7 @@
 //! Syntax tree nodes for expressions.
 
+use std::cmp::Ordering;
+
 use enum_as_inner::EnumAsInner;
 use getset::Getters;
 
@@ -25,43 +27,137 @@ use crate::{
 
 use super::ConnectedList;
 
+/// Represents a binary operator in the syntax tree.
+///
+/// Syntax Synopsis:
+/// ```ebnf
+/// BinaryOperator:
+///     '+'
+///     | '-'
+///     | '*'
+///     | '/'
+///     | '%'
+///     | '=='
+///     | '!='
+///     | '<'
+///     | '<='
+///     | '>'
+///     | '>='
+///     | '&&'
+///     | '||'
+///     ;
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[allow(missing_docs)]
+pub enum BinaryOperator {
+    Add(Punctuation),
+    Subtract(Punctuation),
+    Multiply(Punctuation),
+    Divide(Punctuation),
+    Modulo(Punctuation),
+    Equal(Punctuation, Punctuation),
+    NotEqual(Punctuation, Punctuation),
+    LessThan(Punctuation),
+    LessThanOrEqual(Punctuation, Punctuation),
+    GreaterThan(Punctuation),
+    GreaterThanOrEqual(Punctuation, Punctuation),
+    LogicalAnd(Punctuation, Punctuation),
+    LogicalOr(Punctuation, Punctuation),
+}
+
+impl BinaryOperator {
+    /// Gets the precedence of the operator (the higher the number, the first it will be evaluated)
+    ///
+    /// The least operator has precedence 1.
+    #[must_use]
+    pub fn get_precedence(&self) -> u32 {
+        match self {
+            Self::LogicalOr(..) => 1,
+            Self::LogicalAnd(..) => 2,
+            Self::Equal(..) | Self::NotEqual(..) => 3,
+            Self::LessThan(..)
+            | Self::LessThanOrEqual(..)
+            | Self::GreaterThan(..)
+            | Self::GreaterThanOrEqual(..) => 4,
+            Self::Add(..) | Self::Subtract(..) => 5,
+            Self::Multiply(..) | Self::Divide(..) | Self::Modulo(..) => 6,
+        }
+    }
+}
+
+impl SourceElement for BinaryOperator {
+    fn span(&self) -> Span {
+        match self {
+            Self::Add(token)
+            | Self::Subtract(token)
+            | Self::Multiply(token)
+            | Self::Divide(token)
+            | Self::Modulo(token)
+            | Self::LessThan(token)
+            | Self::GreaterThan(token) => token.span.clone(),
+            Self::Equal(token, token1)
+            | Self::NotEqual(token, token1)
+            | Self::LessThanOrEqual(token, token1)
+            | Self::GreaterThanOrEqual(token, token1)
+            | Self::LogicalAnd(token, token1)
+            | Self::LogicalOr(token, token1) => token.span().join(&token1.span).unwrap(),
+        }
+    }
+}
+
+/// Represents a binary expression in the syntax tree.
+///
+/// Syntax Synopsis:
+/// ```ebnf
+/// Binary:
+///     Expression BinaryOperator Expression
+///     ;
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Binary {
+    /// The left operand of the binary expression.
+    #[get = "pub"]
+    left_operand: Box<Expression>,
+    /// The operator of the binary expression.
+    #[get = "pub"]
+    operator: BinaryOperator,
+    /// The right operand of the binary expression.
+    #[get = "pub"]
+    right_operand: Box<Expression>,
+}
+
+impl SourceElement for Binary {
+    fn span(&self) -> Span {
+        self.left_operand
+            .span()
+            .join(&self.right_operand.span())
+            .unwrap()
+    }
+}
+
 /// Represents an expression in the syntax tree.
 ///
 /// Syntax Synopsis:
 ///
 /// ```ebnf
 /// Expression:
-///     Primary
+///     Primary | Binary
 /// ```
 #[allow(missing_docs)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
 pub enum Expression {
     Primary(Primary),
+    Binary(Binary),
 }
 
 impl SourceElement for Expression {
     fn span(&self) -> Span {
         match self {
             Self::Primary(primary) => primary.span(),
-        }
-    }
-}
-
-impl Expression {
-    /// Checks if the expression is compile-time.
-    #[must_use]
-    pub fn is_comptime(&self) -> bool {
-        match self {
-            Self::Primary(primary) => primary.is_comptime(),
-        }
-    }
-
-    /// Evaluate at compile-time to a string.
-    #[must_use]
-    pub fn comptime_eval(&self) -> Option<String> {
-        match self {
-            Self::Primary(primary) => primary.comptime_eval(),
+            Self::Binary(binary) => binary.span(),
         }
     }
 }
@@ -104,38 +200,6 @@ impl SourceElement for Primary {
     }
 }
 
-impl Primary {
-    /// Checks if the primary expression is compile-time.
-    #[must_use]
-    pub fn is_comptime(&self) -> bool {
-        match self {
-            Self::Boolean(_)
-            | Self::Integer(_)
-            | Self::StringLiteral(_)
-            | Self::MacroStringLiteral(_)
-            | Self::Lua(_) => true,
-            Self::FunctionCall(func) => func.is_comptime(),
-        }
-    }
-
-    /// Evaluate at compile-time to a string.
-    #[must_use]
-    pub fn comptime_eval(&self) -> Option<String> {
-        match self {
-            Self::Boolean(boolean) => Some(boolean.span.str().to_string()),
-            Self::Integer(int) => Some(int.span.str().to_string()),
-            Self::StringLiteral(string_literal) => Some(string_literal.str_content().to_string()),
-            // TODO: correctly evaluate lua code
-            Self::Lua(lua) => lua.eval_string(&VoidHandler).ok().flatten(),
-            Self::MacroStringLiteral(macro_string_literal) => {
-                Some(macro_string_literal.str_content())
-            }
-            // TODO: correctly evaluate function calls
-            Self::FunctionCall(_) => None,
-        }
-    }
-}
-
 /// Represents a function call in the syntax tree.
 ///
 /// Syntax Synopsis:
@@ -168,16 +232,6 @@ impl SourceElement for FunctionCall {
             .span()
             .join(&self.right_parenthesis.span)
             .unwrap()
-    }
-}
-
-impl FunctionCall {
-    /// Checks if the function call is compile-time.
-    #[must_use]
-    pub fn is_comptime(&self) -> bool {
-        self.arguments
-            .as_ref()
-            .map_or(true, |args| args.elements().all(|elem| elem.is_comptime()))
     }
 }
 
@@ -246,7 +300,54 @@ impl<'a> Parser<'a> {
         &mut self,
         handler: &impl Handler<base::Error>,
     ) -> ParseResult<Expression> {
-        self.parse_primary(handler).map(Expression::Primary)
+        let mut first_primary = Expression::Primary(self.parse_primary(handler)?);
+        let mut expressions = Vec::new();
+
+        // loop until there are no more binary operators
+        while let Ok(binary_operator) = self.try_parse(|p| p.parse_binary_operator(&VoidHandler)) {
+            expressions.push((
+                binary_operator,
+                Some(Expression::Primary(self.parse_primary(handler)?)),
+            ));
+        }
+
+        // fold based on precedence and associativity
+
+        let mut candidate_index = 0;
+        let mut current_precedence;
+
+        while !expressions.is_empty() {
+            current_precedence = 0;
+
+            for (index, (binary_operator, _)) in expressions.iter().enumerate() {
+                let new_precedence = binary_operator.get_precedence();
+                if new_precedence.cmp(&current_precedence) == Ordering::Greater {
+                    current_precedence = new_precedence;
+                    candidate_index = index;
+                }
+            }
+
+            assert!(current_precedence > 0, "Invalid precedence");
+
+            if candidate_index == 0 {
+                let (binary_operator, rhs) = expressions.remove(0);
+                first_primary = Expression::Binary(Binary {
+                    left_operand: Box::new(first_primary),
+                    operator: binary_operator,
+                    right_operand: Box::new(rhs.expect("checked above")),
+                });
+            } else {
+                let (binary_operator, rhs) = expressions.remove(candidate_index);
+
+                expressions[candidate_index - 1].1 = Some(Expression::Binary(Binary {
+                    left_operand: Box::new(expressions[candidate_index - 1].1.take().unwrap()),
+                    operator: binary_operator,
+                    right_operand: Box::new(rhs.expect("checked above")),
+                }));
+            }
+        }
+
+        Ok(first_primary)
     }
 
     /// Parses an [`Primary`]
@@ -400,6 +501,70 @@ impl<'a> Parser<'a> {
                 });
                 handler.receive(err.clone());
 
+                Err(err)
+            }
+        }
+    }
+
+    fn parse_binary_operator(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> ParseResult<BinaryOperator> {
+        match self.next_significant_token() {
+            Reading::Atomic(Token::Punctuation(punc)) => match punc.punctuation {
+                '+' => Ok(BinaryOperator::Add(punc)),
+                '-' => Ok(BinaryOperator::Subtract(punc)),
+                '*' => Ok(BinaryOperator::Multiply(punc)),
+                '/' => Ok(BinaryOperator::Divide(punc)),
+                '%' => Ok(BinaryOperator::Modulo(punc)),
+                '!' => {
+                    let equal = self.parse_punctuation('=', false, handler)?;
+                    Ok(BinaryOperator::NotEqual(punc, equal))
+                }
+                '=' => {
+                    let equal = self.parse_punctuation('=', false, handler)?;
+                    Ok(BinaryOperator::Equal(punc, equal))
+                }
+                '<' => {
+                    let equal = self.try_parse(|p| p.parse_punctuation('=', false, &VoidHandler));
+                    if let Ok(equal) = equal {
+                        Ok(BinaryOperator::LessThanOrEqual(punc, equal))
+                    } else {
+                        Ok(BinaryOperator::LessThan(punc))
+                    }
+                }
+                '>' => {
+                    let equal = self.try_parse(|p| p.parse_punctuation('=', false, &VoidHandler));
+                    if let Ok(equal) = equal {
+                        Ok(BinaryOperator::GreaterThanOrEqual(punc, equal))
+                    } else {
+                        Ok(BinaryOperator::GreaterThan(punc))
+                    }
+                }
+                '&' => {
+                    let second = self.parse_punctuation('&', false, handler)?;
+                    Ok(BinaryOperator::LogicalAnd(punc, second))
+                }
+                '|' => {
+                    let second = self.parse_punctuation('|', false, handler)?;
+                    Ok(BinaryOperator::LogicalOr(punc, second))
+                }
+
+                _ => {
+                    let err = Error::UnexpectedSyntax(UnexpectedSyntax {
+                        expected: syntax::error::SyntaxKind::Operator,
+                        found: Some(Token::Punctuation(punc)),
+                    });
+                    handler.receive(err.clone());
+                    Err(err)
+                }
+            },
+            unexpected => {
+                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
+                    expected: syntax::error::SyntaxKind::Operator,
+                    found: unexpected.into_token(),
+                });
+                handler.receive(err.clone());
                 Err(err)
             }
         }
