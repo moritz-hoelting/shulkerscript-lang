@@ -38,6 +38,8 @@ pub enum TranspileError {
     FunctionArgumentsNotAllowed(#[from] FunctionArgumentsNotAllowed),
     #[error(transparent)]
     AssignmentError(#[from] AssignmentError),
+    #[error(transparent)]
+    UnknownIdentifier(#[from] UnknownIdentifier),
 }
 
 /// The result of a transpilation operation.
@@ -251,3 +253,30 @@ impl Display for AssignmentError {
 }
 
 impl std::error::Error for AssignmentError {}
+
+/// An error that occurs when an unknown identifier is used.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownIdentifier {
+    pub identifier: Span,
+}
+
+impl Display for UnknownIdentifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            Message::new(
+                Severity::Error,
+                format!("The identifier {} is not defined.", self.identifier.str())
+            )
+        )?;
+
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(&self.identifier, Option::<u8>::None)
+        )
+    }
+}
+
+impl std::error::Error for UnknownIdentifier {}

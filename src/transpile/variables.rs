@@ -7,8 +7,11 @@ use std::{
     sync::{Arc, OnceLock, RwLock},
 };
 
+#[cfg(feature = "shulkerbox")]
 use chksum_md5 as md5;
+#[cfg(feature = "shulkerbox")]
 use shulkerbox::prelude::{Command, Condition, Execute};
+
 use strum::EnumIs;
 
 use crate::{
@@ -23,8 +26,11 @@ use crate::{
 use super::{
     error::{AssignmentError, IllegalAnnotationContent},
     expression::{ComptimeValue, DataLocation},
-    FunctionData, TranspileAnnotationValue, TranspileError, TranspileResult, Transpiler,
+    FunctionData, TranspileAnnotationValue, TranspileError, TranspileResult,
 };
+
+#[cfg(feature = "shulkerbox")]
+use super::Transpiler;
 
 /// Stores the data required to access a variable.
 #[derive(Debug, Clone, EnumIs)]
@@ -192,6 +198,7 @@ impl<'a> Debug for Scope<'a> {
     }
 }
 
+#[cfg(feature = "shulkerbox")]
 impl Transpiler {
     pub(super) fn transpile_variable_declaration(
         &mut self,
@@ -324,6 +331,7 @@ impl Transpiler {
 }
 
 #[expect(clippy::too_many_lines)]
+#[cfg(feature = "shulkerbox")]
 fn get_single_data_location_identifiers(
     single: &SingleVariableDeclaration,
     program_identifier: &str,
@@ -372,18 +380,18 @@ fn get_single_data_location_identifiers(
                         target.comptime_eval().map(|val| val.to_string()),
                     ) {
                         // TODO: change invalid criteria if boolean
-                        if !crate::util::is_valid_scoreboard_name(&name_eval) {
+                        if !crate::util::is_valid_scoreboard_objective_name(&name_eval) {
                             let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
                                             annotation: deobfuscate_annotation.span(),
-                                            message: "Deobfuscate annotation 'name' must be a valid scoreboard name.".to_string()
+                                            message: "Deobfuscate annotation 'name' must be a valid scoreboard objective name.".to_string()
                                         });
                             handler.receive(error.clone());
                             return Err(error);
                         }
-                        if !crate::util::is_valid_player_name(&target_eval) {
+                        if !crate::util::is_valid_scoreboard_target(&target_eval) {
                             let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
                                             annotation: deobfuscate_annotation.span(),
-                                            message: "Deobfuscate annotation 'target' must be a valid player name.".to_string()
+                                            message: "Deobfuscate annotation 'target' must be a valid scoreboard player name.".to_string()
                                         });
                             handler.receive(error.clone());
                             return Err(error);

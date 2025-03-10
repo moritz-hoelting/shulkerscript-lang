@@ -168,7 +168,10 @@ impl SourceElement for Expression {
 ///
 /// ``` ebnf
 /// Primary:
-///     Integer
+///     Identifier
+///     | Prefix
+///     | Parenthesized
+///     | Integer
 ///     | Boolean
 ///     | StringLiteral
 ///     | FunctionCall
@@ -179,6 +182,9 @@ impl SourceElement for Expression {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
 pub enum Primary {
+    Identifier(Identifier),
+    Prefix(Prefix),
+    Parenthesized(Parenthesized),
     Integer(Integer),
     Boolean(Boolean),
     StringLiteral(StringLiteral),
@@ -190,6 +196,9 @@ pub enum Primary {
 impl SourceElement for Primary {
     fn span(&self) -> Span {
         match self {
+            Self::Identifier(identifier) => identifier.span(),
+            Self::Prefix(prefix) => prefix.span(),
+            Self::Parenthesized(parenthesized) => parenthesized.span(),
             Self::Integer(int) => int.span(),
             Self::Boolean(bool) => bool.span(),
             Self::StringLiteral(string_literal) => string_literal.span(),
@@ -197,6 +206,92 @@ impl SourceElement for Primary {
             Self::MacroStringLiteral(macro_string_literal) => macro_string_literal.span(),
             Self::Lua(lua_code) => lua_code.span(),
         }
+    }
+}
+
+/// Represents a parenthesized expression in the syntax tree.
+///
+/// Syntax Synopsis:    
+/// ```ebnf
+/// Parenthesized:
+///     '(' Expression ')'
+///     ;
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct Parenthesized {
+    /// The open parenthesis.
+    #[get = "pub"]
+    open: Punctuation,
+    /// The expression inside the parenthesis.
+    #[get = "pub"]
+    expression: Box<Expression>,
+    /// The close parenthesis.
+    #[get = "pub"]
+    close: Punctuation,
+}
+
+impl Parenthesized {
+    /// Dissolves the parenthesized expression into its components
+    #[must_use]
+    pub fn dissolve(self) -> (Punctuation, Expression, Punctuation) {
+        (self.open, *self.expression, self.close)
+    }
+}
+
+impl SourceElement for Parenthesized {
+    fn span(&self) -> Span {
+        self.open.span().join(&self.close.span).unwrap()
+    }
+}
+
+/// Represents a prefix operator in the syntax tree.
+///
+/// Syntax Synopsis:
+/// ```ebnf
+/// PrefixOperator:
+///     '!' | '-'
+///     ;
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
+pub enum PrefixOperator {
+    /// The logical not operator '!'.
+    LogicalNot(Punctuation),
+    /// The negate operator '-'.
+    Negate(Punctuation),
+}
+
+impl SourceElement for PrefixOperator {
+    fn span(&self) -> Span {
+        match self {
+            Self::LogicalNot(token) | Self::Negate(token) => token.span.clone(),
+        }
+    }
+}
+
+/// Represents a prefix expression in the syntax tree.
+///
+/// Syntax Synopsis:
+/// ```ebnf
+/// Prefix:
+///     PrefixOperator Primary
+///     ;
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct Prefix {
+    /// The prefix operator.
+    #[get = "pub"]
+    operator: PrefixOperator,
+    /// The operand.
+    #[get = "pub"]
+    operand: Box<Primary>,
+}
+
+impl SourceElement for Prefix {
+    fn span(&self) -> Span {
+        self.operator.span().join(&self.operand.span()).unwrap()
     }
 }
 
@@ -358,6 +453,30 @@ impl<'a> Parser<'a> {
     #[expect(clippy::too_many_lines)]
     pub fn parse_primary(&mut self, handler: &impl Handler<base::Error>) -> ParseResult<Primary> {
         match self.stop_at_significant() {
+            // prefixed expression
+            Reading::Atomic(Token::Punctuation(punc)) if matches!(punc.punctuation, '!' | '-') => {
+                // eat the prefix
+                self.forward();
+
+                let prefix_operator = match punc.punctuation {
+                    '!' => PrefixOperator::LogicalNot(punc),
+                    '-' => PrefixOperator::Negate(punc),
+                    _ => unreachable!(),
+                };
+
+                let operand = Box::new(self.parse_primary(handler)?);
+
+                Ok(Primary::Prefix(Prefix {
+                    operator: prefix_operator,
+                    operand,
+                }))
+            }
+
+            // parenthesized expression
+            Reading::IntoDelimited(left_parenthesis) if left_parenthesis.punctuation == '(' => self
+                .parse_parenthesized(handler)
+                .map(Primary::Parenthesized),
+
             // identifier expression
             Reading::Atomic(Token::Identifier(identifier)) => {
                 // eat the identifier
@@ -380,14 +499,9 @@ impl<'a> Parser<'a> {
                             arguments: token_tree.list,
                         }))
                     }
-                    unexpected => {
-                        // insert parser for regular identifier here
-                        let err = Error::UnexpectedSyntax(UnexpectedSyntax {
-                            expected: syntax::error::SyntaxKind::Punctuation('('),
-                            found: unexpected.into_token(),
-                        });
-                        handler.receive(err.clone());
-                        Err(err)
+                    _ => {
+                        // regular identifier
+                        Ok(Primary::Identifier(identifier))
                     }
                 }
             }
@@ -504,6 +618,23 @@ impl<'a> Parser<'a> {
                 Err(err)
             }
         }
+    }
+
+    fn parse_parenthesized(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> ParseResult<Parenthesized> {
+        let token_tree = self.step_into(
+            Delimiter::Parenthesis,
+            |p| p.parse_expression(handler),
+            handler,
+        )?;
+
+        Ok(Parenthesized {
+            open: token_tree.open,
+            expression: Box::new(token_tree.tree?),
+            close: token_tree.close,
+        })
     }
 
     fn parse_binary_operator(

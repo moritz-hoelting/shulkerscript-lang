@@ -2,7 +2,7 @@
 
 use chksum_md5 as md5;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     ops::Deref,
     sync::{Arc, OnceLock},
 };
@@ -41,6 +41,7 @@ pub struct Transpiler {
     pub(super) main_namespace_name: String,
     pub(super) datapack: shulkerbox::datapack::Datapack,
     pub(super) setup_cmds: Vec<Command>,
+    pub(super) initialized_constant_scores: HashSet<i64>,
     /// Top-level [`Scope`] for each program identifier
     scopes: BTreeMap<String, Arc<Scope<'static>>>,
     /// Key: (program identifier, function name)
@@ -58,6 +59,7 @@ impl Transpiler {
             main_namespace_name: main_namespace_name.clone(),
             datapack: shulkerbox::datapack::Datapack::new(main_namespace_name, pack_format),
             setup_cmds: Vec::new(),
+            initialized_constant_scores: HashSet::new(),
             scopes: BTreeMap::new(),
             functions: BTreeMap::new(),
             aliases: HashMap::new(),
@@ -128,8 +130,16 @@ impl Transpiler {
             let main_namespace = self.datapack.namespace_mut(&self.main_namespace_name);
             let setup_fn = main_namespace.function_mut("shu/setup");
             setup_fn.get_commands_mut().extend(self.setup_cmds.clone());
-            self.datapack
-                .add_load(format!("{}:shu/setup", self.main_namespace_name));
+            // prepend setup function to load tag
+            let load_values = self
+                .datapack
+                .namespace_mut("minecraft")
+                .tag_mut("load", datapack::tag::TagType::Function)
+                .values_mut();
+            load_values.insert(
+                0,
+                datapack::tag::TagValue::Simple(format!("{}:shu/setup", self.main_namespace_name)),
+            );
         }
 
         Ok(())
@@ -422,6 +432,12 @@ impl Transpiler {
                     Expression::Primary(Primary::MacroStringLiteral(literal)) => {
                         Ok(literal.str_content())
                     }
+                    Expression::Primary(
+                        Primary::Identifier(_) | Primary::Parenthesized(_) | Primary::Prefix(_),
+                    ) => {
+                        todo!("allow identifiers, parenthesized & prefix expressions as arguments")
+                    }
+
                     Expression::Binary(_) => todo!("allow binary expressions as arguments"),
                 };
 
@@ -482,35 +498,9 @@ impl Transpiler {
             Statement::LiteralCommand(literal_command) => {
                 Ok(vec![literal_command.clean_command().into()])
             }
-            Statement::Run(run) => match run.expression() {
-                Expression::Primary(Primary::FunctionCall(func)) => self
-                    .transpile_function_call(func, scope, handler)
-                    .map(|cmd| vec![cmd]),
-                Expression::Primary(Primary::Integer(num)) => {
-                    let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
-                        Expression::Primary(Primary::Integer(num.clone())),
-                    ));
-                    handler.receive(error.clone());
-                    Err(error)
-                }
-                Expression::Primary(Primary::Boolean(bool)) => {
-                    let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
-                        Expression::Primary(Primary::Boolean(bool.clone())),
-                    ));
-                    handler.receive(error.clone());
-                    Err(error)
-                }
-                Expression::Primary(Primary::StringLiteral(string)) => {
-                    Ok(vec![Command::Raw(string.str_content().to_string())])
-                }
-                Expression::Primary(Primary::MacroStringLiteral(string)) => {
-                    Ok(vec![Command::UsesMacro(string.into())])
-                }
-                Expression::Primary(Primary::Lua(code)) => Ok(code
-                    .eval_string(handler)?
-                    .map_or_else(Vec::new, |cmd| vec![Command::Raw(cmd)])),
-                Expression::Binary(_) => todo!("transpile binary expression in run statement"),
-            },
+            Statement::Run(run) => {
+                self.transpile_run_expression(run.expression(), program_identifier, scope, handler)
+            }
             Statement::Block(_) => {
                 unreachable!("Only literal commands are allowed in functions at this time.")
             }
@@ -575,6 +565,49 @@ impl Transpiler {
                     handler,
                 ),
             },
+        }
+    }
+
+    #[expect(clippy::only_used_in_recursion)]
+    fn transpile_run_expression(
+        &mut self,
+        expression: &Expression,
+        program_identifier: &str,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> TranspileResult<Vec<Command>> {
+        match expression {
+            Expression::Primary(Primary::FunctionCall(func)) => self
+                .transpile_function_call(func, scope, handler)
+                .map(|cmd| vec![cmd]),
+            expression @ Expression::Primary(
+                Primary::Integer(_)
+                | Primary::Boolean(_)
+                | Primary::Prefix(_)
+                | Primary::Identifier(_),
+            ) => {
+                let error =
+                    TranspileError::UnexpectedExpression(UnexpectedExpression(expression.clone()));
+                handler.receive(error.clone());
+                Err(error)
+            }
+            Expression::Primary(Primary::StringLiteral(string)) => {
+                Ok(vec![Command::Raw(string.str_content().to_string())])
+            }
+            Expression::Primary(Primary::MacroStringLiteral(string)) => {
+                Ok(vec![Command::UsesMacro(string.into())])
+            }
+            Expression::Primary(Primary::Lua(code)) => Ok(code
+                .eval_string(handler)?
+                .map_or_else(Vec::new, |cmd| vec![Command::Raw(cmd)])),
+            Expression::Primary(Primary::Parenthesized(parenthesized)) => self
+                .transpile_run_expression(
+                    parenthesized.expression(),
+                    program_identifier,
+                    scope,
+                    handler,
+                ),
+            Expression::Binary(_) => todo!("transpile binary expression in run statement"),
         }
     }
 

@@ -81,15 +81,15 @@ pub fn identifier_to_macro(ident: &str) -> std::borrow::Cow<str> {
 
 /// Returns whether a string is a valid scoreboard name.
 #[must_use]
-pub fn is_valid_scoreboard_name(name: &str) -> bool {
+pub fn is_valid_scoreboard_objective_name(name: &str) -> bool {
     name.chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '+' | '.'))
 }
 
-/// Returns whether a string is a valid player name.
+/// Returns whether a string is a valid scoreboard target.
 #[must_use]
-pub fn is_valid_player_name(name: &str) -> bool {
-    (3..=16).contains(&name.len()) && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+pub fn is_valid_scoreboard_target(name: &str) -> bool {
+    (..=16).contains(&name.len()) && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 #[cfg(test)]

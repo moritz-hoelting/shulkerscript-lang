@@ -29,9 +29,7 @@ use strum::EnumIs;
 #[cfg_attr(feature = "shulkerbox", doc(inline))]
 pub use transpiler::Transpiler;
 
-#[cfg(feature = "shulkerbox")]
 mod variables;
-#[cfg(feature = "shulkerbox")]
 pub use variables::{Scope, VariableData};
 
 pub mod util;
