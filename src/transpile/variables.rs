@@ -376,8 +376,8 @@ fn get_single_data_location_identifiers(
                 ) = (name, target)
                 {
                     if let (Some(name_eval), Some(target_eval)) = (
-                        objective.comptime_eval().map(|val| val.to_string()),
-                        target.comptime_eval().map(|val| val.to_string()),
+                        objective.comptime_eval(scope).map(|val| val.to_string()),
+                        target.comptime_eval(scope).map(|val| val.to_string()),
                     ) {
                         // TODO: change invalid criteria if boolean
                         if !crate::util::is_valid_scoreboard_objective_name(&name_eval) {

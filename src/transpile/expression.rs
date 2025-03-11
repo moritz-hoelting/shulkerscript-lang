@@ -5,12 +5,11 @@ use std::{fmt::Display, sync::Arc};
 use super::{Scope, VariableData};
 use crate::{
     base::VoidHandler,
+    lexical::token::MacroStringLiteralPart,
     syntax::syntax_tree::expression::{
         Binary, BinaryOperator, Expression, PrefixOperator, Primary,
     },
 };
-
-use derive_more::From;
 
 #[cfg(feature = "shulkerbox")]
 use shulkerbox::prelude::{Command, Condition, Execute};
@@ -29,11 +28,12 @@ use crate::{
 
 /// Compile-time evaluated value
 #[allow(missing_docs)]
-#[derive(Debug, Clone, PartialEq, Eq, From)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComptimeValue {
     Boolean(bool),
     Integer(i64),
     String(String),
+    MacroString(String),
 }
 
 impl Display for ComptimeValue {
@@ -42,6 +42,20 @@ impl Display for ComptimeValue {
             Self::Boolean(boolean) => write!(f, "{boolean}"),
             Self::Integer(int) => write!(f, "{int}"),
             Self::String(string) => write!(f, "{string}"),
+            Self::MacroString(macro_string) => write!(f, "{macro_string}"),
+        }
+    }
+}
+
+impl ComptimeValue {
+    /// Returns the value as a string not containing a macro.
+    #[must_use]
+    pub fn to_string_no_macro(&self) -> Option<String> {
+        match self {
+            Self::Boolean(boolean) => Some(boolean.to_string()),
+            Self::Integer(int) => Some(int.to_string()),
+            Self::String(string) => Some(string.clone()),
+            Self::MacroString(_) => None,
         }
     }
 }
@@ -50,19 +64,17 @@ impl Display for ComptimeValue {
 #[allow(missing_docs)]
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub enum ValueType {
-    ScoreboardValue,
-    Tag,
-    NumberStorage,
-    BooleanStorage,
+    Boolean,
+    Integer,
+    String,
 }
 
 impl Display for ValueType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ScoreboardValue => write!(f, "scoreboard value"),
-            Self::Tag => write!(f, "tag"),
-            Self::BooleanStorage => write!(f, "boolean storage"),
-            Self::NumberStorage => write!(f, "number storage"),
+            Self::Boolean => write!(f, "boolean"),
+            Self::Integer => write!(f, "integer"),
+            Self::String => write!(f, "string"),
         }
     }
 }
@@ -84,6 +96,22 @@ pub enum DataLocation {
         path: String,
         r#type: StorageType,
     },
+}
+
+impl DataLocation {
+    /// Returns the type of the data location.
+    #[must_use]
+    pub fn value_type(&self) -> ValueType {
+        match self {
+            Self::ScoreboardValue { .. } => ValueType::Integer,
+            Self::Tag { .. } => ValueType::Boolean,
+            Self::Storage { r#type, .. } => match r#type {
+                StorageType::Boolean => ValueType::Boolean,
+                StorageType::Byte | StorageType::Int | StorageType::Long => ValueType::Integer,
+                StorageType::Double => todo!("Double storage type"),
+            },
+        }
+    }
 }
 
 /// The type of a storage.
@@ -133,10 +161,10 @@ impl Expression {
 
     /// Evaluate at compile-time.
     #[must_use]
-    pub fn comptime_eval(&self) -> Option<ComptimeValue> {
+    pub fn comptime_eval(&self, scope: &Arc<Scope>) -> Option<ComptimeValue> {
         match self {
-            Self::Primary(primary) => primary.comptime_eval(),
-            Self::Binary(binary) => binary.comptime_eval(),
+            Self::Primary(primary) => primary.comptime_eval(scope),
+            Self::Binary(binary) => binary.comptime_eval(scope),
         }
     }
 }
@@ -146,30 +174,38 @@ impl Primary {
     #[must_use]
     pub fn can_yield_type(&self, r#type: ValueType, scope: &Arc<Scope>) -> bool {
         match self {
-            Self::Boolean(_) => matches!(r#type, ValueType::Tag | ValueType::BooleanStorage),
-            Self::Integer(_) => matches!(r#type, ValueType::ScoreboardValue),
-            Self::FunctionCall(_) => matches!(
-                r#type,
-                ValueType::ScoreboardValue | ValueType::Tag | ValueType::BooleanStorage
-            ),
+            Self::Boolean(_) => matches!(r#type, ValueType::Boolean),
+            Self::Integer(_) => matches!(r#type, ValueType::Integer),
+            Self::FunctionCall(_) => matches!(r#type, ValueType::Integer | ValueType::Boolean),
             Self::Identifier(ident) => {
                 scope
                     .get_variable(ident.span.str())
                     .map_or(false, |variable| match r#type {
-                        ValueType::BooleanStorage => {
-                            matches!(variable.as_ref(), VariableData::BooleanStorage { .. })
+                        ValueType::Boolean => {
+                            matches!(
+                                variable.as_ref(),
+                                VariableData::Tag { .. } | VariableData::BooleanStorage { .. }
+                            )
                         }
-                        ValueType::NumberStorage => false,
-                        ValueType::ScoreboardValue => {
+                        ValueType::Integer => {
                             matches!(variable.as_ref(), VariableData::ScoreboardValue { .. })
                         }
-                        ValueType::Tag => matches!(variable.as_ref(), VariableData::Tag { .. }),
+                        ValueType::String => false,
                     })
             }
             Self::Parenthesized(parenthesized) => {
                 parenthesized.expression().can_yield_type(r#type, scope)
             }
-            Self::Prefix(_) => todo!(),
+            Self::Prefix(prefix) => match prefix.operator() {
+                PrefixOperator::LogicalNot(_) => {
+                    matches!(r#type, ValueType::Boolean)
+                        && prefix.operand().can_yield_type(r#type, scope)
+                }
+                PrefixOperator::Negate(_) => {
+                    matches!(r#type, ValueType::Integer)
+                        && prefix.operand().can_yield_type(r#type, scope)
+                }
+            },
             // TODO: Add support for Lua.
             #[expect(clippy::match_same_arms)]
             Self::Lua(_) => false,
@@ -179,7 +215,7 @@ impl Primary {
 
     /// Evaluate at compile-time.
     #[must_use]
-    pub fn comptime_eval(&self) -> Option<ComptimeValue> {
+    pub fn comptime_eval(&self, scope: &Arc<Scope>) -> Option<ComptimeValue> {
         #[expect(clippy::match_same_arms)]
         match self {
             Self::Boolean(boolean) => Some(ComptimeValue::Boolean(boolean.value())),
@@ -188,21 +224,18 @@ impl Primary {
                 string_literal.str_content().to_string(),
             )),
             Self::Identifier(_) => None,
-            Self::Parenthesized(parenthesized) => parenthesized.expression().comptime_eval(),
-            Self::Prefix(prefix) => {
-                prefix
-                    .operand()
-                    .comptime_eval()
-                    .and_then(|val| match (prefix.operator(), val) {
-                        (PrefixOperator::LogicalNot(_), ComptimeValue::Boolean(boolean)) => {
-                            Some(ComptimeValue::Boolean(!boolean))
-                        }
-                        (PrefixOperator::Negate(_), ComptimeValue::Integer(int)) => {
-                            Some(ComptimeValue::Integer(-int))
-                        }
-                        _ => None,
-                    })
-            }
+            Self::Parenthesized(parenthesized) => parenthesized.expression().comptime_eval(scope),
+            Self::Prefix(prefix) => prefix.operand().comptime_eval(scope).and_then(|val| {
+                match (prefix.operator(), val) {
+                    (PrefixOperator::LogicalNot(_), ComptimeValue::Boolean(boolean)) => {
+                        Some(ComptimeValue::Boolean(!boolean))
+                    }
+                    (PrefixOperator::Negate(_), ComptimeValue::Integer(int)) => {
+                        Some(ComptimeValue::Integer(-int))
+                    }
+                    _ => None,
+                }
+            }),
             // TODO: correctly evaluate lua code
             Self::Lua(lua) => lua
                 .eval_string(&VoidHandler)
@@ -210,8 +243,17 @@ impl Primary {
                 .flatten()
                 .map(ComptimeValue::String),
             Self::MacroStringLiteral(macro_string_literal) => {
-                // TODO: mark as containing macros
-                Some(ComptimeValue::String(macro_string_literal.str_content()))
+                if macro_string_literal
+                    .parts()
+                    .iter()
+                    .any(|part| matches!(part, MacroStringLiteralPart::MacroUsage { .. }))
+                {
+                    Some(ComptimeValue::MacroString(
+                        macro_string_literal.str_content(),
+                    ))
+                } else {
+                    Some(ComptimeValue::String(macro_string_literal.str_content()))
+                }
             }
             // TODO: correctly evaluate function calls
             Self::FunctionCall(_) => None,
@@ -222,9 +264,9 @@ impl Primary {
 impl Binary {
     /// Evaluate at compile-time.
     #[must_use]
-    pub fn comptime_eval(&self) -> Option<ComptimeValue> {
-        let left = self.left_operand().comptime_eval()?;
-        let right = self.right_operand().comptime_eval()?;
+    pub fn comptime_eval(&self, scope: &Arc<Scope>) -> Option<ComptimeValue> {
+        let left = self.left_operand().comptime_eval(scope)?;
+        let right = self.right_operand().comptime_eval(scope)?;
 
         match (left, right) {
             (ComptimeValue::Boolean(left), ComptimeValue::Boolean(right)) => {
@@ -236,9 +278,15 @@ impl Binary {
                     _ => None,
                 }
             }
-            // TODO: check that the other value will be boolean (even if not comptime)
             (ComptimeValue::Boolean(true), _) | (_, ComptimeValue::Boolean(true)) => {
-                if matches!(self.operator(), BinaryOperator::LogicalOr(..)) {
+                if matches!(self.operator(), BinaryOperator::LogicalOr(..))
+                    && self
+                        .left_operand()
+                        .can_yield_type(ValueType::Boolean, scope)
+                    && self
+                        .right_operand()
+                        .can_yield_type(ValueType::Boolean, scope)
+                {
                     Some(ComptimeValue::Boolean(true))
                 } else {
                     None
@@ -437,7 +485,7 @@ impl Transpiler {
                     ))])
                 }
                 DataLocation::Tag { .. } => Err(TranspileError::MismatchedTypes(MismatchedTypes {
-                    expected_type: ValueType::Tag,
+                    expected_type: ValueType::Boolean,
                     expression: primary.span(),
                 })),
                 DataLocation::Storage {
@@ -462,7 +510,7 @@ impl Transpiler {
                     } else {
                         Err(TranspileError::MismatchedTypes(MismatchedTypes {
                             expression: primary.span(),
-                            expected_type: ValueType::NumberStorage,
+                            expected_type: ValueType::Integer,
                         }))
                     }
                 }
@@ -478,11 +526,7 @@ impl Transpiler {
             }
             Primary::StringLiteral(_) | Primary::MacroStringLiteral(_) => {
                 Err(TranspileError::MismatchedTypes(MismatchedTypes {
-                    expected_type: match target {
-                        DataLocation::ScoreboardValue { .. } => ValueType::ScoreboardValue,
-                        DataLocation::Tag { .. } => ValueType::Tag,
-                        DataLocation::Storage { .. } => ValueType::NumberStorage,
-                    },
+                    expected_type: target.value_type(),
                     expression: primary.span(),
                 }))
             }
@@ -552,7 +596,7 @@ impl Transpiler {
                                 } else {
                                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
                                         expression: primary.span(),
-                                        expected_type: ValueType::BooleanStorage,
+                                        expected_type: target.value_type(),
                                     });
                                     handler.receive(err.clone());
                                     Err(err)
@@ -593,7 +637,7 @@ impl Transpiler {
                                 } else {
                                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
                                         expression: primary.span(),
-                                        expected_type: ValueType::NumberStorage,
+                                        expected_type: target.value_type(),
                                     });
                                     handler.receive(err.clone());
                                     Err(err)
@@ -601,7 +645,7 @@ impl Transpiler {
                             }
                             DataLocation::Tag { .. } => {
                                 let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                                    expected_type: ValueType::Tag,
+                                    expected_type: ValueType::Boolean,
                                     expression: primary.span(),
                                 });
                                 handler.receive(err.clone());
@@ -610,13 +654,7 @@ impl Transpiler {
                         },
                         _ => {
                             let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                                expected_type: match target {
-                                    DataLocation::ScoreboardValue { .. } => {
-                                        ValueType::ScoreboardValue
-                                    }
-                                    DataLocation::Tag { .. } => ValueType::Tag,
-                                    DataLocation::Storage { .. } => ValueType::NumberStorage,
-                                },
+                                expected_type: target.value_type(),
                                 expression: primary.span(),
                             });
                             handler.receive(err.clone());
@@ -634,21 +672,21 @@ impl Transpiler {
         }
     }
 
-    #[expect(clippy::needless_pass_by_ref_mut)]
+    #[expect(clippy::too_many_lines)]
     fn transpile_binary_expression(
         &mut self,
         binary: &Binary,
         target: &DataLocation,
-        _scope: &Arc<super::Scope>,
-        _handler: &impl Handler<base::Error>,
+        scope: &Arc<super::Scope>,
+        handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Vec<Command>> {
-        match binary.comptime_eval() {
+        match binary.comptime_eval(scope) {
             Some(ComptimeValue::Integer(value)) => match target {
                 DataLocation::ScoreboardValue { objective, target } => Ok(vec![Command::Raw(
                     format!("scoreboard players set {target} {objective} {value}"),
                 )]),
                 DataLocation::Tag { .. } => Err(TranspileError::MismatchedTypes(MismatchedTypes {
-                    expected_type: ValueType::Tag,
+                    expected_type: ValueType::Boolean,
                     expression: binary.span(),
                 })),
                 DataLocation::Storage {
@@ -670,7 +708,7 @@ impl Transpiler {
                     } else {
                         Err(TranspileError::MismatchedTypes(MismatchedTypes {
                             expression: binary.span(),
-                            expected_type: ValueType::NumberStorage,
+                            expected_type: target.value_type(),
                         }))
                     }
                 }
@@ -700,28 +738,164 @@ impl Transpiler {
                     } else {
                         Err(TranspileError::MismatchedTypes(MismatchedTypes {
                             expression: binary.span(),
-                            expected_type: ValueType::NumberStorage,
+                            expected_type: target.value_type(),
                         }))
                     }
                 }
             },
-            Some(ComptimeValue::String(_)) => {
+            Some(ComptimeValue::String(_) | ComptimeValue::MacroString(_)) => {
                 Err(TranspileError::MismatchedTypes(MismatchedTypes {
-                    expected_type: match target {
-                        DataLocation::ScoreboardValue { .. } => ValueType::ScoreboardValue,
-                        DataLocation::Tag { .. } => ValueType::Tag,
-                        DataLocation::Storage { .. } => ValueType::NumberStorage,
-                    },
+                    expected_type: target.value_type(),
                     expression: binary.span(),
                 }))
             }
             None => {
-                let _left = binary.left_operand();
-                let _right = binary.right_operand();
-                let _operator = binary.operator();
+                let left = binary.left_operand();
+                let right = binary.right_operand();
+                let operator = binary.operator();
 
-                todo!("Transpile binary expression")
+                let (temp_objective, temp_locations) = self.get_temp_scoreboard_locations(2);
+
+                let score_target_location = match target {
+                    DataLocation::ScoreboardValue { objective, target } => (objective, target),
+                    _ => (&temp_objective, &temp_locations[0]),
+                };
+
+                let left_cmds = self.transpile_expression(
+                    left,
+                    &DataLocation::ScoreboardValue {
+                        objective: score_target_location.0.clone(),
+                        target: score_target_location.1.clone(),
+                    },
+                    scope,
+                    handler,
+                )?;
+                let right_cmds = self.transpile_expression(
+                    right,
+                    &DataLocation::ScoreboardValue {
+                        objective: temp_objective.clone(),
+                        target: temp_locations[1].clone(),
+                    },
+                    scope,
+                    handler,
+                )?;
+
+                let calc_cmds = match operator {
+                    BinaryOperator::Add(_) => {
+                        vec![Command::Raw(format!(
+                            "scoreboard players operation {target} {target_objective} += {source} {source_objective}",
+                            target = score_target_location.1,
+                            target_objective = score_target_location.0,
+                            source = temp_locations[1],
+                            source_objective = temp_objective
+                        ))]
+                    }
+                    BinaryOperator::Subtract(_) => {
+                        vec![Command::Raw(format!(
+                            "scoreboard players operation {target} {target_objective} -= {source} {source_objective}",
+                            target = score_target_location.1,
+                            target_objective = score_target_location.0,
+                            source = temp_locations[1],
+                            source_objective = temp_objective
+                        ))]
+                    }
+                    BinaryOperator::Multiply(_) => {
+                        vec![Command::Raw(format!(
+                            "scoreboard players operation {target} {target_objective} *= {source} {source_objective}",
+                            target = score_target_location.1,
+                            target_objective = score_target_location.0,
+                            source = temp_locations[1],
+                            source_objective = temp_objective
+                        ))]
+                    }
+                    BinaryOperator::Divide(_) => {
+                        vec![Command::Raw(format!(
+                            "scoreboard players operation {target} {target_objective} /= {source} {source_objective}",
+                            target = score_target_location.1,
+                            target_objective = score_target_location.0,
+                            source = temp_locations[1],
+                            source_objective = temp_objective
+                        ))]
+                    }
+                    BinaryOperator::Modulo(_) => {
+                        vec![Command::Raw(format!(
+                            "scoreboard players operation {target} {target_objective} %= {source} {source_objective}",
+                            target = score_target_location.1,
+                            target_objective = score_target_location.0,
+                            source = temp_locations[1],
+                            source_objective = temp_objective
+                        ))]
+                    }
+                    _ => todo!("Transpile binary expression"),
+                };
+
+                let transfer_cmd = match target {
+                    DataLocation::ScoreboardValue { .. } => None,
+                    DataLocation::Tag { .. } => {
+                        let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                            expected_type: ValueType::Boolean,
+                            expression: binary.span(),
+                        });
+                        handler.receive(err.clone());
+                        return Err(err);
+                    }
+                    DataLocation::Storage {
+                        storage_name,
+                        path,
+                        r#type,
+                    } => match r#type {
+                        StorageType::Byte
+                        | StorageType::Double
+                        | StorageType::Int
+                        | StorageType::Long => Some(Command::Execute(Execute::Store(
+                            format!(
+                                "result storage {storage_name} {path} {t} 1",
+                                t = r#type.as_str()
+                            )
+                            .into(),
+                            Box::new(Execute::Run(Box::new(Command::Raw(format!(
+                                "scoreboard players get {target} {objective}",
+                                objective = score_target_location.0,
+                                target = score_target_location.1
+                            ))))),
+                        ))),
+                        StorageType::Boolean => {
+                            let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                                expected_type: ValueType::Boolean,
+                                expression: binary.span(),
+                            });
+                            handler.receive(err.clone());
+                            return Err(err);
+                        }
+                    },
+                };
+
+                Ok(left_cmds
+                    .into_iter()
+                    .chain(right_cmds)
+                    .chain(calc_cmds)
+                    .chain(transfer_cmd)
+                    .collect())
             }
         }
+    }
+
+    /// Get temporary scoreboard locations.
+    fn get_temp_scoreboard_locations(&mut self, amount: usize) -> (String, Vec<String>) {
+        let objective = "shu_temp_".to_string()
+            + &chksum_md5::hash(&self.main_namespace_name).to_hex_lowercase();
+
+        self.datapack
+            .register_scoreboard(&objective, None::<&str>, None::<&str>);
+
+        let targets = (0..amount)
+            .map(|i| {
+                chksum_md5::hash(format!("{}\0{i}", self.main_namespace_name))
+                    .to_hex_lowercase()
+                    .split_off(16)
+            })
+            .collect();
+
+        (objective, targets)
     }
 }

@@ -334,8 +334,8 @@ impl Transpiler {
                 |val| match val {
                     TranspileAnnotationValue::None => Ok(identifier_span.str().to_string()),
                     TranspileAnnotationValue::Expression(expr) => expr
-                        .comptime_eval()
-                        .map(|val| val.to_string())
+                        .comptime_eval(scope)
+                        .and_then(|val| val.to_string_no_macro())
                         .ok_or_else(|| {
                             let err = TranspileError::IllegalAnnotationContent(
                                 IllegalAnnotationContent {
