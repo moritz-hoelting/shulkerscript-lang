@@ -31,7 +31,7 @@ use crate::{
 
 use super::{
     error::{TranspileError, TranspileResult},
-    expression::ComptimeValue,
+    expression::{ComptimeValue, ExtendedCondition},
     variables::{Scope, VariableData},
     FunctionData, TranspileAnnotationValue,
 };
@@ -810,10 +810,19 @@ impl Transpiler {
             let (pre_cond_cmds, cond) =
                 self.transpile_expression_as_condition(cond_expression, scope, handler)?;
 
-            Ok(Some((
-                pre_cond_cmds,
-                Execute::If(cond, Box::new(then), el.map(Box::new)),
-            )))
+            match cond {
+                ExtendedCondition::Runtime(cond) => Ok(Some((
+                    pre_cond_cmds,
+                    Execute::If(cond, Box::new(then), el.map(Box::new)),
+                ))),
+                ExtendedCondition::Comptime(cond) => {
+                    if cond {
+                        Ok(Some((Vec::new(), then)))
+                    } else {
+                        Ok(el.map(|el| (Vec::new(), el)))
+                    }
+                }
+            }
         }
     }
 

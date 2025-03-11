@@ -11,6 +11,8 @@ use crate::{
     },
 };
 
+use enum_as_inner::EnumAsInner;
+
 #[cfg(feature = "shulkerbox")]
 use shulkerbox::prelude::{Command, Condition, Execute};
 
@@ -149,6 +151,15 @@ impl StorageType {
     }
 }
 
+/// Condition
+#[derive(Debug, Clone, PartialEq, Eq, EnumAsInner)]
+pub enum ExtendedCondition {
+    /// Runtime condition
+    Runtime(Condition),
+    /// Compile-time condition
+    Comptime(bool),
+}
+
 impl Expression {
     /// Returns whether the expression can yield a certain type.
     #[must_use]
@@ -276,7 +287,7 @@ impl Binary {
                     .can_yield_type(ValueType::Boolean, scope)*/ => {
                         Some(ComptimeValue::Boolean(true))
             }
-            (ComptimeValue::Boolean(false), _) | (_, ComptimeValue::Boolean(false)) if matches!(self.operator(), BinaryOperator::LogicalAnd(..)) 
+            (ComptimeValue::Boolean(false), _) | (_, ComptimeValue::Boolean(false)) if matches!(self.operator(), BinaryOperator::LogicalAnd(..))
                 // TODO: re-enable if can_yield_type works properly
                 /*&& self
                     .left_operand()
@@ -731,11 +742,22 @@ impl Transpiler {
                         ),
                     };
 
-                    cmds.push(Command::Execute(Execute::If(
-                        cond,
-                        Box::new(Execute::Run(Box::new(Command::Raw(success_cmd)))),
-                        Some(Box::new(Execute::Run(Box::new(Command::Raw(else_cmd))))),
-                    )));
+                    let cmd = match cond {
+                        ExtendedCondition::Runtime(cond) => Command::Execute(Execute::If(
+                            cond,
+                            Box::new(Execute::Run(Box::new(Command::Raw(success_cmd)))),
+                            Some(Box::new(Execute::Run(Box::new(Command::Raw(else_cmd))))),
+                        )),
+                        ExtendedCondition::Comptime(cond) => {
+                            if cond {
+                                Command::Raw(success_cmd)
+                            } else {
+                                Command::Raw(else_cmd)
+                            }
+                        }
+                    };
+
+                    cmds.push(cmd);
 
                     Ok(cmds)
                 }
@@ -748,7 +770,7 @@ impl Transpiler {
         expression: &Expression,
         scope: &Arc<super::Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<(Vec<Command>, Condition)> {
+    ) -> TranspileResult<(Vec<Command>, ExtendedCondition)> {
         match expression {
             Expression::Primary(primary) => {
                 self.transpile_primary_expression_as_condition(primary, scope, handler)
@@ -759,14 +781,17 @@ impl Transpiler {
         }
     }
 
+    #[expect(clippy::too_many_lines)]
     fn transpile_primary_expression_as_condition(
         &mut self,
         primary: &Primary,
         scope: &Arc<super::Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<(Vec<Command>, Condition)> {
+    ) -> TranspileResult<(Vec<Command>, ExtendedCondition)> {
         match primary {
-            Primary::Boolean(_) => todo!("handle boolean literal if not catched by comptime eval"),
+            Primary::Boolean(boolean) => {
+                Ok((Vec::new(), ExtendedCondition::Comptime(boolean.value())))
+            }
             Primary::Integer(_) => {
                 let err = TranspileError::MismatchedTypes(MismatchedTypes {
                     expected_type: ValueType::Boolean,
@@ -777,11 +802,12 @@ impl Transpiler {
             }
             Primary::StringLiteral(s) => Ok((
                 Vec::new(),
-                Condition::Atom(s.str_content().to_string().into()),
+                ExtendedCondition::Runtime(Condition::Atom(s.str_content().to_string().into())),
             )),
-            Primary::MacroStringLiteral(macro_string) => {
-                Ok((Vec::new(), Condition::Atom(macro_string.into())))
-            }
+            Primary::MacroStringLiteral(macro_string) => Ok((
+                Vec::new(),
+                ExtendedCondition::Runtime(Condition::Atom(macro_string.into())),
+            )),
             Primary::FunctionCall(func) => {
                 if func
                     .arguments()
@@ -806,7 +832,9 @@ impl Transpiler {
 
                     Ok((
                         Vec::new(),
-                        Condition::Atom(format!("function {func_location}").into()),
+                        ExtendedCondition::Runtime(Condition::Atom(
+                            format!("function {func_location}").into(),
+                        )),
                     ))
                 }
             }
@@ -816,16 +844,20 @@ impl Transpiler {
                     match variable {
                         VariableData::BooleanStorage { storage_name, path } => Ok((
                             Vec::new(),
-                            Condition::Atom(format!("data storage {storage_name} {{{path}: 1b}}").into()),
+                            ExtendedCondition::Runtime(Condition::Atom(
+                                format!("data storage {storage_name} {{{path}: 1b}}").into(),
+                            )),
                         )),
-                        VariableData::FunctionArgument { .. } => {
-                            Ok((
-                                Vec::new(),
-                                Condition::Atom(shulkerbox::util::MacroString::MacroString(vec![
-                                    shulkerbox::util::MacroStringPart::MacroUsage(ident.span.str().to_string()),
-                                ]))
-                            ))
-                        }
+                        VariableData::FunctionArgument { .. } => Ok((
+                            Vec::new(),
+                            ExtendedCondition::Runtime(Condition::Atom(
+                                shulkerbox::util::MacroString::MacroString(vec![
+                                    shulkerbox::util::MacroStringPart::MacroUsage(
+                                        ident.span.str().to_string(),
+                                    ),
+                                ]),
+                            )),
+                        )),
                         _ => {
                             let err = TranspileError::MismatchedTypes(MismatchedTypes {
                                 expected_type: ValueType::Boolean,
@@ -842,8 +874,7 @@ impl Transpiler {
                     handler.receive(err.clone());
                     Err(err)
                 }
-                
-            },
+            }
             Primary::Parenthesized(parenthesized) => {
                 self.transpile_expression_as_condition(parenthesized.expression(), scope, handler)
             }
@@ -854,7 +885,15 @@ impl Transpiler {
                         scope,
                         handler,
                     )?;
-                    Ok((cmds, Condition::Not(Box::new(cond))))
+                    Ok((
+                        cmds,
+                        match cond {
+                            ExtendedCondition::Runtime(cond) => {
+                                ExtendedCondition::Runtime(Condition::Not(Box::new(cond)))
+                            }
+                            ExtendedCondition::Comptime(cond) => ExtendedCondition::Comptime(!cond),
+                        },
+                    ))
                 }
                 PrefixOperator::Negate(_) => {
                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
@@ -863,7 +902,7 @@ impl Transpiler {
                     });
                     handler.receive(err.clone());
                     Err(err)
-                },
+                }
             },
             Primary::Lua(_) => todo!("Lua code as condition"),
         }
@@ -874,16 +913,16 @@ impl Transpiler {
         binary: &Binary,
         scope: &Arc<super::Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<(Vec<Command>, Condition)> {
+    ) -> TranspileResult<(Vec<Command>, ExtendedCondition)> {
         match binary.operator() {
             BinaryOperator::Equal(..)
             | BinaryOperator::NotEqual(..)
             | BinaryOperator::GreaterThan(_)
             | BinaryOperator::GreaterThanOrEqual(..)
             | BinaryOperator::LessThan(_)
-            | BinaryOperator::LessThanOrEqual(..) => {
-                self.transpile_comparison_operator(binary, scope, handler)
-            }
+            | BinaryOperator::LessThanOrEqual(..) => self
+                .transpile_comparison_operator(binary, scope, handler)
+                .map(|(cmds, cond)| (cmds, ExtendedCondition::Runtime(cond))),
             BinaryOperator::LogicalAnd(..) | BinaryOperator::LogicalOr(..) => {
                 self.transpile_logic_operator(binary, scope, handler)
             }
@@ -1066,7 +1105,7 @@ impl Transpiler {
         binary: &Binary,
         scope: &Arc<super::Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<(Vec<Command>, Condition)> {
+    ) -> TranspileResult<(Vec<Command>, ExtendedCondition)> {
         let left = binary.left_operand().as_ref();
         let right = binary.right_operand().as_ref();
 
@@ -1075,16 +1114,44 @@ impl Transpiler {
         let (right_cmds, right_cond) =
             self.transpile_expression_as_condition(right, scope, handler)?;
 
-        let combined_cmds = left_cmds.into_iter().chain(right_cmds).collect();
-
-        match binary.operator() {
-            BinaryOperator::LogicalAnd(..) => Ok((
-                combined_cmds,
-                Condition::And(Box::new(left_cond), Box::new(right_cond)),
+        match (binary.operator(), left_cond, right_cond) {
+            (BinaryOperator::LogicalAnd(..), ExtendedCondition::Comptime(true), other)
+            | (BinaryOperator::LogicalOr(..), ExtendedCondition::Comptime(false), other) => {
+                Ok((right_cmds, other))
+            }
+            (BinaryOperator::LogicalAnd(..), other, ExtendedCondition::Comptime(true))
+            | (BinaryOperator::LogicalOr(..), other, ExtendedCondition::Comptime(false)) => {
+                Ok((left_cmds, other))
+            }
+            (BinaryOperator::LogicalAnd(..), ExtendedCondition::Comptime(false), _)
+            | (BinaryOperator::LogicalAnd(..), _, ExtendedCondition::Comptime(false)) => {
+                Ok((Vec::new(), ExtendedCondition::Comptime(false)))
+            }
+            (BinaryOperator::LogicalOr(..), ExtendedCondition::Comptime(true), _)
+            | (BinaryOperator::LogicalOr(..), _, ExtendedCondition::Comptime(true)) => {
+                Ok((Vec::new(), ExtendedCondition::Comptime(true)))
+            }
+            (
+                BinaryOperator::LogicalAnd(..),
+                ExtendedCondition::Runtime(left_cond),
+                ExtendedCondition::Runtime(right_cond),
+            ) => Ok((
+                left_cmds.into_iter().chain(right_cmds).collect(),
+                ExtendedCondition::Runtime(Condition::And(
+                    Box::new(left_cond),
+                    Box::new(right_cond),
+                )),
             )),
-            BinaryOperator::LogicalOr(..) => Ok((
-                combined_cmds,
-                Condition::Or(Box::new(left_cond), Box::new(right_cond)),
+            (
+                BinaryOperator::LogicalOr(..),
+                ExtendedCondition::Runtime(left_cond),
+                ExtendedCondition::Runtime(right_cond),
+            ) => Ok((
+                left_cmds.into_iter().chain(right_cmds).collect(),
+                ExtendedCondition::Runtime(Condition::Or(
+                    Box::new(left_cond),
+                    Box::new(right_cond),
+                )),
             )),
             _ => unreachable!("This function should only be called for logical operators."),
         }
@@ -1187,9 +1254,13 @@ impl Transpiler {
 
         let targets = (0..amount)
             .map(|i| {
-                chksum_md5::hash(format!("{namespace}\0{j}", namespace = self.main_namespace_name, j = i + self.temp_counter))
-                    .to_hex_lowercase()
-                    .split_off(16)
+                chksum_md5::hash(format!(
+                    "{namespace}\0{j}",
+                    namespace = self.main_namespace_name,
+                    j = i + self.temp_counter
+                ))
+                .to_hex_lowercase()
+                .split_off(16)
             })
             .collect();
 
