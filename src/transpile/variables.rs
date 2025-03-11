@@ -12,7 +12,7 @@ use chksum_md5 as md5;
 #[cfg(feature = "shulkerbox")]
 use shulkerbox::prelude::{Command, Condition, Execute};
 
-use strum::EnumIs;
+use enum_as_inner::EnumAsInner;
 
 use crate::{
     base::{self, source_file::SourceElement as _, Handler},
@@ -33,7 +33,7 @@ use super::{
 use super::Transpiler;
 
 /// Stores the data required to access a variable.
-#[derive(Debug, Clone, EnumIs)]
+#[derive(Debug, Clone, EnumAsInner)]
 pub enum VariableData {
     /// A function.
     Function {

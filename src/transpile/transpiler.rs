@@ -42,6 +42,7 @@ pub struct Transpiler {
     pub(super) datapack: shulkerbox::datapack::Datapack,
     pub(super) setup_cmds: Vec<Command>,
     pub(super) initialized_constant_scores: HashSet<i64>,
+    pub(super) temp_counter: usize,
     /// Top-level [`Scope`] for each program identifier
     scopes: BTreeMap<String, Arc<Scope<'static>>>,
     /// Key: (program identifier, function name)
@@ -60,6 +61,7 @@ impl Transpiler {
             datapack: shulkerbox::datapack::Datapack::new(main_namespace_name, pack_format),
             setup_cmds: Vec::new(),
             initialized_constant_scores: HashSet::new(),
+            temp_counter: 0,
             scopes: BTreeMap::new(),
             functions: BTreeMap::new(),
             aliases: HashMap::new(),
