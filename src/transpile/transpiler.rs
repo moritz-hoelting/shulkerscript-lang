@@ -69,22 +69,16 @@ impl Transpiler {
         }
     }
 
-    /// Consumes the transpiler and returns the resulting datapack.
-    #[must_use]
-    pub fn into_datapack(self) -> Datapack {
-        self.datapack
-    }
-
-    /// Transpiles the given programs.
+    /// Transpiles the given programs and returns the resulting datapack.
     ///
     /// # Errors
     /// - [`TranspileError::MissingFunctionDeclaration`] If a called function is missing
     #[tracing::instrument(level = "trace", skip_all)]
     pub fn transpile(
-        &mut self,
+        mut self,
         programs: &[ProgramFile],
         handler: &impl Handler<base::Error>,
-    ) -> Result<(), TranspileError> {
+    ) -> Result<Datapack, TranspileError> {
         tracing::trace!("Transpiling program declarations");
         for program in programs {
             let program_identifier = program
@@ -145,7 +139,7 @@ impl Transpiler {
             );
         }
 
-        Ok(())
+        Ok(self.datapack)
     }
 
     /// Transpiles the given program.

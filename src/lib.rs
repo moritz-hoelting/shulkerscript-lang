@@ -176,9 +176,8 @@ where
 
     tracing::info!("Transpiling the source code.");
 
-    let mut transpiler = Transpiler::new(main_namespace_name, pack_format);
-    transpiler.transpile(&programs, handler)?;
-    let datapack = transpiler.into_datapack();
+    let datapack =
+        Transpiler::new(main_namespace_name, pack_format).transpile(&programs, handler)?;
 
     if handler.has_received() {
         return Err(Error::other(
