@@ -13,11 +13,8 @@ use crate::{
     base::{self, source_file::SourceElement as _, Handler},
     lexical::token::{MacroStringLiteral, MacroStringLiteralPart},
     syntax::syntax_tree::{
-        condition::{
-            BinaryCondition, Condition, ParenthesizedCondition, PrimaryCondition, UnaryCondition,
-        },
         declaration::{Declaration, Function, ImportItems},
-        expression::{Expression, FunctionCall, Primary},
+        expression::{Expression, FunctionCall, Parenthesized, Primary},
         program::{Namespace, ProgramFile},
         statement::{
             execute_block::{
@@ -360,7 +357,7 @@ impl Conditional {
     }
 }
 
-impl ParenthesizedCondition {
+impl Parenthesized {
     /// Analyzes the semantics of the parenthesized condition.
     pub fn analyze_semantics(
         &self,
@@ -368,23 +365,8 @@ impl ParenthesizedCondition {
         macro_names: &HashSet<String>,
         handler: &impl Handler<base::Error>,
     ) -> Result<(), error::Error> {
-        self.condition
+        self.expression()
             .analyze_semantics(function_names, macro_names, handler)
-    }
-}
-
-impl Condition {
-    /// Analyzes the semantics of the condition.
-    pub fn analyze_semantics(
-        &self,
-        function_names: &HashSet<String>,
-        macro_names: &HashSet<String>,
-        handler: &impl Handler<base::Error>,
-    ) -> Result<(), error::Error> {
-        match self {
-            Self::Primary(prim) => prim.analyze_semantics(function_names, macro_names, handler),
-            Self::Binary(bin) => bin.analyze_semantics(function_names, macro_names, handler),
-        }
     }
 }
 
@@ -616,64 +598,5 @@ impl VariableDeclaration {
         // }
         // TODO: correctly analyze the semantics of the variable declaration
         Ok(())
-    }
-}
-
-impl PrimaryCondition {
-    /// Analyzes the semantics of a primary condition.
-    pub fn analyze_semantics(
-        &self,
-        function_names: &HashSet<String>,
-        macro_names: &HashSet<String>,
-        handler: &impl Handler<base::Error>,
-    ) -> Result<(), error::Error> {
-        match self {
-            Self::Parenthesized(paren) => {
-                paren.analyze_semantics(function_names, macro_names, handler)
-            }
-            Self::StringLiteral(_) => Ok(()),
-            Self::Unary(unary) => unary.analyze_semantics(function_names, macro_names, handler),
-        }
-    }
-}
-
-impl UnaryCondition {
-    /// Analyzes the semantics of an unary condition.
-    pub fn analyze_semantics(
-        &self,
-        function_names: &HashSet<String>,
-        macro_names: &HashSet<String>,
-        handler: &impl Handler<base::Error>,
-    ) -> Result<(), error::Error> {
-        self.operand()
-            .analyze_semantics(function_names, macro_names, handler)
-    }
-}
-
-impl BinaryCondition {
-    /// Analyzes the semantics of a binary condition.
-    pub fn analyze_semantics(
-        &self,
-        function_names: &HashSet<String>,
-        macro_names: &HashSet<String>,
-        handler: &impl Handler<base::Error>,
-    ) -> Result<(), error::Error> {
-        let a = self
-            .left_operand()
-            .analyze_semantics(function_names, macro_names, handler)
-            .inspect_err(|err| {
-                handler.receive(err.clone());
-            });
-        let b = self
-            .right_operand()
-            .analyze_semantics(function_names, macro_names, handler)
-            .inspect_err(|err| {
-                handler.receive(err.clone());
-            });
-        if a.is_err() {
-            a
-        } else {
-            b
-        }
     }
 }

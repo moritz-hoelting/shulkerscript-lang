@@ -620,7 +620,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_parenthesized(
+    pub(super) fn parse_parenthesized(
         &mut self,
         handler: &impl Handler<base::Error>,
     ) -> ParseResult<Parenthesized> {

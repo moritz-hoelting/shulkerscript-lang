@@ -31,6 +31,7 @@ use crate::{
 
 use super::{
     error::{TranspileError, TranspileResult},
+    expression::ComptimeValue,
     variables::{Scope, VariableData},
     FunctionData, TranspileAnnotationValue,
 };
@@ -508,9 +509,12 @@ impl Transpiler {
             }
             Statement::ExecuteBlock(execute) => {
                 let child_scope = Scope::with_parent(scope);
-                Ok(self
-                    .transpile_execute_block(execute, program_identifier, &child_scope, handler)?
-                    .map_or_else(Vec::new, |cmd| vec![cmd]))
+                Ok(self.transpile_execute_block(
+                    execute,
+                    program_identifier,
+                    &child_scope,
+                    handler,
+                )?)
             }
             Statement::DocComment(doccomment) => {
                 let content = doccomment.content();
@@ -654,9 +658,15 @@ impl Transpiler {
         program_identifier: &str,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<Option<Command>> {
+    ) -> TranspileResult<Vec<Command>> {
         self.transpile_execute_block_internal(execute, program_identifier, scope, handler)
-            .map(|ex| ex.map(Command::Execute))
+            .map(|ex| {
+                ex.map(|(mut pre_cmds, exec)| {
+                    pre_cmds.push(exec.into());
+                    pre_cmds
+                })
+                .unwrap_or_default()
+            })
     }
 
     fn transpile_execute_block_internal(
@@ -665,7 +675,7 @@ impl Transpiler {
         program_identifier: &str,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<Option<Execute>> {
+    ) -> TranspileResult<Option<(Vec<Command>, Execute)>> {
         match execute {
             ExecuteBlock::HeadTail(head, tail) => {
                 let tail = match tail {
@@ -689,7 +699,7 @@ impl Transpiler {
                         if commands.is_empty() {
                             Ok(None)
                         } else {
-                            Ok(Some(Execute::Runs(commands)))
+                            Ok(Some((Vec::new(), Execute::Runs(commands))))
                         }
                     }
                     ExecuteBlockTail::ExecuteBlock(_, execute_block) => self
@@ -764,58 +774,66 @@ impl Transpiler {
         program_identifier: &str,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<Option<Execute>> {
-        let (_, cond) = cond.clone().dissolve();
-        let (_, cond, _) = cond.dissolve();
+    ) -> TranspileResult<Option<(Vec<Command>, Execute)>> {
+        let cond_expression = cond.condition().expression().as_ref();
+
         let mut errors = Vec::new();
 
-        let el = el
-            .and_then(|el| {
-                let (_, block) = el.clone().dissolve();
-                let statements = block.statements();
-                let cmds = statements
-                    .iter()
-                    .flat_map(|statement| {
-                        self.transpile_statement(statement, program_identifier, scope, handler)
-                            .unwrap_or_else(|err| {
-                                errors.push(err);
-                                Vec::new()
-                            })
-                    })
-                    .collect::<Vec<_>>();
+        let el = el.and_then(|el| {
+            let (_, block) = el.clone().dissolve();
+            let statements = block.statements();
+            let cmds = statements
+                .iter()
+                .flat_map(|statement| {
+                    self.transpile_statement(statement, program_identifier, scope, handler)
+                        .unwrap_or_else(|err| {
+                            errors.push(err);
+                            Vec::new()
+                        })
+                })
+                .collect::<Vec<_>>();
 
-                match cmds.len() {
-                    0 => None,
-                    1 => Some(Execute::Run(Box::new(
-                        cmds.into_iter().next().expect("length is 1"),
-                    ))),
-                    _ => Some(Execute::Runs(cmds)),
-                }
-            })
-            .map(Box::new);
+            match cmds.len() {
+                0 => None,
+                1 => Some(Execute::Run(Box::new(
+                    cmds.into_iter().next().expect("length is 1"),
+                ))),
+                _ => Some(Execute::Runs(cmds)),
+            }
+        });
 
-        if !errors.is_empty() {
-            return Err(errors.remove(0));
+        if let Some(ComptimeValue::Boolean(value)) = cond_expression.comptime_eval(scope) {
+            if value {
+                Ok(Some((Vec::new(), then)))
+            } else {
+                Ok(el.map(|el| (Vec::new(), el)))
+            }
+        } else {
+            if !errors.is_empty() {
+                return Err(errors.remove(0));
+            }
+
+            let (pre_cond_cmds, cond) =
+                self.transpile_expression_as_condition(cond_expression, scope, handler)?;
+
+            Ok(Some((
+                pre_cond_cmds,
+                Execute::If(cond, Box::new(then), el.map(Box::new)),
+            )))
         }
-
-        Ok(Some(Execute::If(
-            datapack::Condition::from(cond),
-            Box::new(then),
-            el,
-        )))
     }
 
     fn combine_execute_head_tail(
         &mut self,
         head: &ExecuteBlockHead,
-        tail: Option<Execute>,
+        tail: Option<(Vec<Command>, Execute)>,
         program_identifier: &str,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<Option<Execute>> {
+    ) -> TranspileResult<Option<(Vec<Command>, Execute)>> {
         Ok(match head {
             ExecuteBlockHead::Conditional(cond) => {
-                if let Some(tail) = tail {
+                if let Some((mut pre_cmds, tail)) = tail {
                     self.transpile_conditional(
                         cond,
                         tail,
@@ -824,57 +842,88 @@ impl Transpiler {
                         scope,
                         handler,
                     )?
+                    .map(|(pre_cond_cmds, cond)| {
+                        pre_cmds.extend(pre_cond_cmds);
+                        (pre_cmds, cond)
+                    })
                 } else {
                     None
                 }
             }
             ExecuteBlockHead::As(r#as) => {
                 let selector = r#as.as_selector();
-                tail.map(|tail| Execute::As(selector.into(), Box::new(tail)))
+                tail.map(|(pre_cmds, tail)| {
+                    (pre_cmds, Execute::As(selector.into(), Box::new(tail)))
+                })
             }
             ExecuteBlockHead::At(at) => {
                 let selector = at.at_selector();
-                tail.map(|tail| Execute::At(selector.into(), Box::new(tail)))
+                tail.map(|(pre_cmds, tail)| {
+                    (pre_cmds, Execute::At(selector.into(), Box::new(tail)))
+                })
             }
             ExecuteBlockHead::Align(align) => {
                 let align = align.align_selector();
-                tail.map(|tail| Execute::Align(align.into(), Box::new(tail)))
+                tail.map(|(pre_cmds, tail)| {
+                    (pre_cmds, Execute::Align(align.into(), Box::new(tail)))
+                })
             }
             ExecuteBlockHead::Anchored(anchored) => {
                 let anchor = anchored.anchored_selector();
-                tail.map(|tail| Execute::Anchored(anchor.into(), Box::new(tail)))
+                tail.map(|(pre_cmds, tail)| {
+                    (pre_cmds, Execute::Anchored(anchor.into(), Box::new(tail)))
+                })
             }
             ExecuteBlockHead::In(r#in) => {
                 let dimension = r#in.in_selector();
-                tail.map(|tail| Execute::In(dimension.into(), Box::new(tail)))
+                tail.map(|(pre_cmds, tail)| {
+                    (pre_cmds, Execute::In(dimension.into(), Box::new(tail)))
+                })
             }
             ExecuteBlockHead::Positioned(positioned) => {
                 let position = positioned.positioned_selector();
-                tail.map(|tail| Execute::Positioned(position.into(), Box::new(tail)))
+                tail.map(|(pre_cmds, tail)| {
+                    (
+                        pre_cmds,
+                        Execute::Positioned(position.into(), Box::new(tail)),
+                    )
+                })
             }
             ExecuteBlockHead::Rotated(rotated) => {
                 let rotation = rotated.rotated_selector();
-                tail.map(|tail| Execute::Rotated(rotation.into(), Box::new(tail)))
+                tail.map(|(pre_cmds, tail)| {
+                    (pre_cmds, Execute::Rotated(rotation.into(), Box::new(tail)))
+                })
             }
             ExecuteBlockHead::Facing(facing) => {
                 let facing = facing.facing_selector();
-                tail.map(|tail| Execute::Facing(facing.into(), Box::new(tail)))
+                tail.map(|(pre_cmds, tail)| {
+                    (pre_cmds, Execute::Facing(facing.into(), Box::new(tail)))
+                })
             }
             ExecuteBlockHead::AsAt(as_at) => {
                 let selector = as_at.asat_selector();
-                tail.map(|tail| Execute::AsAt(selector.into(), Box::new(tail)))
+                tail.map(|(pre_cmds, tail)| {
+                    (pre_cmds, Execute::AsAt(selector.into(), Box::new(tail)))
+                })
             }
             ExecuteBlockHead::On(on) => {
                 let dimension = on.on_selector();
-                tail.map(|tail| Execute::On(dimension.into(), Box::new(tail)))
+                tail.map(|(pre_cmds, tail)| {
+                    (pre_cmds, Execute::On(dimension.into(), Box::new(tail)))
+                })
             }
             ExecuteBlockHead::Store(store) => {
                 let store = store.store_selector();
-                tail.map(|tail| Execute::Store(store.into(), Box::new(tail)))
+                tail.map(|(pre_cmds, tail)| {
+                    (pre_cmds, Execute::Store(store.into(), Box::new(tail)))
+                })
             }
             ExecuteBlockHead::Summon(summon) => {
                 let entity = summon.summon_selector();
-                tail.map(|tail| Execute::Summon(entity.into(), Box::new(tail)))
+                tail.map(|(pre_cmds, tail)| {
+                    (pre_cmds, Execute::Summon(entity.into(), Box::new(tail)))
+                })
             }
         })
     }

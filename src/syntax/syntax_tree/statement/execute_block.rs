@@ -19,7 +19,7 @@ use crate::{
     syntax::{
         error::{Error, ParseResult, SyntaxKind, UnexpectedSyntax},
         parser::{DelimitedTree, Parser, Reading},
-        syntax_tree::{condition::ParenthesizedCondition, AnyStringLiteral},
+        syntax_tree::{expression::Parenthesized, AnyStringLiteral},
     },
 };
 
@@ -148,7 +148,7 @@ impl SourceElement for ExecuteBlockTail {
 ///
 /// ``` ebnf
 /// Conditional:
-/// 'if' ParenthizedCondition
+/// 'if' Parenthized
 /// ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -159,13 +159,13 @@ pub struct Conditional {
     if_keyword: Keyword,
     /// The condition of the conditional.
     #[get = "pub"]
-    condition: ParenthesizedCondition,
+    condition: Parenthesized,
 }
 
 impl Conditional {
     /// Dissolves the [`Conditional`] into its components.
     #[must_use]
-    pub fn dissolve(self) -> (Keyword, ParenthesizedCondition) {
+    pub fn dissolve(self) -> (Keyword, Parenthesized) {
         (self.if_keyword, self.condition)
     }
 }
@@ -773,7 +773,7 @@ impl<'a> Parser<'a> {
                 // eat the if keyword
                 self.forward();
 
-                let condition = self.parse_parenthesized_condition(handler)?;
+                let condition = self.parse_parenthesized(handler)?;
 
                 let conditional = Conditional {
                     if_keyword,

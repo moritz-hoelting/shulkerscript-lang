@@ -266,6 +266,26 @@ impl Binary {
         let right = self.right_operand().comptime_eval(scope)?;
 
         match (left, right) {
+            (ComptimeValue::Boolean(true), _) | (_, ComptimeValue::Boolean(true)) if matches!(self.operator(), BinaryOperator::LogicalOr(..))
+                // TODO: re-enable if can_yield_type works properly
+                /*&& self
+                    .left_operand()
+                    .can_yield_type(ValueType::Boolean, scope)
+                && self
+                    .right_operand()
+                    .can_yield_type(ValueType::Boolean, scope)*/ => {
+                        Some(ComptimeValue::Boolean(true))
+            }
+            (ComptimeValue::Boolean(false), _) | (_, ComptimeValue::Boolean(false)) if matches!(self.operator(), BinaryOperator::LogicalAnd(..)) 
+                // TODO: re-enable if can_yield_type works properly
+                /*&& self
+                    .left_operand()
+                    .can_yield_type(ValueType::Boolean, scope)
+                && self
+                    .right_operand()
+                    .can_yield_type(ValueType::Boolean, scope)*/ => {
+                        Some(ComptimeValue::Boolean(false))
+            }
             (ComptimeValue::Boolean(left), ComptimeValue::Boolean(right)) => {
                 match self.operator() {
                     BinaryOperator::Equal(..) => Some(ComptimeValue::Boolean(left == right)),
@@ -273,27 +293,6 @@ impl Binary {
                     BinaryOperator::LogicalAnd(..) => Some(ComptimeValue::Boolean(left && right)),
                     BinaryOperator::LogicalOr(..) => Some(ComptimeValue::Boolean(left || right)),
                     _ => None,
-                }
-            }
-            (ComptimeValue::Boolean(true), _) | (_, ComptimeValue::Boolean(true)) => {
-                if matches!(self.operator(), BinaryOperator::LogicalOr(..))
-                    && self
-                        .left_operand()
-                        .can_yield_type(ValueType::Boolean, scope)
-                    && self
-                        .right_operand()
-                        .can_yield_type(ValueType::Boolean, scope)
-                {
-                    Some(ComptimeValue::Boolean(true))
-                } else {
-                    None
-                }
-            }
-            (ComptimeValue::Boolean(false), _) | (_, ComptimeValue::Boolean(false)) => {
-                if matches!(self.operator(), BinaryOperator::LogicalAnd(..)) {
-                    Some(ComptimeValue::Boolean(false))
-                } else {
-                    None
                 }
             }
             (ComptimeValue::Integer(left), ComptimeValue::Integer(right)) => {
@@ -703,11 +702,11 @@ impl Transpiler {
                             format!("scoreboard players set {target} {objective} 1"),
                             format!("scoreboard players set {target} {objective} 0"),
                         ),
-                DataLocation::Storage {
-                    storage_name,
-                    path,
-                    r#type,
-                } => {
+                        DataLocation::Storage {
+                            storage_name,
+                            path,
+                            r#type,
+                        } => {
                             if matches!(r#type, StorageType::Boolean) {
                                 (
                                     format!(
@@ -717,15 +716,15 @@ impl Transpiler {
                                         "data modify storage {storage_name} {path} set value 0b"
                                     ),
                                 )
-                    } else {
+                            } else {
                                 let err = TranspileError::MismatchedTypes(MismatchedTypes {
                                     expected_type: ValueType::Boolean,
-                            expression: binary.span(),
+                                    expression: binary.span(),
                                 });
                                 handler.receive(err.clone());
                                 return Err(err);
-                    }
-                }
+                            }
+                        }
                         DataLocation::Tag { tag_name, entity } => (
                             format!("tag {entity} add {tag_name}"),
                             format!("tag {entity} remove {tag_name}"),
@@ -744,7 +743,7 @@ impl Transpiler {
         }
     }
 
-    fn transpile_expression_as_condition(
+    pub(super) fn transpile_expression_as_condition(
         &mut self,
         expression: &Expression,
         scope: &Arc<super::Scope>,
@@ -767,7 +766,7 @@ impl Transpiler {
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<(Vec<Command>, Condition)> {
         match primary {
-            Primary::Boolean(_) => unreachable!("boolean literal would have been catched in comptime evaluation of binary expression"),
+            Primary::Boolean(_) => todo!("handle boolean literal if not catched by comptime eval"),
             Primary::Integer(_) => {
                 let err = TranspileError::MismatchedTypes(MismatchedTypes {
                     expected_type: ValueType::Boolean,
@@ -797,7 +796,7 @@ impl Transpiler {
                         });
                     handler.receive(err.clone());
                     Err(err)
-                    } else {
+                } else {
                     let (func_location, _) = self.get_or_transpile_function(
                         &func.identifier().span,
                         None,
@@ -906,35 +905,35 @@ impl Transpiler {
         scope: &Arc<super::Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Vec<Command>> {
-                let left = binary.left_operand();
-                let right = binary.right_operand();
-                let operator = binary.operator();
+        let left = binary.left_operand();
+        let right = binary.right_operand();
+        let operator = binary.operator();
 
-                let (temp_objective, temp_locations) = self.get_temp_scoreboard_locations(2);
+        let (temp_objective, temp_locations) = self.get_temp_scoreboard_locations(2);
 
-                let score_target_location = match target {
-                    DataLocation::ScoreboardValue { objective, target } => (objective, target),
-                    _ => (&temp_objective, &temp_locations[0]),
-                };
+        let score_target_location = match target {
+            DataLocation::ScoreboardValue { objective, target } => (objective, target),
+            _ => (&temp_objective, &temp_locations[0]),
+        };
 
-                let left_cmds = self.transpile_expression(
-                    left,
-                    &DataLocation::ScoreboardValue {
-                        objective: score_target_location.0.clone(),
-                        target: score_target_location.1.clone(),
-                    },
-                    scope,
-                    handler,
-                )?;
-                let right_cmds = self.transpile_expression(
-                    right,
-                    &DataLocation::ScoreboardValue {
-                        objective: temp_objective.clone(),
-                        target: temp_locations[1].clone(),
-                    },
-                    scope,
-                    handler,
-                )?;
+        let left_cmds = self.transpile_expression(
+            left,
+            &DataLocation::ScoreboardValue {
+                objective: score_target_location.0.clone(),
+                target: score_target_location.1.clone(),
+            },
+            scope,
+            handler,
+        )?;
+        let right_cmds = self.transpile_expression(
+            right,
+            &DataLocation::ScoreboardValue {
+                objective: temp_objective.clone(),
+                target: temp_locations[1].clone(),
+            },
+            scope,
+            handler,
+        )?;
 
         let calc_cmds = {
             let (target_objective, target) = score_target_location;
@@ -950,58 +949,58 @@ impl Transpiler {
                 _ => unreachable!("This operator should not be handled here."),
             };
 
-                        vec![Command::Raw(format!(
+            vec![Command::Raw(format!(
                 "scoreboard players operation {target} {target_objective} {operation} {source} {source_objective}"
             ))]
-                };
+        };
 
-                let transfer_cmd = match target {
-                    DataLocation::ScoreboardValue { .. } => None,
-                    DataLocation::Tag { .. } => {
-                        let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                            expected_type: ValueType::Boolean,
-                            expression: binary.span(),
-                        });
-                        handler.receive(err.clone());
-                        return Err(err);
-                    }
-                    DataLocation::Storage {
-                        storage_name,
-                        path,
-                        r#type,
-                    } => match r#type {
+        let transfer_cmd = match target {
+            DataLocation::ScoreboardValue { .. } => None,
+            DataLocation::Tag { .. } => {
+                let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                    expected_type: ValueType::Boolean,
+                    expression: binary.span(),
+                });
+                handler.receive(err.clone());
+                return Err(err);
+            }
+            DataLocation::Storage {
+                storage_name,
+                path,
+                r#type,
+            } => match r#type {
                 StorageType::Byte | StorageType::Double | StorageType::Int | StorageType::Long => {
                     Some(Command::Execute(Execute::Store(
-                            format!(
-                                "result storage {storage_name} {path} {t} 1",
-                                t = r#type.as_str()
-                            )
-                            .into(),
-                            Box::new(Execute::Run(Box::new(Command::Raw(format!(
-                                "scoreboard players get {target} {objective}",
-                                objective = score_target_location.0,
-                                target = score_target_location.1
-                            ))))),
+                        format!(
+                            "result storage {storage_name} {path} {t} 1",
+                            t = r#type.as_str()
+                        )
+                        .into(),
+                        Box::new(Execute::Run(Box::new(Command::Raw(format!(
+                            "scoreboard players get {target} {objective}",
+                            objective = score_target_location.0,
+                            target = score_target_location.1
+                        ))))),
                     )))
                 }
-                        StorageType::Boolean => {
-                            let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                                expected_type: ValueType::Boolean,
-                                expression: binary.span(),
-                            });
-                            handler.receive(err.clone());
-                            return Err(err);
-                        }
-                    },
-                };
+                StorageType::Boolean => {
+                    let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                        expected_type: ValueType::Boolean,
+                        expression: binary.span(),
+                    });
+                    handler.receive(err.clone());
+                    return Err(err);
+                }
+            },
+        };
 
-                Ok(left_cmds
-                    .into_iter()
-                    .chain(right_cmds)
-                    .chain(calc_cmds)
-                    .chain(transfer_cmd)
-                    .collect())
-            }
+        Ok(left_cmds
+            .into_iter()
+            .chain(right_cmds)
+            .chain(calc_cmds)
+            .chain(transfer_cmd)
+            .collect())
+    }
 
     fn transpile_comparison_operator(
         &mut self,
