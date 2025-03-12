@@ -4,17 +4,21 @@ use std::{fmt::Display, sync::Arc};
 
 use super::{Scope, VariableData};
 use crate::{
-    base::VoidHandler,
+    base::{self, Handler, VoidHandler},
     lexical::token::MacroStringLiteralPart,
     syntax::syntax_tree::expression::{
         Binary, BinaryOperator, Expression, PrefixOperator, Primary,
     },
 };
 
+#[cfg(feature = "shulkerbox")]
 use enum_as_inner::EnumAsInner;
 
 #[cfg(feature = "shulkerbox")]
-use shulkerbox::prelude::{Command, Condition, Execute};
+use shulkerbox::{
+    prelude::{Command, Condition, Execute},
+    util::MacroString,
+};
 
 #[cfg(feature = "shulkerbox")]
 use super::{
@@ -23,8 +27,11 @@ use super::{
 };
 #[cfg(feature = "shulkerbox")]
 use crate::{
-    base::{self, source_file::SourceElement, Handler},
-    transpile::{error::FunctionArgumentsNotAllowed, TranspileError},
+    base::source_file::SourceElement,
+    transpile::{
+        error::{FunctionArgumentsNotAllowed, MissingValue},
+        TranspileError,
+    },
 };
 
 /// Compile-time evaluated value
@@ -34,7 +41,7 @@ pub enum ComptimeValue {
     Boolean(bool),
     Integer(i64),
     String(String),
-    MacroString(String),
+    MacroString(MacroString),
 }
 
 impl Display for ComptimeValue {
@@ -43,7 +50,7 @@ impl Display for ComptimeValue {
             Self::Boolean(boolean) => write!(f, "{boolean}"),
             Self::Integer(int) => write!(f, "{int}"),
             Self::String(string) => write!(f, "{string}"),
-            Self::MacroString(macro_string) => write!(f, "{macro_string}"),
+            Self::MacroString(macro_string) => write!(f, "{}", macro_string.compile()),
         }
     }
 }
@@ -76,6 +83,69 @@ impl Display for ValueType {
             Self::Boolean => write!(f, "boolean"),
             Self::Integer => write!(f, "integer"),
             Self::String => write!(f, "string"),
+        }
+    }
+}
+
+#[allow(missing_docs)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExpectedType {
+    Boolean,
+    Integer,
+    String,
+    Any,
+    AnyOf(Vec<ExpectedType>),
+}
+
+impl ExpectedType {
+    /// Add another expected type to the list of expected types.
+    #[must_use]
+    pub fn or(self, or: Self) -> Self {
+        match self {
+            Self::Boolean | Self::Integer | Self::String => match or {
+                Self::Boolean | Self::Integer | Self::String => Self::AnyOf(vec![self, or]),
+                Self::Any => Self::Any,
+                Self::AnyOf(mut types) => {
+                    types.push(self);
+                    Self::AnyOf(types)
+                }
+            },
+            Self::Any => Self::Any,
+            Self::AnyOf(mut types) => {
+                types.push(or);
+                Self::AnyOf(types)
+            }
+        }
+    }
+}
+
+impl Display for ExpectedType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Boolean => write!(f, "boolean"),
+            Self::Integer => write!(f, "integer"),
+            Self::String => write!(f, "string"),
+            Self::Any => write!(f, "any"),
+            Self::AnyOf(types) => {
+                write!(f, "any of [")?;
+                for (i, r#type) in types.iter().enumerate() {
+                    if i != 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{type}")?;
+                }
+                write!(f, "]")
+            }
+        }
+    }
+}
+
+impl From<ValueType> for ExpectedType {
+    fn from(value: ValueType) -> Self {
+        match value {
+            ValueType::Boolean => Self::Boolean,
+            ValueType::Integer => Self::Integer,
+            ValueType::String => Self::String,
         }
     }
 }
@@ -151,6 +221,7 @@ impl StorageType {
 }
 
 /// Condition
+#[cfg(feature = "shulkerbox")]
 #[derive(Debug, Clone, PartialEq, Eq, EnumAsInner)]
 pub enum ExtendedCondition {
     /// Runtime condition
@@ -171,10 +242,14 @@ impl Expression {
 
     /// Evaluate at compile-time.
     #[must_use]
-    pub fn comptime_eval(&self, scope: &Arc<Scope>) -> Option<ComptimeValue> {
+    pub fn comptime_eval(
+        &self,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> Option<ComptimeValue> {
         match self {
-            Self::Primary(primary) => primary.comptime_eval(scope),
-            Self::Binary(binary) => binary.comptime_eval(scope),
+            Self::Primary(primary) => primary.comptime_eval(scope, handler),
+            Self::Binary(binary) => binary.comptime_eval(scope, handler),
         }
     }
 }
@@ -216,16 +291,19 @@ impl Primary {
                         && prefix.operand().can_yield_type(r#type, scope)
                 }
             },
+            #[cfg_attr(not(feature = "lua"), expect(unused_variables))]
             Self::Lua(lua) => {
-                if let Ok(value) = lua.eval(&VoidHandler) {
-                    match value {
-                        mlua::Value::Boolean(_) => matches!(r#type, ValueType::Boolean),
-                        mlua::Value::Integer(_) => matches!(r#type, ValueType::Integer),
-                        mlua::Value::String(_) => matches!(r#type, ValueType::String),
-                        _ => false,
+                cfg_if::cfg_if! {
+                    if #[cfg(feature = "lua")] {
+                        lua.eval(&VoidHandler).map_or(false, |value| match value {
+                            mlua::Value::Boolean(_) => matches!(r#type, ValueType::Boolean),
+                            mlua::Value::Integer(_) => matches!(r#type, ValueType::Integer),
+                            mlua::Value::String(_) => matches!(r#type, ValueType::String),
+                            _ => false,
+                        })
+                    } else {
+                        false
                     }
-                } else {
-                    false
                 }
             }
             Self::StringLiteral(_) | Self::MacroStringLiteral(_) => {
@@ -236,7 +314,11 @@ impl Primary {
 
     /// Evaluate at compile-time.
     #[must_use]
-    pub fn comptime_eval(&self, scope: &Arc<Scope>) -> Option<ComptimeValue> {
+    pub fn comptime_eval(
+        &self,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> Option<ComptimeValue> {
         match self {
             Self::Boolean(boolean) => Some(ComptimeValue::Boolean(boolean.value())),
             Self::Integer(int) => Some(ComptimeValue::Integer(int.as_i64())),
@@ -244,20 +326,30 @@ impl Primary {
                 string_literal.str_content().to_string(),
             )),
             Self::Identifier(_) | Self::FunctionCall(_) => None,
-            Self::Parenthesized(parenthesized) => parenthesized.expression().comptime_eval(scope),
-            Self::Prefix(prefix) => prefix.operand().comptime_eval(scope).and_then(|val| {
-                match (prefix.operator(), val) {
-                    (PrefixOperator::LogicalNot(_), ComptimeValue::Boolean(boolean)) => {
-                        Some(ComptimeValue::Boolean(!boolean))
-                    }
-                    (PrefixOperator::Negate(_), ComptimeValue::Integer(int)) => {
-                        Some(ComptimeValue::Integer(-int))
-                    }
-                    _ => None,
-                }
-            }),
-            // TODO: throw error
-            Self::Lua(lua) => lua.eval_comptime(&VoidHandler).ok().flatten(),
+            Self::Parenthesized(parenthesized) => {
+                parenthesized.expression().comptime_eval(scope, handler)
+            }
+            Self::Prefix(prefix) => {
+                prefix
+                    .operand()
+                    .comptime_eval(scope, handler)
+                    .and_then(|val| match (prefix.operator(), val) {
+                        (PrefixOperator::LogicalNot(_), ComptimeValue::Boolean(boolean)) => {
+                            Some(ComptimeValue::Boolean(!boolean))
+                        }
+                        (PrefixOperator::Negate(_), ComptimeValue::Integer(int)) => {
+                            Some(ComptimeValue::Integer(-int))
+                        }
+                        _ => None,
+                    })
+            }
+            Self::Lua(lua) => lua
+                .eval_comptime(&VoidHandler)
+                .inspect_err(|err| {
+                    handler.receive(err.clone());
+                })
+                .ok()
+                .flatten(),
             Self::MacroStringLiteral(macro_string_literal) => {
                 if macro_string_literal
                     .parts()
@@ -265,7 +357,7 @@ impl Primary {
                     .any(|part| matches!(part, MacroStringLiteralPart::MacroUsage { .. }))
                 {
                     Some(ComptimeValue::MacroString(
-                        macro_string_literal.str_content(),
+                        macro_string_literal.clone().into(),
                     ))
                 } else {
                     Some(ComptimeValue::String(macro_string_literal.str_content()))
@@ -318,9 +410,13 @@ impl Binary {
 
     /// Evaluate at compile-time.
     #[must_use]
-    pub fn comptime_eval(&self, scope: &Arc<Scope>) -> Option<ComptimeValue> {
-        let left = self.left_operand().comptime_eval(scope)?;
-        let right = self.right_operand().comptime_eval(scope)?;
+    pub fn comptime_eval(
+        &self,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> Option<ComptimeValue> {
+        let left = self.left_operand().comptime_eval(scope, handler)?;
+        let right = self.right_operand().comptime_eval(scope, handler)?;
 
         match (left, right) {
             (ComptimeValue::Boolean(true), _) | (_, ComptimeValue::Boolean(true)) if matches!(self.operator(), BinaryOperator::LogicalOr(..))
@@ -426,7 +522,7 @@ impl Transpiler {
     }
 
     #[expect(clippy::too_many_lines)]
-    fn transpile_primary_expression(
+    pub(super) fn transpile_primary_expression(
         &mut self,
         primary: &Primary,
         target: &DataLocation,
@@ -442,31 +538,39 @@ impl Transpiler {
             ),
             Primary::FunctionCall(func) => match target {
                 DataLocation::ScoreboardValue { objective, target } => {
-                    let call_cmd = self.transpile_function_call(func, scope, handler)?;
-                    Ok(vec![Command::Execute(Execute::Store(
-                        format!("result score {target} {objective}").into(),
-                        Box::new(Execute::Run(Box::new(call_cmd))),
-                    ))])
+                    let mut cmds = self.transpile_function_call(func, scope, handler)?;
+                    if let Some(call_cmd) = cmds.pop() {
+                        let modified = Command::Execute(Execute::Store(
+                            format!("result score {target} {objective}").into(),
+                            Box::new(Execute::Run(Box::new(call_cmd))),
+                        ));
+                        cmds.push(modified);
+                    }
+                    Ok(cmds)
                 }
                 DataLocation::Storage {
                     storage_name,
                     path,
                     r#type,
                 } => {
-                    let call_cmd = self.transpile_function_call(func, scope, handler)?;
-                    let result_success = if matches!(r#type, StorageType::Boolean) {
-                        "success"
-                    } else {
-                        "result"
-                    };
-                    Ok(vec![Command::Execute(Execute::Store(
-                        format!(
-                            "{result_success} storage {storage_name} {path} {type} 1.0d",
-                            r#type = r#type.as_str()
-                        )
-                        .into(),
-                        Box::new(Execute::Run(Box::new(call_cmd))),
-                    ))])
+                    let mut cmds = self.transpile_function_call(func, scope, handler)?;
+                    if let Some(call_cmd) = cmds.pop() {
+                        let result_success = if matches!(r#type, StorageType::Boolean) {
+                            "success"
+                        } else {
+                            "result"
+                        };
+                        let modified = Command::Execute(Execute::Store(
+                            format!(
+                                "{result_success} storage {storage_name} {path} {type} 1.0d",
+                                r#type = r#type.as_str()
+                            )
+                            .into(),
+                            Box::new(Execute::Run(Box::new(call_cmd))),
+                        ));
+                        cmds.push(modified);
+                    }
+                    Ok(cmds)
                 }
                 DataLocation::Tag { tag_name, entity } => {
                     if func
@@ -511,11 +615,17 @@ impl Transpiler {
             Primary::Parenthesized(parenthesized) => {
                 self.transpile_expression(parenthesized.expression(), target, scope, handler)
             }
-            Primary::Lua(lua) => {
+            Primary::Lua(lua) =>
+            {
+                #[expect(clippy::option_if_let_else)]
                 if let Some(value) = lua.eval_comptime(handler)? {
                     self.store_comptime_value(&value, target, lua, handler)
                 } else {
-                    todo!("handle no return value from lua")
+                    let err = TranspileError::MissingValue(MissingValue {
+                        expression: lua.span(),
+                    });
+                    handler.receive(err.clone());
+                    Err(err)
                 }
             }
             Primary::StringLiteral(_) | Primary::MacroStringLiteral(_) => {
@@ -536,7 +646,7 @@ impl Transpiler {
                     Ok(cmds)
                 } else {
                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                        expected_type: target.value_type(),
+                        expected_type: target.value_type().into(),
                         expression: primary.span(),
                     });
                     handler.receive(err.clone());
@@ -601,7 +711,7 @@ impl Transpiler {
                     _ => {
                         let err = TranspileError::MismatchedTypes(MismatchedTypes {
                             expression: prefix.span(),
-                            expected_type: ValueType::Integer,
+                            expected_type: ExpectedType::Integer,
                         });
                         handler.receive(err.clone());
                         Err(err)
@@ -665,7 +775,7 @@ impl Transpiler {
                                 } else {
                                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
                                         expression: primary.span(),
-                                        expected_type: target.value_type(),
+                                        expected_type: target.value_type().into(),
                                     });
                                     handler.receive(err.clone());
                                     Err(err)
@@ -697,16 +807,21 @@ impl Transpiler {
                                         | StorageType::Int
                                         | StorageType::Long
                                 ) {
-                                    let cmd = Command::Raw(format!(
-                                        "data modify storage {storage_name} {path} set value {value}{suffix}",
-                                        value = score_target,
-                                        suffix = r#type.suffix()
+                                    let cmd = Command::Execute(Execute::Store(
+                                        format!(
+                                            "result storage {storage_name} {path} {t} 1.0",
+                                            t = r#type.as_str()
+                                        )
+                                        .into(),
+                                        Box::new(Execute::Run(Box::new(Command::Raw(format!(
+                                            "scoreboard players get {score_target} {objective}"
+                                        ))))),
                                     ));
                                     Ok(vec![cmd])
                                 } else {
                                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
                                         expression: primary.span(),
-                                        expected_type: target.value_type(),
+                                        expected_type: target.value_type().into(),
                                     });
                                     handler.receive(err.clone());
                                     Err(err)
@@ -714,7 +829,7 @@ impl Transpiler {
                             }
                             DataLocation::Tag { .. } => {
                                 let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                                    expected_type: ValueType::Boolean,
+                                    expected_type: ExpectedType::Boolean,
                                     expression: primary.span(),
                                 });
                                 handler.receive(err.clone());
@@ -723,7 +838,7 @@ impl Transpiler {
                         },
                         _ => {
                             let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                                expected_type: target.value_type(),
+                                expected_type: target.value_type().into(),
                                 expression: primary.span(),
                             });
                             handler.receive(err.clone());
@@ -748,7 +863,7 @@ impl Transpiler {
         scope: &Arc<super::Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Vec<Command>> {
-        if let Some(value) = binary.comptime_eval(scope) {
+        if let Some(value) = binary.comptime_eval(scope, handler) {
             self.transpile_comptime_value(&value, binary, target, scope, handler)
         } else {
             match binary.operator() {
@@ -808,7 +923,7 @@ impl Transpiler {
             }
             Primary::Integer(_) => {
                 let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                    expected_type: ValueType::Boolean,
+                    expected_type: ExpectedType::Boolean,
                     expression: primary.span(),
                 });
                 handler.receive(err.clone());
@@ -874,7 +989,7 @@ impl Transpiler {
                         )),
                         _ => {
                             let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                                expected_type: ValueType::Boolean,
+                                expected_type: ExpectedType::Boolean,
                                 expression: primary.span(),
                             });
                             handler.receive(err.clone());
@@ -911,28 +1026,34 @@ impl Transpiler {
                 }
                 PrefixOperator::Negate(_) => {
                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                        expected_type: ValueType::Boolean,
+                        expected_type: ExpectedType::Boolean,
                         expression: primary.span(),
                     });
                     handler.receive(err.clone());
                     Err(err)
                 }
             },
-            Primary::Lua(lua) => {
-                match lua.eval_comptime(handler)? {
-                    Some(ComptimeValue::String(value) | ComptimeValue::MacroString(value)) => {
-                        // TODO: mark condition as containing macro if so
-                        Ok((
-                            Vec::new(),
-                            ExtendedCondition::Runtime(Condition::Atom(value.into())),
-                        ))
-                    }
-                    Some(ComptimeValue::Boolean(boolean)) => {
-                        Ok((Vec::new(), ExtendedCondition::Comptime(boolean)))
-                    }
-                    _ => todo!("invalid or none lua return value"),
+            Primary::Lua(lua) => match lua.eval_comptime(handler)? {
+                Some(ComptimeValue::String(value)) => Ok((
+                    Vec::new(),
+                    ExtendedCondition::Runtime(Condition::Atom(value.into())),
+                )),
+                Some(ComptimeValue::MacroString(value)) => Ok((
+                    Vec::new(),
+                    ExtendedCondition::Runtime(Condition::Atom(value)),
+                )),
+                Some(ComptimeValue::Boolean(boolean)) => {
+                    Ok((Vec::new(), ExtendedCondition::Comptime(boolean)))
                 }
-            }
+                _ => {
+                    let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                        expected_type: ExpectedType::Boolean,
+                        expression: primary.span(),
+                    });
+                    handler.receive(err.clone());
+                    Err(err)
+                }
+            },
         }
     }
 
@@ -956,7 +1077,7 @@ impl Transpiler {
             }
             _ => {
                 let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                    expected_type: ValueType::Boolean,
+                    expected_type: ExpectedType::Boolean,
                     expression: binary.span(),
                 });
                 handler.receive(err.clone());
@@ -1025,7 +1146,7 @@ impl Transpiler {
             DataLocation::ScoreboardValue { .. } => None,
             DataLocation::Tag { .. } => {
                 let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                    expected_type: ValueType::Boolean,
+                    expected_type: ExpectedType::Boolean,
                     expression: binary.span(),
                 });
                 handler.receive(err.clone());
@@ -1052,7 +1173,7 @@ impl Transpiler {
                 }
                 StorageType::Boolean => {
                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                        expected_type: ValueType::Boolean,
+                        expected_type: ExpectedType::Boolean,
                         expression: binary.span(),
                     });
                     handler.receive(err.clone());
@@ -1201,7 +1322,7 @@ impl Transpiler {
                 )]),
                 DataLocation::Tag { .. } => {
                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                        expected_type: ValueType::Boolean,
+                        expected_type: ExpectedType::Boolean,
                         expression: original.span(),
                     });
                     handler.receive(err.clone());
@@ -1226,7 +1347,7 @@ impl Transpiler {
                     } else {
                         let err = TranspileError::MismatchedTypes(MismatchedTypes {
                             expression: original.span(),
-                            expected_type: target.value_type(),
+                            expected_type: target.value_type().into(),
                         });
                         handler.receive(err.clone());
                         Err(err)
@@ -1258,7 +1379,7 @@ impl Transpiler {
                     } else {
                         let err = TranspileError::MismatchedTypes(MismatchedTypes {
                             expression: original.span(),
-                            expected_type: target.value_type(),
+                            expected_type: target.value_type().into(),
                         });
                         handler.receive(err.clone());
                         Err(err)
@@ -1267,7 +1388,7 @@ impl Transpiler {
             },
             ComptimeValue::String(_) | ComptimeValue::MacroString(_) => {
                 let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                    expected_type: target.value_type(),
+                    expected_type: target.value_type().into(),
                     expression: original.span(),
                 });
                 handler.receive(err.clone());
@@ -1276,6 +1397,7 @@ impl Transpiler {
         }
     }
 
+    #[expect(clippy::needless_pass_by_ref_mut)]
     fn store_comptime_value(
         &mut self,
         value: &ComptimeValue,
@@ -1285,17 +1407,12 @@ impl Transpiler {
     ) -> TranspileResult<Vec<Command>> {
         match value {
             ComptimeValue::Integer(int) => match target {
-                DataLocation::ScoreboardValue { objective, target } => {
-                    Ok(vec![Command::Raw(format!(
-                        "scoreboard players set {target} {objective} {value}",
-                        target = target,
-                        objective = objective,
-                        value = int
-                    ))])
-                }
+                DataLocation::ScoreboardValue { objective, target } => Ok(vec![Command::Raw(
+                    format!("scoreboard players set {target} {objective} {int}"),
+                )]),
                 DataLocation::Tag { .. } => {
                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                        expected_type: ValueType::Boolean,
+                        expected_type: ExpectedType::Boolean,
                         expression: source.span(),
                     });
                     handler.receive(err.clone());
@@ -1323,7 +1440,7 @@ impl Transpiler {
                     } else {
                         let err = TranspileError::MismatchedTypes(MismatchedTypes {
                             expression: source.span(),
-                            expected_type: ValueType::Integer,
+                            expected_type: ExpectedType::Integer,
                         });
                         handler.receive(err.clone());
                         Err(err)
@@ -1370,6 +1487,7 @@ impl Transpiler {
         }
     }
 
+    #[expect(clippy::unused_self, clippy::needless_pass_by_ref_mut)]
     fn store_condition_success(
         &mut self,
         cond: ExtendedCondition,
@@ -1394,7 +1512,7 @@ impl Transpiler {
                     )
                 } else {
                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                        expected_type: ValueType::Boolean,
+                        expected_type: ExpectedType::Boolean,
                         expression: source.span(),
                     });
                     handler.receive(err.clone());
@@ -1426,7 +1544,7 @@ impl Transpiler {
     }
 
     /// Get temporary scoreboard locations.
-    fn get_temp_scoreboard_locations(&mut self, amount: usize) -> (String, Vec<String>) {
+    pub(super) fn get_temp_scoreboard_locations(&mut self, amount: usize) -> (String, Vec<String>) {
         let objective = "shu_temp_".to_string()
             + &chksum_md5::hash(&self.main_namespace_name).to_hex_lowercase();
 
@@ -1448,5 +1566,27 @@ impl Transpiler {
         self.temp_counter = self.temp_counter.wrapping_add(amount);
 
         (objective, targets)
+    }
+
+    /// Get temporary storage locations.
+    pub(super) fn get_temp_storage_locations(&mut self, amount: usize) -> (String, Vec<String>) {
+        let storage_name = "shulkerscript:temp_".to_string()
+            + &chksum_md5::hash(&self.main_namespace_name).to_hex_lowercase();
+
+        let paths = (0..amount)
+            .map(|i| {
+                chksum_md5::hash(format!(
+                    "{namespace}\0{j}",
+                    namespace = self.main_namespace_name,
+                    j = i + self.temp_counter
+                ))
+                .to_hex_lowercase()
+                .split_off(16)
+            })
+            .collect();
+
+        self.temp_counter = self.temp_counter.wrapping_add(amount);
+
+        (storage_name, paths)
     }
 }

@@ -12,7 +12,7 @@ use crate::{
     semantic::error::{ConflictingFunctionNames, InvalidFunctionArguments, UnexpectedExpression},
 };
 
-use super::{expression::ValueType, FunctionData};
+use super::{expression::ExpectedType, FunctionData};
 
 /// Errors that can occur during transpilation.
 #[allow(clippy::module_name_repetitions, missing_docs)]
@@ -40,6 +40,8 @@ pub enum TranspileError {
     AssignmentError(#[from] AssignmentError),
     #[error(transparent)]
     UnknownIdentifier(#[from] UnknownIdentifier),
+    #[error(transparent)]
+    MissingValue(#[from] MissingValue),
 }
 
 /// The result of a transpilation operation.
@@ -193,7 +195,7 @@ impl std::error::Error for IllegalAnnotationContent {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MismatchedTypes {
     pub expression: Span,
-    pub expected_type: ValueType,
+    pub expected_type: ExpectedType,
 }
 
 impl Display for MismatchedTypes {
@@ -280,3 +282,30 @@ impl Display for UnknownIdentifier {
 }
 
 impl std::error::Error for UnknownIdentifier {}
+
+/// An error that occurs when there is a value expected but none provided.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingValue {
+    pub expression: Span,
+}
+
+impl Display for MissingValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            Message::new(
+                Severity::Error,
+                "The expression is expected to return a value, but no value is found."
+            )
+        )?;
+
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(&self.expression, Option::<u8>::None)
+        )
+    }
+}
+
+impl std::error::Error for MissingValue {}

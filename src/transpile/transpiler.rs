@@ -1,13 +1,17 @@
 //! Transpiler for `Shulkerscript`
 
 use chksum_md5 as md5;
+use enum_as_inner::EnumAsInner;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     ops::Deref,
     sync::{Arc, OnceLock},
 };
 
-use shulkerbox::datapack::{self, Command, Datapack, Execute};
+use shulkerbox::{
+    datapack::{self, Command, Datapack, Execute},
+    util::{MacroString, MacroStringPart},
+};
 
 use crate::{
     base::{
@@ -30,8 +34,8 @@ use crate::{
 };
 
 use super::{
-    error::{MismatchedTypes, TranspileError, TranspileResult},
-    expression::{ComptimeValue, ExtendedCondition, ValueType},
+    error::{MismatchedTypes, TranspileError, TranspileResult, UnknownIdentifier},
+    expression::{ComptimeValue, ExpectedType, ExtendedCondition, StorageType},
     variables::{Scope, VariableData},
     FunctionData, TranspileAnnotationValue,
 };
@@ -50,6 +54,13 @@ pub struct Transpiler {
     functions: BTreeMap<(String, String), FunctionData>,
     /// Key: alias, Value: target
     aliases: HashMap<(String, String), (String, String)>,
+}
+
+#[derive(Debug, Clone)]
+pub enum TranspiledFunctionArguments {
+    None,
+    Static(BTreeMap<String, MacroString>),
+    Dynamic(Vec<Command>),
 }
 
 impl Transpiler {
@@ -265,22 +276,20 @@ impl Transpiler {
         arguments: Option<&[&Expression]>,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<(String, Option<BTreeMap<String, String>>)> {
+    ) -> TranspileResult<(String, TranspiledFunctionArguments)> {
         let program_identifier = identifier_span.source_file().identifier();
         let program_query = (
             program_identifier.to_string(),
             identifier_span.str().to_string(),
         );
         let alias_query = self.aliases.get(&program_query).cloned();
-        let already_transpiled = match scope
+        let already_transpiled = scope
             .get_variable(identifier_span.str())
             .expect("called function should be in scope")
             .as_ref()
-        {
-            VariableData::Function { path, .. } => Some(path.get().is_some()),
-            _ => None,
-        }
-        .expect("called variable should be of type function");
+            .as_function()
+            .map(|(_, path)| path.get().is_some())
+            .expect("called variable should be of type function");
 
         let function_data = scope
             .get_variable(identifier_span.str())
@@ -331,7 +340,7 @@ impl Transpiler {
                 |val| match val {
                     TranspileAnnotationValue::None => Ok(identifier_span.str().to_string()),
                     TranspileAnnotationValue::Expression(expr) => expr
-                        .comptime_eval(scope)
+                        .comptime_eval(scope, handler)
                         .and_then(|val| val.to_string_no_macro())
                         .ok_or_else(|| {
                             let err = TranspileError::IllegalAnnotationContent(
@@ -385,7 +394,7 @@ impl Transpiler {
             function_path.set(function_location.clone()).unwrap();
         }
 
-        let parameters = function_data.parameters.clone();
+        let parameters = &function_data.parameters;
 
         let function_location = function_path
             .get()
@@ -402,71 +411,185 @@ impl Transpiler {
         if arg_count.is_some_and(|arg_count| arg_count != parameters.len()) {
             let err = TranspileError::InvalidFunctionArguments(InvalidFunctionArguments {
                 expected: parameters.len(),
-                actual: arg_count.expect("checked in if condition"),
+                actual: arg_count.unwrap_or_default(),
                 span: identifier_span.clone(),
             });
             handler.receive(err.clone());
             Err(err)
         } else if arg_count.is_some_and(|arg_count| arg_count > 0) {
-            let mut compiled_args = Vec::new();
-            let mut errs = Vec::new();
-            for expression in arguments.iter().flat_map(|x| x.iter()) {
-                let value = match expression {
-                    Expression::Primary(Primary::FunctionCall(func)) => self
-                        .transpile_function_call(func, scope, handler)
-                        .map(|cmd| match cmd {
-                            Command::Raw(s) => s,
-                            _ => unreachable!("Function call should always return a raw command"),
-                        }),
-                    Expression::Primary(Primary::Lua(lua)) => {
-                        lua.eval_comptime(handler).and_then(|opt| {
-                            opt.map_or_else(
-                                || {
+            {
+                #[derive(Debug, Clone, EnumAsInner)]
+                enum Parameter {
+                    Static(MacroString),
+                    Dynamic {
+                        prepare_cmds: Vec<Command>,
+                        storage_name: String,
+                        path: String,
+                    },
+                }
+
+                let mut compiled_args = Vec::new();
+                let mut errs = Vec::new();
+
+                for expression in arguments.iter().flat_map(|x| x.iter()) {
+                    let value = match expression {
+                        Expression::Primary(Primary::Lua(lua)) => {
+                            lua.eval_comptime(handler).and_then(|val| match val {
+                                Some(ComptimeValue::MacroString(s)) => Ok(Parameter::Static(s)),
+                                Some(val) => Ok(Parameter::Static(val.to_string().into())),
+                                None => {
                                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
                                         expression: expression.span(),
-                                        expected_type: ValueType::String,
+                                        expected_type: ExpectedType::String,
                                     });
                                     handler.receive(err.clone());
                                     Err(err)
+                                }
+                            })
+                        }
+                        Expression::Primary(Primary::Integer(num)) => {
+                            Ok(Parameter::Static(num.span.str().to_string().into()))
+                        }
+                        Expression::Primary(Primary::Boolean(bool)) => {
+                            Ok(Parameter::Static(bool.span.str().to_string().into()))
+                        }
+                        Expression::Primary(Primary::StringLiteral(string)) => {
+                            Ok(Parameter::Static(string.str_content().to_string().into()))
+                        }
+                        Expression::Primary(Primary::MacroStringLiteral(literal)) => {
+                            Ok(Parameter::Static(literal.into()))
+                        }
+                        Expression::Primary(primary @ Primary::Identifier(ident)) => {
+                            let var = scope.get_variable(ident.span.str()).ok_or_else(|| {
+                                let err = TranspileError::UnknownIdentifier(UnknownIdentifier {
+                                    identifier: ident.span(),
+                                });
+                                handler.receive(err.clone());
+                                err
+                            })?;
+                            match var.as_ref() {
+                                VariableData::FunctionArgument { .. } => {
+                                    Ok(Parameter::Static(MacroString::MacroString(vec![
+                                        MacroStringPart::MacroUsage(
+                                            crate::util::identifier_to_macro(ident.span.str())
+                                                .to_string(),
+                                        ),
+                                    ])))
+                                }
+
+                                VariableData::BooleanStorage { .. }
+                                | VariableData::ScoreboardValue { .. } => {
+                                    let (temp_storage, mut temp_path) =
+                                        self.get_temp_storage_locations(1);
+                                    let prepare_cmds = self.transpile_primary_expression(
+                                        primary,
+                                        &super::expression::DataLocation::Storage {
+                                            storage_name: temp_storage.clone(),
+                                            path: temp_path[0].clone(),
+                                            r#type: StorageType::Int,
+                                        },
+                                        scope,
+                                        handler,
+                                    )?;
+
+                                    Ok(Parameter::Dynamic {
+                                        prepare_cmds: dbg!(prepare_cmds),
+                                        storage_name: temp_storage,
+                                        path: std::mem::take(&mut temp_path[0]),
+                                    })
+                                }
+                                _ => todo!("other variable types"),
+                            }
+                        }
+                        Expression::Primary(
+                            Primary::Parenthesized(_)
+                            | Primary::Prefix(_)
+                            | Primary::FunctionCall(_),
+                        )
+                        | Expression::Binary(_) => {
+                            let (temp_storage, mut temp_path) = self.get_temp_storage_locations(1);
+                            let prepare_cmds = self.transpile_expression(
+                                expression,
+                                &super::expression::DataLocation::Storage {
+                                    storage_name: temp_storage.clone(),
+                                    path: temp_path[0].clone(),
+                                    r#type: StorageType::Int,
                                 },
-                                |val| Ok(val.to_string()),
-                            )
-                        })
-                    }
-                    Expression::Primary(Primary::Integer(num)) => Ok(num.span.str().to_string()),
-                    Expression::Primary(Primary::Boolean(bool)) => Ok(bool.span.str().to_string()),
-                    Expression::Primary(Primary::StringLiteral(string)) => {
-                        Ok(string.str_content().to_string())
-                    }
-                    Expression::Primary(Primary::MacroStringLiteral(literal)) => {
-                        Ok(literal.str_content())
-                    }
-                    Expression::Primary(
-                        Primary::Identifier(_) | Primary::Parenthesized(_) | Primary::Prefix(_),
-                    ) => {
-                        todo!("allow identifiers, parenthesized & prefix expressions as arguments")
-                    }
+                                scope,
+                                handler,
+                            )?;
 
-                    Expression::Binary(_) => todo!("allow binary expressions as arguments"),
-                };
+                            Ok(Parameter::Dynamic {
+                                prepare_cmds,
+                                storage_name: temp_storage,
+                                path: std::mem::take(&mut temp_path[0]),
+                            })
+                        }
+                    };
 
-                match value {
-                    Ok(value) => {
-                        compiled_args.push(value);
-                    }
-                    Err(err) => {
-                        compiled_args.push(String::new());
-                        errs.push(err.clone());
+                    match value {
+                        Ok(value) => {
+                            compiled_args.push(value);
+                        }
+                        Err(err) => {
+                            compiled_args
+                                .push(Parameter::Static(MacroString::String(String::new())));
+                            errs.push(err.clone());
+                        }
                     }
                 }
+                if let Some(err) = errs.first() {
+                    return Err(err.clone());
+                }
+                if compiled_args.iter().any(|arg| !arg.is_static()) {
+                    let (mut setup_cmds, move_cmds) = parameters.clone().into_iter().zip(compiled_args).fold(
+                        (Vec::new(), Vec::new()),
+                        |(mut acc_setup, mut acc_move), (arg_name, data)| {
+                            let arg_name = crate::util::identifier_to_macro(&arg_name);
+                            match data {
+                            Parameter::Static(s) => {
+                                // TODO: optimize by combining into single `data merge` command
+                                let move_cmd = match s {
+                                    MacroString::String(value) => Command::Raw(format!(r#"data modify storage shulkerscript:function_arguments {arg_name} set value "{value}""#, value = crate::util::escape_str(&value))),
+                                    MacroString::MacroString(mut parts) => {
+                                        parts.insert(0, MacroStringPart::String(format!(r#"data modify storage shulkerscript:function_arguments {arg_name} set value ""#)));
+                                        parts.push(MacroStringPart::String('"'.to_string()));
+                                        Command::UsesMacro(MacroString::MacroString(parts))
+                                    }
+                                };
+                                acc_move.push(move_cmd);
+                            }
+                            Parameter::Dynamic { prepare_cmds, storage_name, path } => {
+                                acc_setup.extend(prepare_cmds);
+                                acc_move.push(Command::Raw(format!(r#"data modify storage shulkerscript:function_arguments {arg_name} set from storage {storage_name} {path}"#)));
+                            }
+                        }
+                        (acc_setup, acc_move)},
+                    );
+                    setup_cmds.extend(move_cmds);
+
+                    Ok((
+                        function_location,
+                        TranspiledFunctionArguments::Dynamic(setup_cmds),
+                    ))
+                } else {
+                    let function_args = parameters
+                        .clone()
+                        .into_iter()
+                        .zip(
+                            compiled_args
+                                .into_iter()
+                                .map(|arg| arg.into_static().expect("checked in if condition")),
+                        )
+                        .collect();
+                    Ok((
+                        function_location,
+                        TranspiledFunctionArguments::Static(function_args),
+                    ))
+                }
             }
-            if let Some(err) = errs.first() {
-                return Err(err.clone());
-            }
-            let function_args = parameters.into_iter().zip(compiled_args).collect();
-            Ok((function_location, Some(function_args)))
         } else {
-            Ok((function_location, None))
+            Ok((function_location, TranspiledFunctionArguments::None))
         }
     }
 
@@ -556,9 +679,9 @@ impl Transpiler {
             }
             Statement::Semicolon(semi) => match semi.statement() {
                 SemicolonStatement::Expression(expr) => match expr {
-                    Expression::Primary(Primary::FunctionCall(func)) => self
-                        .transpile_function_call(func, scope, handler)
-                        .map(|cmd| vec![cmd]),
+                    Expression::Primary(Primary::FunctionCall(func)) => {
+                        self.transpile_function_call(func, scope, handler)
+                    }
                     unexpected => {
                         let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
                             unexpected.clone(),
@@ -589,9 +712,9 @@ impl Transpiler {
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Vec<Command>> {
         match expression {
-            Expression::Primary(Primary::FunctionCall(func)) => self
-                .transpile_function_call(func, scope, handler)
-                .map(|cmd| vec![cmd]),
+            Expression::Primary(Primary::FunctionCall(func)) => {
+                self.transpile_function_call(func, scope, handler)
+            }
             expression @ Expression::Primary(
                 Primary::Integer(_)
                 | Primary::Boolean(_)
@@ -610,13 +733,11 @@ impl Transpiler {
                 Ok(vec![Command::UsesMacro(string.into())])
             }
             Expression::Primary(Primary::Lua(code)) => match code.eval_comptime(handler)? {
-                Some(ComptimeValue::String(cmd) | ComptimeValue::MacroString(cmd)) => {
-                    // TODO: mark command as containing macro if so
-                    Ok(vec![Command::Raw(cmd)])
-                }
+                Some(ComptimeValue::String(cmd)) => Ok(vec![Command::Raw(cmd)]),
+                Some(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd)]),
                 Some(ComptimeValue::Boolean(_) | ComptimeValue::Integer(_)) => {
                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                        expected_type: ValueType::String,
+                        expected_type: ExpectedType::String,
                         expression: code.span(),
                     });
                     handler.receive(err.clone());
@@ -632,16 +753,11 @@ impl Transpiler {
                     scope,
                     handler,
                 ),
-            Expression::Binary(bin) => {
-                if let Some(ComptimeValue::String(cmd) | ComptimeValue::MacroString(cmd)) =
-                    bin.comptime_eval(scope)
-                {
-                    // TODO: mark as containing macro if so
-                    Ok(vec![Command::Raw(cmd)])
-                } else {
-                    todo!("run binary expression")
-                }
-            }
+            Expression::Binary(bin) => match bin.comptime_eval(scope, handler) {
+                Some(ComptimeValue::String(cmd)) => Ok(vec![Command::Raw(cmd)]),
+                Some(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd)]),
+                _ => todo!("run binary expression"),
+            },
         }
     }
 
@@ -650,7 +766,7 @@ impl Transpiler {
         func: &FunctionCall,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<Command> {
+    ) -> TranspileResult<Vec<Command>> {
         let arguments = func
             .arguments()
             .as_ref()
@@ -662,22 +778,78 @@ impl Transpiler {
             handler,
         )?;
         let mut function_call = format!("function {location}");
-        if let Some(arguments) = arguments {
-            use std::fmt::Write;
-            let arguments = arguments
-                .iter()
-                .map(|(ident, v)| {
-                    format!(
-                        r#"{macro_name}:"{escaped}""#,
-                        macro_name = crate::util::identifier_to_macro(ident),
-                        escaped = crate::util::escape_str(v)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(",");
-            write!(function_call, " {{{arguments}}}").unwrap();
+        match arguments {
+            TranspiledFunctionArguments::Static(arguments) => {
+                use std::fmt::Write;
+                let arguments = arguments
+                    .iter()
+                    .map(|(ident, v)| match v {
+                        MacroString::String(s) => MacroString::String(format!(
+                            r#"{macro_name}:"{escaped}""#,
+                            macro_name = crate::util::identifier_to_macro(ident),
+                            escaped = crate::util::escape_str(s)
+                        )),
+                        MacroString::MacroString(parts) => MacroString::MacroString(
+                            std::iter::once(MacroStringPart::String(format!(
+                                r#"{macro_name}:""#,
+                                macro_name = crate::util::identifier_to_macro(ident)
+                            )))
+                            .chain(parts.clone().into_iter().map(|part| match part {
+                                MacroStringPart::String(s) => {
+                                    MacroStringPart::String(crate::util::escape_str(&s).to_string())
+                                }
+                                macro_usage @ MacroStringPart::MacroUsage(_) => macro_usage,
+                            }))
+                            .chain(std::iter::once(MacroStringPart::String('"'.to_string())))
+                            .collect(),
+                        ),
+                    })
+                    .fold(MacroString::String(String::new()), |acc, cur| match acc {
+                        MacroString::String(mut s) => match cur {
+                            MacroString::String(cur) => {
+                                s.push_str(&cur);
+                                MacroString::String(s)
+                            }
+                            MacroString::MacroString(cur) => {
+                                let mut parts = vec![MacroStringPart::String(s)];
+                                parts.extend(cur);
+                                MacroString::MacroString(parts)
+                            }
+                        },
+                        MacroString::MacroString(mut parts) => match cur {
+                            MacroString::String(cur) => {
+                                parts.push(MacroStringPart::String(cur));
+                                MacroString::MacroString(parts)
+                            }
+                            MacroString::MacroString(cur) => {
+                                parts.extend(cur);
+                                MacroString::MacroString(parts)
+                            }
+                        },
+                    });
+
+                let cmd = match arguments {
+                    MacroString::String(arguments) => {
+                        write!(function_call, " {{{arguments}}}").unwrap();
+                        Command::Raw(function_call)
+                    }
+                    MacroString::MacroString(mut parts) => {
+                        function_call.push_str(" {");
+                        parts.insert(0, MacroStringPart::String(function_call));
+                        parts.push(MacroStringPart::String('}'.to_string()));
+                        Command::UsesMacro(MacroString::MacroString(parts))
+                    }
+                };
+
+                Ok(vec![cmd])
+            }
+            TranspiledFunctionArguments::Dynamic(mut cmds) => {
+                function_call.push_str(" with storage shulkerscript:function_arguments");
+                cmds.push(Command::Raw(function_call));
+                Ok(cmds)
+            }
+            TranspiledFunctionArguments::None => Ok(vec![Command::Raw(function_call)]),
         }
-        Ok(Command::Raw(function_call))
     }
 
     fn transpile_execute_block(
@@ -830,7 +1002,7 @@ impl Transpiler {
             }
         });
 
-        if let Some(ComptimeValue::Boolean(value)) = cond_expression.comptime_eval(scope) {
+        if let Some(ComptimeValue::Boolean(value)) = cond_expression.comptime_eval(scope, handler) {
             if value {
                 Ok(Some((Vec::new(), then)))
             } else {
