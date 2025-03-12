@@ -269,7 +269,7 @@ impl Transpiler {
                     },
                 );
             }
-            _ => todo!("implement other variable types"),
+            _ => unreachable!("no other variable types"),
         }
 
         single.assignment().as_ref().map_or_else(
@@ -306,7 +306,7 @@ impl Transpiler {
                     })
                 }
                 VariableData::Function { .. } | VariableData::FunctionArgument { .. } => {
-                    Err(TranspileError::AssignmentError(AssignmentError {
+                    let err = TranspileError::AssignmentError(AssignmentError {
                         identifier: identifier.span(),
                         message: format!(
                             "Cannot assign to a {}.",
@@ -316,16 +316,20 @@ impl Transpiler {
                                 "function argument"
                             }
                         ),
-                    }))
+                    });
+                    handler.receive(err.clone());
+                    Err(err)
                 }
                 _ => todo!("implement other variable types"),
             }?;
             self.transpile_expression(expression, &data_location, scope, handler)
         } else {
-            Err(TranspileError::AssignmentError(AssignmentError {
+            let err = TranspileError::AssignmentError(AssignmentError {
                 identifier: identifier.span(),
                 message: "Variable does not exist.".to_string(),
-            }))
+            });
+            handler.receive(err.clone());
+            Err(err)
         }
     }
 }

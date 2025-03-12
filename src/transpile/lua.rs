@@ -7,19 +7,19 @@ mod enabled {
     use crate::{
         base::{self, source_file::SourceElement, Handler},
         syntax::syntax_tree::expression::LuaCode,
-        transpile::error::{LuaRuntimeError, TranspileError, TranspileResult},
+        transpile::{
+            error::{LuaRuntimeError, TranspileError, TranspileResult},
+            expression::ComptimeValue,
+        },
     };
 
     impl LuaCode {
-        /// Evaluates the Lua code and returns the resulting command.
+        /// Evaluated the Lua code and returns the resulting value.
         ///
         /// # Errors
-        /// - If Lua code evaluation is disabled.
+        /// - If evaluation fails
         #[tracing::instrument(level = "debug", name = "eval_lua", skip_all, ret)]
-        pub fn eval_string(
-            &self,
-            handler: &impl Handler<base::Error>,
-        ) -> TranspileResult<Option<String>> {
+        pub fn eval(&self, handler: &impl Handler<base::Error>) -> TranspileResult<mlua::Value> {
             tracing::debug!("Evaluating Lua code");
 
             let lua = Lua::new();
@@ -48,8 +48,7 @@ mod enabled {
 
             self.add_globals(&lua).unwrap();
 
-            let lua_result = lua
-                .load(self.code())
+            lua.load(self.code())
                 .set_name(name)
                 .eval::<Value>()
                 .map_err(|err| {
@@ -57,7 +56,19 @@ mod enabled {
                         TranspileError::from(LuaRuntimeError::from_lua_err(&err, self.span()));
                     handler.receive(crate::Error::from(err.clone()));
                     err
-                })?;
+                })
+        }
+
+        /// Evaluates the Lua code and returns the resulting [`ComptimeValue`].
+        ///
+        /// # Errors
+        /// - If Lua code evaluation is disabled.
+        #[tracing::instrument(level = "debug", name = "eval_lua", skip_all, ret)]
+        pub fn eval_comptime(
+            &self,
+            handler: &impl Handler<base::Error>,
+        ) -> TranspileResult<Option<ComptimeValue>> {
+            let lua_result = self.eval(handler)?;
 
             self.handle_lua_result(lua_result).inspect_err(|err| {
                 handler.receive(err.clone());
@@ -77,28 +88,32 @@ mod enabled {
             Ok(())
         }
 
-        fn handle_lua_result(&self, value: Value) -> TranspileResult<Option<String>> {
+        fn handle_lua_result(&self, value: Value) -> TranspileResult<Option<ComptimeValue>> {
             match value {
                 Value::Nil => Ok(None),
-                Value::String(s) => Ok(Some(s.to_string_lossy())),
-                Value::Integer(i) => Ok(Some(i.to_string())),
-                Value::Number(n) => Ok(Some(n.to_string())),
+                Value::String(s) => Ok(Some(ComptimeValue::String(s.to_string_lossy()))),
+                Value::Integer(i) => Ok(Some(ComptimeValue::Integer(i))),
+                // TODO: change when floating point comptime numbers are supported
+                Value::Number(n) => Ok(Some(ComptimeValue::String(n.to_string()))),
                 Value::Function(f) => self.handle_lua_result(f.call(()).map_err(|err| {
                     TranspileError::LuaRuntimeError(LuaRuntimeError::from_lua_err(
                         &err,
                         self.span(),
                     ))
                 })?),
-                Value::Boolean(_)
-                | Value::Error(_)
+                Value::Boolean(boolean) => Ok(Some(ComptimeValue::Boolean(boolean))),
+                Value::Error(_)
                 | Value::Table(_)
                 | Value::Thread(_)
                 | Value::UserData(_)
                 | Value::LightUserData(_)
-                | Value::Other(..) => Err(TranspileError::LuaRuntimeError(LuaRuntimeError {
-                    code_block: self.span(),
-                    error_message: format!("invalid return type {}", value.type_name()),
-                })),
+                | Value::Other(..) => {
+                    let err = TranspileError::LuaRuntimeError(LuaRuntimeError {
+                        code_block: self.span(),
+                        error_message: format!("invalid return type {}", value.type_name()),
+                    });
+                    todo!("pass error to handler: {err}")
+                }
             }
         }
     }
@@ -112,16 +127,30 @@ mod disabled {
         transpile::error::{TranspileError, TranspileResult},
     };
 
+    use super::expression::ComptimeValue;
+
     impl LuaCode {
         /// Will always return an error because Lua code evaluation is disabled.
         /// Enable the feature `lua` to enable Lua code evaluation.
         ///
         /// # Errors
+        /// - Always, as the lua feature is disabled
+        #[tracing::instrument(level = "debug", name = "eval_lua", skip_all, ret)]
+        pub fn eval(&self, handler: &impl Handler<base::Error>) -> TranspileResult<mlua::Value> {
+            handler.receive(TranspileError::LuaDisabled);
+            tracing::error!("Lua code evaluation is disabled");
+            Err(TranspileError::LuaDisabled)
+        }
+
+        /// Will always return an error because Lua code evaluation is disabled.
+        /// Enable the feature `lua` to enable Lua code evaluation.
+        ///
+        /// # Errors
         /// - If Lua code evaluation is disabled.
-        pub fn eval_string(
+        pub fn eval_comptime(
             &self,
             handler: &impl Handler<base::Error>,
-        ) -> TranspileResult<Option<String>> {
+        ) -> TranspileResult<Option<ComptimeValue>> {
             handler.receive(TranspileError::LuaDisabled);
             tracing::error!("Lua code evaluation is disabled");
             Err(TranspileError::LuaDisabled)

@@ -30,8 +30,8 @@ use crate::{
 };
 
 use super::{
-    error::{TranspileError, TranspileResult},
-    expression::{ComptimeValue, ExtendedCondition},
+    error::{MismatchedTypes, TranspileError, TranspileResult},
+    expression::{ComptimeValue, ExtendedCondition, ValueType},
     variables::{Scope, VariableData},
     FunctionData, TranspileAnnotationValue,
 };
@@ -419,7 +419,19 @@ impl Transpiler {
                             _ => unreachable!("Function call should always return a raw command"),
                         }),
                     Expression::Primary(Primary::Lua(lua)) => {
-                        lua.eval_string(handler).map(Option::unwrap_or_default)
+                        lua.eval_comptime(handler).and_then(|opt| {
+                            opt.map_or_else(
+                                || {
+                                    let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                                        expression: expression.span(),
+                                        expected_type: ValueType::String,
+                                    });
+                                    handler.receive(err.clone());
+                                    Err(err)
+                                },
+                                |val| Ok(val.to_string()),
+                            )
+                        })
                     }
                     Expression::Primary(Primary::Integer(num)) => Ok(num.span.str().to_string()),
                     Expression::Primary(Primary::Boolean(bool)) => Ok(bool.span.str().to_string()),
@@ -597,9 +609,22 @@ impl Transpiler {
             Expression::Primary(Primary::MacroStringLiteral(string)) => {
                 Ok(vec![Command::UsesMacro(string.into())])
             }
-            Expression::Primary(Primary::Lua(code)) => Ok(code
-                .eval_string(handler)?
-                .map_or_else(Vec::new, |cmd| vec![Command::Raw(cmd)])),
+            Expression::Primary(Primary::Lua(code)) => match code.eval_comptime(handler)? {
+                Some(ComptimeValue::String(cmd) | ComptimeValue::MacroString(cmd)) => {
+                    // TODO: mark command as containing macro if so
+                    Ok(vec![Command::Raw(cmd)])
+                }
+                Some(ComptimeValue::Boolean(_) | ComptimeValue::Integer(_)) => {
+                    let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                        expected_type: ValueType::String,
+                        expression: code.span(),
+                    });
+                    handler.receive(err.clone());
+                    Err(err)
+                }
+                None => Ok(Vec::new()),
+            },
+
             Expression::Primary(Primary::Parenthesized(parenthesized)) => self
                 .transpile_run_expression(
                     parenthesized.expression(),
@@ -607,7 +632,16 @@ impl Transpiler {
                     scope,
                     handler,
                 ),
-            Expression::Binary(_) => todo!("transpile binary expression in run statement"),
+            Expression::Binary(bin) => {
+                if let Some(ComptimeValue::String(cmd) | ComptimeValue::MacroString(cmd)) =
+                    bin.comptime_eval(scope)
+                {
+                    // TODO: mark as containing macro if so
+                    Ok(vec![Command::Raw(cmd)])
+                } else {
+                    todo!("run binary expression")
+                }
+            }
         }
     }
 
