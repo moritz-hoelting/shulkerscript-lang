@@ -268,7 +268,6 @@ impl Transpiler {
 
     /// Gets the function at the given path, or transpiles it if it hasn't been transpiled yet.
     /// Returns the location of the function or None if the function does not exist.
-    #[allow(clippy::significant_drop_tightening)]
     #[tracing::instrument(level = "trace", skip(self, handler))]
     pub(super) fn get_or_transpile_function(
         &mut self,
@@ -324,7 +323,13 @@ impl Transpiler {
             let function_scope = Scope::with_parent(scope);
 
             for (i, param) in function_data.parameters.iter().enumerate() {
-                function_scope.set_variable(param, VariableData::FunctionArgument { index: i });
+                function_scope.set_variable(
+                    param,
+                    VariableData::MacroParameter {
+                        index: i,
+                        macro_name: crate::util::identifier_to_macro(param).to_string(),
+                    },
+                );
             }
 
             let statements = function_data.statements.clone();
@@ -468,12 +473,9 @@ impl Transpiler {
                                 err
                             })?;
                             match var.as_ref() {
-                                VariableData::FunctionArgument { .. } => {
+                                VariableData::MacroParameter { macro_name, .. } => {
                                     Ok(Parameter::Static(MacroString::MacroString(vec![
-                                        MacroStringPart::MacroUsage(
-                                            crate::util::identifier_to_macro(ident.span.str())
-                                                .to_string(),
-                                        ),
+                                        MacroStringPart::MacroUsage(macro_name.clone()),
                                     ])))
                                 }
 
@@ -486,14 +488,22 @@ impl Transpiler {
                                         &super::expression::DataLocation::Storage {
                                             storage_name: temp_storage.clone(),
                                             path: temp_path[0].clone(),
-                                            r#type: StorageType::Int,
+                                            r#type: match var.as_ref() {
+                                                VariableData::BooleanStorage { .. } => {
+                                                    StorageType::Boolean
+                                                }
+                                                VariableData::ScoreboardValue { .. } => {
+                                                    StorageType::Int
+                                                }
+                                                _ => unreachable!("checked in parent match"),
+                                            },
                                         },
                                         scope,
                                         handler,
                                     )?;
 
                                     Ok(Parameter::Dynamic {
-                                        prepare_cmds: dbg!(prepare_cmds),
+                                        prepare_cmds,
                                         storage_name: temp_storage,
                                         path: std::mem::take(&mut temp_path[0]),
                                     })
@@ -542,30 +552,70 @@ impl Transpiler {
                     return Err(err.clone());
                 }
                 if compiled_args.iter().any(|arg| !arg.is_static()) {
-                    let (mut setup_cmds, move_cmds) = parameters.clone().into_iter().zip(compiled_args).fold(
-                        (Vec::new(), Vec::new()),
-                        |(mut acc_setup, mut acc_move), (arg_name, data)| {
+                    let (mut setup_cmds, move_cmds, static_params) = parameters.clone().into_iter().zip(compiled_args).fold(
+                        (Vec::new(), Vec::new(), BTreeMap::new()),
+                        |(mut acc_setup, mut acc_move, mut statics), (arg_name, data)| {
                             let arg_name = crate::util::identifier_to_macro(&arg_name);
                             match data {
                             Parameter::Static(s) => {
-                                // TODO: optimize by combining into single `data merge` command
-                                let move_cmd = match s {
-                                    MacroString::String(value) => Command::Raw(format!(r#"data modify storage shulkerscript:function_arguments {arg_name} set value "{value}""#, value = crate::util::escape_str(&value))),
-                                    MacroString::MacroString(mut parts) => {
-                                        parts.insert(0, MacroStringPart::String(format!(r#"data modify storage shulkerscript:function_arguments {arg_name} set value ""#)));
-                                        parts.push(MacroStringPart::String('"'.to_string()));
-                                        Command::UsesMacro(MacroString::MacroString(parts))
+                                match s {
+                                    MacroString::String(value) => statics.insert(arg_name.to_string(), MacroString::String(crate::util::escape_str(&value).to_string())),
+                                    MacroString::MacroString(parts) => {
+                                        let parts = parts.into_iter().map(|part| {
+                                            match part {
+                                                MacroStringPart::String(s) => MacroStringPart::String(crate::util::escape_str(&s).to_string()),
+                                                MacroStringPart::MacroUsage(m) => MacroStringPart::MacroUsage(m),
+                                            }
+                                        }).collect();
+                                        statics.insert(arg_name.to_string(), MacroString::MacroString(parts))
                                     }
                                 };
-                                acc_move.push(move_cmd);
                             }
                             Parameter::Dynamic { prepare_cmds, storage_name, path } => {
                                 acc_setup.extend(prepare_cmds);
                                 acc_move.push(Command::Raw(format!(r#"data modify storage shulkerscript:function_arguments {arg_name} set from storage {storage_name} {path}"#)));
                             }
                         }
-                        (acc_setup, acc_move)},
+                        (acc_setup, acc_move, statics)},
                     );
+                    let statics_len = static_params.len();
+                    let joined_statics =
+                        super::util::join_macro_strings(static_params.into_iter().enumerate().map(
+                            |(i, (k, v))| match v {
+                                MacroString::String(s) => {
+                                    let mut s = format!(r#"{k}:"{s}""#);
+                                    if i < statics_len - 1 {
+                                        s.push(',');
+                                    }
+                                    MacroString::String(s)
+                                }
+                                MacroString::MacroString(mut parts) => {
+                                    parts.insert(0, MacroStringPart::String(format!(r#"{k}:""#)));
+                                    let mut ending = '"'.to_string();
+                                    if i < statics_len - 1 {
+                                        ending.push(',');
+                                    }
+                                    parts.push(MacroStringPart::String(ending));
+                                    MacroString::MacroString(parts)
+                                }
+                            },
+                        ));
+                    let statics_cmd = match joined_statics {
+                        MacroString::String(s) => Command::Raw(format!(
+                            r#"data merge storage shulkerscript:function_arguments {{{s}}}"#
+                        )),
+                        MacroString::MacroString(_) => {
+                            Command::UsesMacro(super::util::join_macro_strings([
+                                MacroString::String(
+                                    "data merge storage shulkerscript:function_arguments {"
+                                        .to_string(),
+                                ),
+                                joined_statics,
+                                MacroString::String("}".to_string()),
+                            ]))
+                        }
+                    };
+                    setup_cmds.push(statics_cmd);
                     setup_cmds.extend(move_cmds);
 
                     Ok((
@@ -756,7 +806,14 @@ impl Transpiler {
             Expression::Binary(bin) => match bin.comptime_eval(scope, handler) {
                 Some(ComptimeValue::String(cmd)) => Ok(vec![Command::Raw(cmd)]),
                 Some(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd)]),
-                _ => todo!("run binary expression"),
+                _ => {
+                    let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                        expression: bin.span(),
+                        expected_type: ExpectedType::String,
+                    });
+                    handler.receive(err.clone());
+                    Err(err)
+                }
             },
         }
     }
@@ -781,52 +838,28 @@ impl Transpiler {
         match arguments {
             TranspiledFunctionArguments::Static(arguments) => {
                 use std::fmt::Write;
-                let arguments = arguments
-                    .iter()
-                    .map(|(ident, v)| match v {
-                        MacroString::String(s) => MacroString::String(format!(
-                            r#"{macro_name}:"{escaped}""#,
-                            macro_name = crate::util::identifier_to_macro(ident),
-                            escaped = crate::util::escape_str(s)
-                        )),
-                        MacroString::MacroString(parts) => MacroString::MacroString(
-                            std::iter::once(MacroStringPart::String(format!(
-                                r#"{macro_name}:""#,
-                                macro_name = crate::util::identifier_to_macro(ident)
-                            )))
-                            .chain(parts.clone().into_iter().map(|part| match part {
-                                MacroStringPart::String(s) => {
-                                    MacroStringPart::String(crate::util::escape_str(&s).to_string())
-                                }
-                                macro_usage @ MacroStringPart::MacroUsage(_) => macro_usage,
-                            }))
-                            .chain(std::iter::once(MacroStringPart::String('"'.to_string())))
-                            .collect(),
-                        ),
-                    })
-                    .fold(MacroString::String(String::new()), |acc, cur| match acc {
-                        MacroString::String(mut s) => match cur {
-                            MacroString::String(cur) => {
-                                s.push_str(&cur);
-                                MacroString::String(s)
+                let arguments_iter = arguments.iter().map(|(ident, v)| match v {
+                    MacroString::String(s) => MacroString::String(format!(
+                        r#"{macro_name}:"{escaped}""#,
+                        macro_name = crate::util::identifier_to_macro(ident),
+                        escaped = crate::util::escape_str(s)
+                    )),
+                    MacroString::MacroString(parts) => MacroString::MacroString(
+                        std::iter::once(MacroStringPart::String(format!(
+                            r#"{macro_name}:""#,
+                            macro_name = crate::util::identifier_to_macro(ident)
+                        )))
+                        .chain(parts.clone().into_iter().map(|part| match part {
+                            MacroStringPart::String(s) => {
+                                MacroStringPart::String(crate::util::escape_str(&s).to_string())
                             }
-                            MacroString::MacroString(cur) => {
-                                let mut parts = vec![MacroStringPart::String(s)];
-                                parts.extend(cur);
-                                MacroString::MacroString(parts)
-                            }
-                        },
-                        MacroString::MacroString(mut parts) => match cur {
-                            MacroString::String(cur) => {
-                                parts.push(MacroStringPart::String(cur));
-                                MacroString::MacroString(parts)
-                            }
-                            MacroString::MacroString(cur) => {
-                                parts.extend(cur);
-                                MacroString::MacroString(parts)
-                            }
-                        },
-                    });
+                            macro_usage @ MacroStringPart::MacroUsage(_) => macro_usage,
+                        }))
+                        .chain(std::iter::once(MacroStringPart::String('"'.to_string())))
+                        .collect(),
+                    ),
+                });
+                let arguments = super::util::join_macro_strings(arguments_iter);
 
                 let cmd = match arguments {
                     MacroString::String(arguments) => {

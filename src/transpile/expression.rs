@@ -34,6 +34,7 @@ use crate::{
     },
 };
 
+// TODO: fix this leading to compile errors without 'shulkerbox' feature
 /// Compile-time evaluated value
 #[allow(missing_docs)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -419,25 +420,27 @@ impl Binary {
         let right = self.right_operand().comptime_eval(scope, handler)?;
 
         match (left, right) {
-            (ComptimeValue::Boolean(true), _) | (_, ComptimeValue::Boolean(true)) if matches!(self.operator(), BinaryOperator::LogicalOr(..))
-                // TODO: re-enable if can_yield_type works properly
-                /*&& self
-                    .left_operand()
-                    .can_yield_type(ValueType::Boolean, scope)
-                && self
-                    .right_operand()
-                    .can_yield_type(ValueType::Boolean, scope)*/ => {
-                        Some(ComptimeValue::Boolean(true))
+            (ComptimeValue::Boolean(true), _) | (_, ComptimeValue::Boolean(true))
+                if matches!(self.operator(), BinaryOperator::LogicalOr(..))
+                    && self
+                        .left_operand()
+                        .can_yield_type(ValueType::Boolean, scope)
+                    && self
+                        .right_operand()
+                        .can_yield_type(ValueType::Boolean, scope) =>
+            {
+                Some(ComptimeValue::Boolean(true))
             }
-            (ComptimeValue::Boolean(false), _) | (_, ComptimeValue::Boolean(false)) if matches!(self.operator(), BinaryOperator::LogicalAnd(..))
-                // TODO: re-enable if can_yield_type works properly
-                /*&& self
-                    .left_operand()
-                    .can_yield_type(ValueType::Boolean, scope)
-                && self
-                    .right_operand()
-                    .can_yield_type(ValueType::Boolean, scope)*/ => {
-                        Some(ComptimeValue::Boolean(false))
+            (ComptimeValue::Boolean(false), _) | (_, ComptimeValue::Boolean(false))
+                if matches!(self.operator(), BinaryOperator::LogicalAnd(..))
+                    && self
+                        .left_operand()
+                        .can_yield_type(ValueType::Boolean, scope)
+                    && self
+                        .right_operand()
+                        .can_yield_type(ValueType::Boolean, scope) =>
+            {
+                Some(ComptimeValue::Boolean(false))
             }
             (ComptimeValue::Boolean(left), ComptimeValue::Boolean(right)) => {
                 match self.operator() {
@@ -660,7 +663,7 @@ impl Transpiler {
                         target: score_target,
                     } => {
                         let mut expr_cmds = self.transpile_primary_expression(
-                            dbg!(prefix).operand(),
+                            prefix.operand(),
                             target,
                             scope,
                             handler,
@@ -711,18 +714,15 @@ impl Transpiler {
                     _ => {
                         let err = TranspileError::MismatchedTypes(MismatchedTypes {
                             expression: prefix.span(),
-                            expected_type: ExpectedType::Integer,
+                            expected_type: target.value_type().into(),
                         });
                         handler.receive(err.clone());
                         Err(err)
                     }
                 },
                 PrefixOperator::LogicalNot(_) => {
-                    let (mut cmds, cond) = self
-                        .transpile_primary_expression_as_condition(primary, scope, handler)
-                        .inspect_err(|err| {
-                            dbg!(err);
-                        })?;
+                    let (mut cmds, cond) =
+                        self.transpile_primary_expression_as_condition(primary, scope, handler)?;
 
                     let store_cmds =
                         self.store_condition_success(cond, target, primary, handler)?;
@@ -864,7 +864,7 @@ impl Transpiler {
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Vec<Command>> {
         if let Some(value) = binary.comptime_eval(scope, handler) {
-            self.transpile_comptime_value(&value, binary, target, scope, handler)
+            self.store_comptime_value(&value, target, binary, handler)
         } else {
             match binary.operator() {
                 BinaryOperator::Add(_)
@@ -977,12 +977,12 @@ impl Transpiler {
                                 format!("data storage {storage_name} {{{path}: 1b}}").into(),
                             )),
                         )),
-                        VariableData::FunctionArgument { .. } => Ok((
+                        VariableData::MacroParameter { macro_name, .. } => Ok((
                             Vec::new(),
                             ExtendedCondition::Runtime(Condition::Atom(
                                 shulkerbox::util::MacroString::MacroString(vec![
                                     shulkerbox::util::MacroStringPart::MacroUsage(
-                                        ident.span.str().to_string(),
+                                        macro_name.clone(),
                                     ),
                                 ]),
                             )),
@@ -1306,98 +1306,6 @@ impl Transpiler {
         }
     }
 
-    #[expect(clippy::unused_self)]
-    fn transpile_comptime_value(
-        &self,
-        value: &ComptimeValue,
-        original: &impl SourceElement,
-        target: &DataLocation,
-        _scope: &Arc<super::Scope>,
-        handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<Vec<Command>> {
-        match value {
-            ComptimeValue::Integer(value) => match target {
-                DataLocation::ScoreboardValue { objective, target } => Ok(vec![Command::Raw(
-                    format!("scoreboard players set {target} {objective} {value}"),
-                )]),
-                DataLocation::Tag { .. } => {
-                    let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                        expected_type: ExpectedType::Boolean,
-                        expression: original.span(),
-                    });
-                    handler.receive(err.clone());
-                    Err(err)
-                }
-                DataLocation::Storage {
-                    storage_name,
-                    path,
-                    r#type,
-                } => {
-                    if matches!(
-                        r#type,
-                        StorageType::Byte
-                            | StorageType::Double
-                            | StorageType::Int
-                            | StorageType::Long
-                    ) {
-                        Ok(vec![Command::Raw(format!(
-                            "data modify storage {storage_name} {path} set value {value}{suffix}",
-                            suffix = r#type.suffix(),
-                        ))])
-                    } else {
-                        let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                            expression: original.span(),
-                            expected_type: target.value_type().into(),
-                        });
-                        handler.receive(err.clone());
-                        Err(err)
-                    }
-                }
-            },
-            &ComptimeValue::Boolean(value) => match target {
-                DataLocation::ScoreboardValue { objective, target } => {
-                    Ok(vec![Command::Raw(format!(
-                        "scoreboard players set {target} {objective} {value}",
-                        value = u8::from(value)
-                    ))])
-                }
-                DataLocation::Tag { tag_name, entity } => Ok(vec![Command::Raw(format!(
-                    "tag {entity} {op} {tag_name}",
-                    op = if value { "add" } else { "remove" }
-                ))]),
-                DataLocation::Storage {
-                    storage_name,
-                    path,
-                    r#type,
-                } => {
-                    if matches!(r#type, StorageType::Boolean) {
-                        Ok(vec![Command::Raw(format!(
-                            "data modify storage {storage_name} {path} set value {value}{suffix}",
-                            value = u8::from(value),
-                            suffix = r#type.suffix(),
-                        ))])
-                    } else {
-                        let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                            expression: original.span(),
-                            expected_type: target.value_type().into(),
-                        });
-                        handler.receive(err.clone());
-                        Err(err)
-                    }
-                }
-            },
-            ComptimeValue::String(_) | ComptimeValue::MacroString(_) => {
-                let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                    expected_type: target.value_type().into(),
-                    expression: original.span(),
-                });
-                handler.receive(err.clone());
-                Err(err)
-            }
-        }
-    }
-
-    #[expect(clippy::needless_pass_by_ref_mut)]
     fn store_comptime_value(
         &mut self,
         value: &ComptimeValue,
@@ -1406,9 +1314,9 @@ impl Transpiler {
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Vec<Command>> {
         match value {
-            ComptimeValue::Integer(int) => match target {
+            ComptimeValue::Integer(value) => match target {
                 DataLocation::ScoreboardValue { objective, target } => Ok(vec![Command::Raw(
-                    format!("scoreboard players set {target} {objective} {int}"),
+                    format!("scoreboard players set {target} {objective} {value}"),
                 )]),
                 DataLocation::Tag { .. } => {
                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
@@ -1431,58 +1339,79 @@ impl Transpiler {
                             | StorageType::Long
                     ) {
                         Ok(vec![Command::Raw(format!(
-                            "data modify storage {storage} {path} set value {value}{suffix}",
-                            storage = storage_name,
-                            path = path,
-                            value = int,
-                            suffix = r#type.suffix()
+                            "data modify storage {storage_name} {path} set value {value}{suffix}",
+                            suffix = r#type.suffix(),
                         ))])
                     } else {
                         let err = TranspileError::MismatchedTypes(MismatchedTypes {
                             expression: source.span(),
-                            expected_type: ExpectedType::Integer,
+                            expected_type: target.value_type().into(),
                         });
                         handler.receive(err.clone());
                         Err(err)
                     }
                 }
             },
-            &ComptimeValue::Boolean(boolean) => match target {
-                DataLocation::Tag { tag_name, entity } => {
-                    let cmd = format!(
-                        "tag {target} {op} {tag}",
-                        target = entity,
-                        op = if boolean { "add" } else { "remove" },
-                        tag = tag_name
-                    );
-                    Ok(vec![shulkerbox::prelude::Command::Raw(cmd)])
-                }
+            &ComptimeValue::Boolean(value) => match target {
+                DataLocation::Tag { tag_name, entity } => Ok(vec![Command::Raw(format!(
+                    "tag {entity} {op} {tag_name}",
+                    op = if value { "add" } else { "remove" }
+                ))]),
                 DataLocation::Storage {
                     storage_name,
                     path,
                     r#type,
                 } => {
-                    let cmd = format!(
-                        "data modify storage {storage} {path} set value {value}{suffix}",
-                        storage = storage_name,
-                        path = path,
-                        value = if boolean { "1" } else { "0" },
-                        suffix = r#type.suffix()
-                    );
-                    Ok(vec![shulkerbox::prelude::Command::Raw(cmd)])
+                    if matches!(r#type, StorageType::Boolean) {
+                        Ok(vec![Command::Raw(format!(
+                            "data modify storage {storage_name} {path} set value {value}{suffix}",
+                            value = u8::from(value),
+                            suffix = r#type.suffix(),
+                        ))])
+                    } else {
+                        let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                            expression: source.span(),
+                            expected_type: target.value_type().into(),
+                        });
+                        handler.receive(err.clone());
+                        Err(err)
+                    }
                 }
                 DataLocation::ScoreboardValue { objective, target } => {
-                    let cmd = format!(
+                    Ok(vec![Command::Raw(format!(
                         "scoreboard players set {target} {objective} {value}",
-                        target = target,
-                        objective = objective,
-                        value = if boolean { "1" } else { "0" }
-                    );
-                    Ok(vec![shulkerbox::prelude::Command::Raw(cmd)])
+                        value = u8::from(value)
+                    ))])
                 }
             },
-            ComptimeValue::String(_) | ComptimeValue::MacroString(_) => {
-                todo!("store string comptime value")
+            ComptimeValue::String(value) => self.store_comptime_value(
+                &ComptimeValue::MacroString(value.clone().into()),
+                target,
+                source,
+                handler,
+            ),
+            ComptimeValue::MacroString(value) => {
+                match target {
+                    DataLocation::Storage {
+                        r#type: StorageType::Boolean,
+                        ..
+                    }
+                    | DataLocation::Tag { .. } => self.store_condition_success(
+                        ExtendedCondition::Runtime(Condition::Atom(value.clone())),
+                        target,
+                        source,
+                        handler,
+                    ),
+                    // DataLocation::Storage { storage_name, path, r#type: StorageType::String } => todo!("implement storage string")
+                    _ => {
+                        let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                            expected_type: target.value_type().into(),
+                            expression: source.span(),
+                        });
+                        handler.receive(err.clone());
+                        Err(err)
+                    }
+                }
             }
         }
     }
