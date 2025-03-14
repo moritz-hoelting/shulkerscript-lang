@@ -334,9 +334,6 @@ impl Transpiler {
 
             let statements = function_data.statements.clone();
 
-            let commands =
-                self.transpile_function(&statements, program_identifier, &function_scope, handler)?;
-
             let modified_name = function_data.annotations.get("deobfuscate").map_or_else(
                 || {
                     let hash_data = program_identifier.to_string() + "\0" + identifier_span.str();
@@ -370,6 +367,16 @@ impl Transpiler {
                 },
             )?;
 
+            let function_location = format!(
+                "{namespace}:{modified_name}",
+                namespace = function_data.namespace
+            );
+
+            function_path.set(function_location.clone()).unwrap();
+
+            let commands =
+                self.transpile_function(&statements, program_identifier, &function_scope, handler)?;
+
             let namespace = self.datapack.namespace_mut(&function_data.namespace);
 
             if namespace.function(&modified_name).is_some() {
@@ -384,19 +391,12 @@ impl Transpiler {
             let function = namespace.function_mut(&modified_name);
             function.get_commands_mut().extend(commands);
 
-            let function_location = format!(
-                "{namespace}:{modified_name}",
-                namespace = function_data.namespace
-            );
-
             if function_data.annotations.contains_key("tick") {
                 self.datapack.add_tick(&function_location);
             }
             if function_data.annotations.contains_key("load") {
                 self.datapack.add_load(&function_location);
             }
-
-            function_path.set(function_location.clone()).unwrap();
         }
 
         let parameters = &function_data.parameters;
