@@ -129,6 +129,8 @@ impl<'a> Scope<'a> {
     }
 
     /// Gets the number of times a variable has been shadowed.
+    ///
+    ///
     pub fn get_variable_shadow_count(&self, name: &str) -> usize {
         let count = self
             .shadowed
@@ -138,9 +140,7 @@ impl<'a> Scope<'a> {
             .copied()
             .unwrap_or(0);
         self.parent.as_ref().map_or(count, |parent| {
-            count
-                + parent.get_variable_shadow_count(name)
-                + usize::from(parent.get_variable(name).is_some())
+            count.saturating_sub(1) + parent.get_variable_shadow_count(name)
         })
     }
 

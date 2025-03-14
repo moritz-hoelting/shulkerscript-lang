@@ -10,8 +10,8 @@ mod enabled {
         base::{self, source_file::SourceElement, Handler},
         syntax::syntax_tree::expression::LuaCode,
         transpile::{
-            error::{LuaRuntimeError, TranspileError, TranspileResult},
-            expression::ComptimeValue,
+            error::{LuaRuntimeError, MismatchedTypes, TranspileError, TranspileResult},
+            expression::{ComptimeValue, ExpectedType},
             Scope, VariableData,
         },
     };
@@ -124,7 +124,7 @@ mod enabled {
                             table.set("path", lua.create_string(path)?)?;
                             Value::Table(table)
                         }
-                        Some(_) => todo!("allow other types"),
+                        Some(_) => todo!("allow other variable types"),
                         None => todo!("throw correct error"),
                     };
                     globals.set(name, value)?;
@@ -155,8 +155,68 @@ mod enabled {
                     handler,
                 ),
                 Value::Boolean(boolean) => Ok(Some(ComptimeValue::Boolean(boolean))),
+                Value::Table(table) => match table.get::<Value>("value") {
+                    Ok(Value::Nil) => {
+                        let err = TranspileError::LuaRuntimeError(LuaRuntimeError {
+                            code_block: self.span(),
+                            error_message: "return table must contain non-nil 'value'".to_string(),
+                        });
+                        handler.receive(err.clone());
+                        Err(err)
+                    }
+                    Ok(value) => {
+                        let value = match self.handle_lua_result(value, handler)? {
+                            Some(ComptimeValue::String(s)) => {
+                                let contains_macro = match table.get::<Value>("contains_macro") {
+                                    Ok(Value::Boolean(boolean)) => Ok(boolean),
+                                    Ok(value) => {
+                                        if let Some(ComptimeValue::Boolean(boolean)) =
+                                            self.handle_lua_result(value, handler)?
+                                        {
+                                            Ok(boolean)
+                                        } else {
+                                            let err =
+                                                TranspileError::MismatchedTypes(MismatchedTypes {
+                                                    expression: self.span(),
+                                                    expected_type: ExpectedType::Boolean,
+                                                });
+                                            handler.receive(err.clone());
+                                            Err(err)
+                                        }
+                                    }
+                                    _ => {
+                                        let err =
+                                            TranspileError::MismatchedTypes(MismatchedTypes {
+                                                expression: self.span(),
+                                                expected_type: ExpectedType::Boolean,
+                                            });
+                                        handler.receive(err.clone());
+                                        Err(err)
+                                    }
+                                }?;
+
+                                if contains_macro {
+                                    Some(ComptimeValue::MacroString(
+                                        s.parse().expect("parsing cannot fail"),
+                                    ))
+                                } else {
+                                    Some(ComptimeValue::String(s))
+                                }
+                            }
+                            value => value,
+                        };
+                        Ok(value)
+                    }
+                    Err(err) => {
+                        let err = TranspileError::LuaRuntimeError(LuaRuntimeError::from_lua_err(
+                            &err,
+                            self.span(),
+                        ));
+                        handler.receive(err.clone());
+                        Err(err)
+                    }
+                },
                 Value::Error(_)
-                | Value::Table(_)
                 | Value::Thread(_)
                 | Value::UserData(_)
                 | Value::LightUserData(_)

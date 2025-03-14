@@ -1,6 +1,6 @@
 //! Utility methods for transpiling
 
-use std::fmt::Display;
+use std::{fmt::Display, str::FromStr};
 
 use crate::{
     lexical::token::{MacroStringLiteral, MacroStringLiteralPart},
@@ -114,6 +114,61 @@ where
         })
 }
 
+impl FromStr for MacroString {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let pos = s.find("$(");
+        if pos.is_some_and(|pos| s[pos..].contains(')')) {
+            let mut parts = Vec::new();
+            let mut s = s;
+            while let Some(pos) = s.find("$(") {
+                let (before, after) = s.split_at(pos);
+
+                let last_macro_index = after
+                    .char_indices()
+                    .skip(2)
+                    .take_while(|&(_, c)| c.is_ascii_alphanumeric() || c == '_')
+                    .map(|(i, _)| i)
+                    .last();
+
+                match last_macro_index {
+                    Some(last_macro_index) if after[last_macro_index + 1..].starts_with(')') => {
+                        if !before.is_empty() {
+                            parts.push(MacroStringPart::String(before.to_string()));
+                        }
+                        parts.push(MacroStringPart::MacroUsage(
+                            after[2..=last_macro_index].to_string(),
+                        ));
+                        s = &after[last_macro_index + 2..];
+                        if s.is_empty() {
+                            break;
+                        }
+                    }
+                    _ => {
+                        parts.push(MacroStringPart::String(s.to_string()));
+                        s = "";
+                        break;
+                    }
+                }
+            }
+            if !s.is_empty() {
+                parts.push(MacroStringPart::String(s.to_string()));
+            }
+            if parts
+                .iter()
+                .any(|p| matches!(p, MacroStringPart::MacroUsage(_)))
+            {
+                Ok(Self::MacroString(parts))
+            } else {
+                Ok(Self::String(s.to_string()))
+            }
+        } else {
+            Ok(Self::String(s.to_string()))
+        }
+    }
+}
+
 impl<S> From<S> for MacroString
 where
     S: Into<String>,
@@ -170,5 +225,41 @@ impl From<&MacroStringLiteral> for MacroString {
 impl From<MacroStringLiteral> for MacroString {
     fn from(value: MacroStringLiteral) -> Self {
         Self::from(&value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_macro_string() {
+        assert_eq!(
+            MacroString::from_str("Hello, $(world)!").unwrap(),
+            MacroString::MacroString(vec![
+                MacroStringPart::String("Hello, ".to_string()),
+                MacroStringPart::MacroUsage("world".to_string()),
+                MacroStringPart::String("!".to_string())
+            ])
+        );
+        assert_eq!(
+            MacroString::from_str("Hello, $(world)! $(world").unwrap(),
+            MacroString::MacroString(vec![
+                MacroStringPart::String("Hello, ".to_string()),
+                MacroStringPart::MacroUsage("world".to_string()),
+                MacroStringPart::String("! $(world".to_string()),
+            ])
+        );
+        assert_eq!(
+            MacroString::from_str("Hello $(a) from $(b) and $(c)").unwrap(),
+            MacroString::MacroString(vec![
+                MacroStringPart::String("Hello ".to_string()),
+                MacroStringPart::MacroUsage("a".to_string()),
+                MacroStringPart::String(" from ".to_string()),
+                MacroStringPart::MacroUsage("b".to_string()),
+                MacroStringPart::String(" and ".to_string()),
+                MacroStringPart::MacroUsage("c".to_string()),
+            ])
+        );
     }
 }
