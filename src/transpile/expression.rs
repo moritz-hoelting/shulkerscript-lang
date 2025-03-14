@@ -2,7 +2,7 @@
 
 use std::{fmt::Display, sync::Arc};
 
-use super::{Scope, VariableData};
+use super::{util::MacroString, Scope, VariableData};
 use crate::{
     base::{self, Handler, VoidHandler},
     lexical::token::MacroStringLiteralPart,
@@ -15,10 +15,7 @@ use crate::{
 use enum_as_inner::EnumAsInner;
 
 #[cfg(feature = "shulkerbox")]
-use shulkerbox::{
-    prelude::{Command, Condition, Execute},
-    util::MacroString,
-};
+use shulkerbox::prelude::{Command, Condition, Execute};
 
 #[cfg(feature = "shulkerbox")]
 use super::{
@@ -51,7 +48,7 @@ impl Display for ComptimeValue {
             Self::Boolean(boolean) => write!(f, "{boolean}"),
             Self::Integer(int) => write!(f, "{int}"),
             Self::String(string) => write!(f, "{string}"),
-            Self::MacroString(macro_string) => write!(f, "{}", macro_string.compile()),
+            Self::MacroString(macro_string) => write!(f, "{macro_string}"),
         }
     }
 }
@@ -1040,7 +1037,7 @@ impl Transpiler {
                 )),
                 Some(ComptimeValue::MacroString(value)) => Ok((
                     Vec::new(),
-                    ExtendedCondition::Runtime(Condition::Atom(value)),
+                    ExtendedCondition::Runtime(Condition::Atom(value.into())),
                 )),
                 Some(ComptimeValue::Boolean(boolean)) => {
                     Ok((Vec::new(), ExtendedCondition::Comptime(boolean)))
@@ -1397,7 +1394,7 @@ impl Transpiler {
                         ..
                     }
                     | DataLocation::Tag { .. } => self.store_condition_success(
-                        ExtendedCondition::Runtime(Condition::Atom(value.clone())),
+                        ExtendedCondition::Runtime(Condition::Atom(value.clone().into())),
                         target,
                         source,
                         handler,

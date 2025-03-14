@@ -1,57 +1,50 @@
 //! Conversion functions for converting between tokens/ast-nodes and [`shulkerbox`] types
 
-use shulkerbox::util::{MacroString, MacroStringPart};
+use shulkerbox::util::{MacroString as ExtMacroString, MacroStringPart as ExtMacroStringPart};
 
-use crate::{
-    lexical::token::{MacroStringLiteral, MacroStringLiteralPart},
-    syntax::syntax_tree::AnyStringLiteral,
-};
+use crate::{lexical::token::MacroStringLiteral, syntax::syntax_tree::AnyStringLiteral};
 
-impl From<&AnyStringLiteral> for MacroString {
-    fn from(value: &AnyStringLiteral) -> Self {
+use super::util::{MacroString, MacroStringPart};
+
+impl From<MacroString> for ExtMacroString {
+    fn from(value: MacroString) -> Self {
         match value {
-            AnyStringLiteral::StringLiteral(literal) => Self::from(literal.str_content().as_ref()),
-            AnyStringLiteral::MacroStringLiteral(literal) => Self::from(literal),
+            MacroString::String(s) => Self::String(s),
+            MacroString::MacroString(parts) => {
+                Self::MacroString(parts.into_iter().map(ExtMacroStringPart::from).collect())
+            }
         }
     }
 }
 
-impl From<AnyStringLiteral> for MacroString {
+impl From<MacroStringPart> for ExtMacroStringPart {
+    fn from(value: MacroStringPart) -> Self {
+        match value {
+            MacroStringPart::String(s) => Self::String(s),
+            MacroStringPart::MacroUsage(m) => Self::MacroUsage(m),
+        }
+    }
+}
+
+impl From<&AnyStringLiteral> for ExtMacroString {
+    fn from(value: &AnyStringLiteral) -> Self {
+        Self::from(MacroString::from(value))
+    }
+}
+
+impl From<AnyStringLiteral> for ExtMacroString {
     fn from(value: AnyStringLiteral) -> Self {
         Self::from(&value)
     }
 }
 
-impl From<&MacroStringLiteral> for MacroString {
+impl From<&MacroStringLiteral> for ExtMacroString {
     fn from(value: &MacroStringLiteral) -> Self {
-        if value
-            .parts()
-            .iter()
-            .any(|p| matches!(p, MacroStringLiteralPart::MacroUsage { .. }))
-        {
-            Self::MacroString(
-                value
-                    .parts()
-                    .iter()
-                    .map(|part| match part {
-                        MacroStringLiteralPart::Text(span) => MacroStringPart::String(
-                            crate::util::unescape_macro_string(span.str()).to_string(),
-                        ),
-                        MacroStringLiteralPart::MacroUsage { identifier, .. } => {
-                            MacroStringPart::MacroUsage(
-                                crate::util::identifier_to_macro(identifier.span.str()).to_string(),
-                            )
-                        }
-                    })
-                    .collect(),
-            )
-        } else {
-            Self::String(value.str_content())
-        }
+        Self::from(MacroString::from(value))
     }
 }
 
-impl From<MacroStringLiteral> for MacroString {
+impl From<MacroStringLiteral> for ExtMacroString {
     fn from(value: MacroStringLiteral) -> Self {
         Self::from(&value)
     }

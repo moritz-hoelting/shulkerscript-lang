@@ -8,10 +8,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use shulkerbox::{
-    datapack::{self, Command, Datapack, Execute},
-    util::{MacroString, MacroStringPart},
-};
+use shulkerbox::datapack::{self, Command, Datapack, Execute};
 
 use crate::{
     base::{
@@ -30,7 +27,10 @@ use crate::{
         },
         AnnotationAssignment,
     },
-    transpile::error::{IllegalAnnotationContent, MissingFunctionDeclaration},
+    transpile::{
+        error::{IllegalAnnotationContent, MissingFunctionDeclaration},
+        util::{MacroString, MacroStringPart},
+    },
 };
 
 use super::{
@@ -604,16 +604,17 @@ impl Transpiler {
                         MacroString::String(s) => Command::Raw(format!(
                             r#"data merge storage shulkerscript:function_arguments {{{s}}}"#
                         )),
-                        MacroString::MacroString(_) => {
-                            Command::UsesMacro(super::util::join_macro_strings([
+                        MacroString::MacroString(_) => Command::UsesMacro(
+                            super::util::join_macro_strings([
                                 MacroString::String(
                                     "data merge storage shulkerscript:function_arguments {"
                                         .to_string(),
                                 ),
                                 joined_statics,
                                 MacroString::String("}".to_string()),
-                            ]))
-                        }
+                            ])
+                            .into(),
+                        ),
                     };
                     setup_cmds.push(statics_cmd);
                     setup_cmds.extend(move_cmds);
@@ -784,7 +785,7 @@ impl Transpiler {
             }
             Expression::Primary(Primary::Lua(code)) => match code.eval_comptime(scope, handler)? {
                 Some(ComptimeValue::String(cmd)) => Ok(vec![Command::Raw(cmd)]),
-                Some(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd)]),
+                Some(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd.into())]),
                 Some(ComptimeValue::Boolean(_) | ComptimeValue::Integer(_)) => {
                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
                         expected_type: ExpectedType::String,
@@ -805,7 +806,7 @@ impl Transpiler {
                 ),
             Expression::Binary(bin) => match bin.comptime_eval(scope, handler) {
                 Some(ComptimeValue::String(cmd)) => Ok(vec![Command::Raw(cmd)]),
-                Some(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd)]),
+                Some(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd.into())]),
                 _ => {
                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
                         expression: bin.span(),
@@ -870,7 +871,7 @@ impl Transpiler {
                         function_call.push_str(" {");
                         parts.insert(0, MacroStringPart::String(function_call));
                         parts.push(MacroStringPart::String('}'.to_string()));
-                        Command::UsesMacro(MacroString::MacroString(parts))
+                        Command::UsesMacro(MacroString::MacroString(parts).into())
                     }
                 };
 

@@ -10,6 +10,8 @@ mod enabled {
         base::{self, source_file::SourceElement, Handler},
         syntax::syntax_tree::expression::LuaCode,
         transpile::{
+            error::{LuaRuntimeError, TranspileError, TranspileResult},
+            expression::ComptimeValue,
             Scope, VariableData,
         },
     };
@@ -173,13 +175,15 @@ mod enabled {
 
 #[cfg(not(feature = "lua"))]
 mod disabled {
+    use std::sync::Arc;
+
     use crate::{
         base::{self, Handler},
         syntax::syntax_tree::expression::LuaCode,
         transpile::error::{TranspileError, TranspileResult},
     };
 
-    use crate::transpile::expression::ComptimeValue;
+    use crate::transpile::{expression::ComptimeValue, Scope};
 
     impl LuaCode {
         /// Will always return an error because Lua code evaluation is disabled.
@@ -193,6 +197,7 @@ mod disabled {
             scope: &Arc<Scope>,
             handler: &impl Handler<base::Error>,
         ) -> TranspileResult<()> {
+            let _ = scope;
             handler.receive(TranspileError::LuaDisabled);
             tracing::error!("Lua code evaluation is disabled");
             Err(TranspileError::LuaDisabled)
@@ -208,6 +213,7 @@ mod disabled {
             scope: &Arc<Scope>,
             handler: &impl Handler<base::Error>,
         ) -> TranspileResult<Option<ComptimeValue>> {
+            let _ = scope;
             handler.receive(TranspileError::LuaDisabled);
             tracing::error!("Lua code evaluation is disabled");
             Err(TranspileError::LuaDisabled)
