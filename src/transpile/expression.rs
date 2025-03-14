@@ -296,7 +296,7 @@ impl Primary {
             Self::Lua(lua) => {
                 cfg_if::cfg_if! {
                     if #[cfg(feature = "lua")] {
-                        lua.eval(&VoidHandler).map_or(false, |value| match value {
+                        lua.eval(scope, &VoidHandler).map_or(false, |(value, _)| match value {
                             mlua::Value::Boolean(_) => matches!(r#type, ValueType::Boolean),
                             mlua::Value::Integer(_) => matches!(r#type, ValueType::Integer),
                             mlua::Value::String(_) => matches!(r#type, ValueType::String),
@@ -345,7 +345,7 @@ impl Primary {
                     })
             }
             Self::Lua(lua) => lua
-                .eval_comptime(&VoidHandler)
+                .eval_comptime(scope, &VoidHandler)
                 .inspect_err(|err| {
                     handler.receive(err.clone());
                 })
@@ -621,7 +621,7 @@ impl Transpiler {
             Primary::Lua(lua) =>
             {
                 #[expect(clippy::option_if_let_else)]
-                if let Some(value) = lua.eval_comptime(handler)? {
+                if let Some(value) = lua.eval_comptime(scope, handler)? {
                     self.store_comptime_value(&value, target, lua, handler)
                 } else {
                     let err = TranspileError::MissingValue(MissingValue {
@@ -1033,7 +1033,7 @@ impl Transpiler {
                     Err(err)
                 }
             },
-            Primary::Lua(lua) => match lua.eval_comptime(handler)? {
+            Primary::Lua(lua) => match lua.eval_comptime(scope, handler)? {
                 Some(ComptimeValue::String(value)) => Ok((
                     Vec::new(),
                     ExtendedCondition::Runtime(Condition::Atom(value.into())),

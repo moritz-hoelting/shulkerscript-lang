@@ -439,7 +439,7 @@ impl Transpiler {
                 for expression in arguments.iter().flat_map(|x| x.iter()) {
                     let value = match expression {
                         Expression::Primary(Primary::Lua(lua)) => {
-                            lua.eval_comptime(handler).and_then(|val| match val {
+                            lua.eval_comptime(scope, handler).and_then(|val| match val {
                                 Some(ComptimeValue::MacroString(s)) => Ok(Parameter::Static(s)),
                                 Some(val) => Ok(Parameter::Static(val.to_string().into())),
                                 None => {
@@ -782,7 +782,7 @@ impl Transpiler {
             Expression::Primary(Primary::MacroStringLiteral(string)) => {
                 Ok(vec![Command::UsesMacro(string.into())])
             }
-            Expression::Primary(Primary::Lua(code)) => match code.eval_comptime(handler)? {
+            Expression::Primary(Primary::Lua(code)) => match code.eval_comptime(scope, handler)? {
                 Some(ComptimeValue::String(cmd)) => Ok(vec![Command::Raw(cmd)]),
                 Some(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd)]),
                 Some(ComptimeValue::Boolean(_) | ComptimeValue::Integer(_)) => {

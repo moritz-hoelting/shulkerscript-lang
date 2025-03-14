@@ -349,7 +349,7 @@ pub struct LuaCode {
     left_parenthesis: Punctuation,
     /// The arguments of the lua code.
     #[get = "pub"]
-    variables: Option<ConnectedList<Identifier, Punctuation>>,
+    inputs: Option<ConnectedList<Identifier, Punctuation>>,
     /// The right parenthesis of the lua code.
     #[get = "pub"]
     right_parenthesis: Punctuation,
@@ -550,10 +550,7 @@ impl<'a> Parser<'a> {
                     Delimiter::Parenthesis,
                     ',',
                     |parser| match parser.next_significant_token() {
-                        Reading::Atomic(Token::Identifier(identifier)) => {
-                            parser.forward();
-                            Ok(identifier)
-                        }
+                        Reading::Atomic(Token::Identifier(identifier)) => Ok(identifier),
                         unexpected => {
                             let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                                 expected: syntax::error::SyntaxKind::Identifier,
@@ -597,7 +594,7 @@ impl<'a> Parser<'a> {
                 Ok(Primary::Lua(Box::new(LuaCode {
                     lua_keyword,
                     left_parenthesis: variables.open,
-                    variables: variables.list,
+                    inputs: variables.list,
                     right_parenthesis: variables.close,
                     left_brace: tree.open,
                     code: tree.tree?,

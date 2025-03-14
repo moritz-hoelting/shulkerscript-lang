@@ -2,14 +2,15 @@
 
 #[cfg(feature = "lua")]
 mod enabled {
+    use std::sync::Arc;
+
     use mlua::{Lua, Value};
 
     use crate::{
         base::{self, source_file::SourceElement, Handler},
         syntax::syntax_tree::expression::LuaCode,
         transpile::{
-            error::{LuaRuntimeError, TranspileError, TranspileResult},
-            expression::ComptimeValue,
+            Scope, VariableData,
         },
     };
 
@@ -19,7 +20,11 @@ mod enabled {
         /// # Errors
         /// - If evaluation fails
         #[tracing::instrument(level = "debug", name = "eval_lua", skip_all, ret)]
-        pub fn eval(&self, handler: &impl Handler<base::Error>) -> TranspileResult<mlua::Value> {
+        pub fn eval(
+            &self,
+            scope: &Arc<Scope>,
+            handler: &impl Handler<base::Error>,
+        ) -> TranspileResult<(mlua::Value, mlua::Lua)> {
             tracing::debug!("Evaluating Lua code");
 
             let lua = Lua::new();
@@ -46,9 +51,17 @@ mod enabled {
                 )
             };
 
-            self.add_globals(&lua).unwrap();
+            if let Err(err) = self.add_globals(&lua, scope) {
+                let err = TranspileError::LuaRuntimeError(LuaRuntimeError::from_lua_err(
+                    &err,
+                    self.span(),
+                ));
+                handler.receive(crate::Error::from(err.clone()));
+                return Err(err);
+            }
 
-            lua.load(self.code())
+            let res = lua
+                .load(self.code())
                 .set_name(name)
                 .eval::<Value>()
                 .map_err(|err| {
@@ -56,7 +69,12 @@ mod enabled {
                         TranspileError::from(LuaRuntimeError::from_lua_err(&err, self.span()));
                     handler.receive(crate::Error::from(err.clone()));
                     err
-                })
+                });
+
+            res.map(|v| {
+                tracing::debug!("Lua code evaluated successfully");
+                (v, lua)
+            })
         }
 
         /// Evaluates the Lua code and returns the resulting [`ComptimeValue`].
@@ -66,17 +84,16 @@ mod enabled {
         #[tracing::instrument(level = "debug", name = "eval_lua", skip_all, ret)]
         pub fn eval_comptime(
             &self,
+            scope: &Arc<Scope>,
             handler: &impl Handler<base::Error>,
         ) -> TranspileResult<Option<ComptimeValue>> {
-            let lua_result = self.eval(handler)?;
+            // required to keep the lua instance alive
+            let (lua_result, _lua) = self.eval(scope, handler)?;
 
             self.handle_lua_result(lua_result, handler)
-                .inspect_err(|err| {
-                    handler.receive(err.clone());
-                })
         }
 
-        fn add_globals(&self, lua: &Lua) -> mlua::Result<()> {
+        fn add_globals(&self, lua: &Lua, scope: &Arc<Scope>) -> mlua::Result<()> {
             let globals = lua.globals();
 
             let location = {
@@ -85,6 +102,32 @@ mod enabled {
                 file.path_relative().unwrap_or_else(|| file.path().clone())
             };
             globals.set("shu_location", location.to_string_lossy())?;
+
+            if let Some(inputs) = self.inputs() {
+                for x in inputs.elements() {
+                    let name = x.span.str();
+                    let value = match scope.get_variable(name).as_deref() {
+                        Some(VariableData::MacroParameter { macro_name, .. }) => {
+                            Value::String(lua.create_string(format!("$({macro_name})"))?)
+                        }
+                        Some(VariableData::ScoreboardValue { objective, target }) => {
+                            let table = lua.create_table()?;
+                            table.set("objective", lua.create_string(objective)?)?;
+                            table.set("target", lua.create_string(target)?)?;
+                            Value::Table(table)
+                        }
+                        Some(VariableData::BooleanStorage { storage_name, path }) => {
+                            let table = lua.create_table()?;
+                            table.set("storage", lua.create_string(storage_name)?)?;
+                            table.set("path", lua.create_string(path)?)?;
+                            Value::Table(table)
+                        }
+                        Some(_) => todo!("allow other types"),
+                        None => todo!("throw correct error"),
+                    };
+                    globals.set(name, value)?;
+                }
+            }
 
             Ok(())
         }
@@ -145,7 +188,11 @@ mod disabled {
         /// # Errors
         /// - Always, as the lua feature is disabled
         #[tracing::instrument(level = "debug", name = "eval_lua", skip_all, ret)]
-        pub fn eval(&self, handler: &impl Handler<base::Error>) -> TranspileResult<()> {
+        pub fn eval(
+            &self,
+            scope: &Arc<Scope>,
+            handler: &impl Handler<base::Error>,
+        ) -> TranspileResult<()> {
             handler.receive(TranspileError::LuaDisabled);
             tracing::error!("Lua code evaluation is disabled");
             Err(TranspileError::LuaDisabled)
@@ -158,6 +205,7 @@ mod disabled {
         /// - If Lua code evaluation is disabled.
         pub fn eval_comptime(
             &self,
+            scope: &Arc<Scope>,
             handler: &impl Handler<base::Error>,
         ) -> TranspileResult<Option<ComptimeValue>> {
             handler.receive(TranspileError::LuaDisabled);
