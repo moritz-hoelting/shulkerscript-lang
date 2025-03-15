@@ -98,12 +98,37 @@ mod enabled {
         fn add_globals(&self, lua: &Lua, scope: &Arc<Scope>) -> mlua::Result<()> {
             let globals = lua.globals();
 
-            let location = {
-                let span = self.span();
-                let file = span.source_file();
-                file.path_relative().unwrap_or_else(|| file.path().clone())
+            let shulkerscript_globals = {
+                let table = lua.create_table()?;
+
+                let (location_path, location_start, location_end) = {
+                    let span = self.span();
+                    let file = span.source_file();
+                    let path = file.path().to_owned();
+                    let start_location = span.start_location();
+                    let end_location = span.end_location().unwrap_or_else(|| {
+                        let line_amount = file.line_amount();
+                        let column = file.get_line(line_amount).expect("line amount used").len();
+
+                        crate::base::source_file::Location {
+                            line: line_amount,
+                            column,
+                        }
+                    });
+
+                    (path, start_location, end_location)
+                };
+
+                table.set("file_path", location_path.to_string_lossy())?;
+                table.set("start_line", location_start.line)?;
+                table.set("start_column", location_start.column)?;
+                table.set("end_line", location_end.line)?;
+                table.set("end_column", location_end.column)?;
+
+                table.set("version", crate::VERSION)?;
+
+                table
             };
-            globals.set("shu_location", location.to_string_lossy())?;
 
             if let Some(inputs) = self.inputs() {
                 for x in inputs.elements() {
@@ -169,6 +194,8 @@ mod enabled {
                     globals.set(name, value)?;
                 }
             }
+
+            globals.set("shulkerscript", shulkerscript_globals)?;
 
             Ok(())
         }
