@@ -112,10 +112,27 @@ mod enabled {
                         Some(VariableData::MacroParameter { macro_name, .. }) => {
                             Value::String(lua.create_string(format!("$({macro_name})"))?)
                         }
+                        Some(VariableData::Scoreboard { objective }) => {
+                            let table = lua.create_table()?;
+                            table.set("objective", objective.as_str())?;
+                            Value::Table(table)
+                        }
                         Some(VariableData::ScoreboardValue { objective, target }) => {
                             let table = lua.create_table()?;
                             table.set("objective", lua.create_string(objective)?)?;
                             table.set("target", lua.create_string(target)?)?;
+                            Value::Table(table)
+                        }
+                        Some(VariableData::ScoreboardArray { objective, targets }) => {
+                            let table = lua.create_table()?;
+                            table.set("objective", objective.as_str())?;
+                            let values = lua.create_table_from(
+                                targets
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, target)| (i + 1, target.as_str())),
+                            )?;
+                            table.set("targets", values)?;
                             Value::Table(table)
                         }
                         Some(VariableData::BooleanStorage { storage_name, path }) => {
@@ -124,7 +141,29 @@ mod enabled {
                             table.set("path", lua.create_string(path)?)?;
                             Value::Table(table)
                         }
-                        Some(_) => todo!("allow other variable types"),
+                        Some(VariableData::BooleanStorageArray {
+                            storage_name,
+                            paths,
+                        }) => {
+                            let table = lua.create_table()?;
+                            table.set("storage", storage_name.as_str())?;
+                            let values = lua.create_table_from(
+                                paths
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, path)| (i + 1, path.as_str())),
+                            )?;
+                            table.set("paths", values)?;
+                            Value::Table(table)
+                        }
+                        Some(VariableData::Tag { tag_name }) => {
+                            let table = lua.create_table()?;
+                            table.set("name", tag_name.as_str())?;
+                            Value::Table(table)
+                        }
+                        Some(VariableData::Function { .. }) => {
+                            todo!("allow function variable type")
+                        }
                         None => todo!("throw correct error"),
                     };
                     globals.set(name, value)?;
