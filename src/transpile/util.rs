@@ -121,9 +121,9 @@ impl FromStr for MacroString {
         let pos = s.find("$(");
         if pos.is_some_and(|pos| s[pos..].contains(')')) {
             let mut parts = Vec::new();
-            let mut s = s;
-            while let Some(pos) = s.find("$(") {
-                let (before, after) = s.split_at(pos);
+            let mut rem = s;
+            while let Some(pos) = rem.find("$(") {
+                let (before, after) = rem.split_at(pos);
 
                 let last_macro_index = after
                     .char_indices()
@@ -135,25 +135,46 @@ impl FromStr for MacroString {
                 match last_macro_index {
                     Some(last_macro_index) if after[last_macro_index + 1..].starts_with(')') => {
                         if !before.is_empty() {
-                            parts.push(MacroStringPart::String(before.to_string()));
+                            match parts.last_mut() {
+                                Some(MacroStringPart::String(last)) => {
+                                    *last += before;
+                                }
+                                _ => {
+                                    parts.push(MacroStringPart::String(before.to_string()));
+                                }
+                            }
                         }
                         parts.push(MacroStringPart::MacroUsage(
                             after[2..=last_macro_index].to_string(),
                         ));
-                        s = &after[last_macro_index + 2..];
-                        if s.is_empty() {
+                        rem = &after[last_macro_index + 2..];
+                        if rem.is_empty() {
                             break;
                         }
                     }
                     _ => {
-                        parts.push(MacroStringPart::String(s.to_string()));
-                        s = "";
-                        break;
+                        let part = &rem[..=pos + 1];
+                        match parts.last_mut() {
+                            Some(MacroStringPart::String(last)) => {
+                                *last += part;
+                            }
+                            _ => {
+                                parts.push(MacroStringPart::String(part.to_string()));
+                            }
+                        }
+                        rem = &rem[pos + 2..];
                     }
                 }
             }
-            if !s.is_empty() {
-                parts.push(MacroStringPart::String(s.to_string()));
+            if !rem.is_empty() {
+                match parts.last_mut() {
+                    Some(MacroStringPart::String(last)) => {
+                        *last += rem;
+                    }
+                    _ => {
+                        parts.push(MacroStringPart::String(rem.to_string()));
+                    }
+                }
             }
             if parts
                 .iter()
@@ -259,6 +280,14 @@ mod tests {
                 MacroStringPart::MacroUsage("b".to_string()),
                 MacroStringPart::String(" and ".to_string()),
                 MacroStringPart::MacroUsage("c".to_string()),
+            ])
+        );
+        assert_eq!(
+            MacroString::from_str("Hello, $(world! $(world)!").unwrap(),
+            MacroString::MacroString(vec![
+                MacroStringPart::String("Hello, $(world! ".to_string()),
+                MacroStringPart::MacroUsage("world".to_string()),
+                MacroStringPart::String("!".to_string()),
             ])
         );
     }
