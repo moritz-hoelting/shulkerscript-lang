@@ -444,7 +444,7 @@ impl Primary {
             }
             Self::Lua(_) | Self::StringLiteral(_) | Self::Integer(_) | Self::Boolean(_) => Ok(()),
             Self::MacroStringLiteral(literal) => literal.analyze_semantics(macro_names, handler),
-            Self::Identifier(_) | Self::Parenthesized(_) | Self::Prefix(_) => {
+            Self::Identifier(_) | Self::Parenthesized(_) | Self::Prefix(_) | Self::Indexed(_) => {
                 // TODO: correctly analyze the semantics of the primary expression
                 Ok(())
             }

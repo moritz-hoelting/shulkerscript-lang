@@ -15,17 +15,20 @@ use shulkerbox::prelude::{Command, Condition, Execute};
 use enum_as_inner::EnumAsInner;
 
 use crate::{
-    base::{self, source_file::SourceElement as _, Handler},
+    base::{self, source_file::SourceElement, Handler},
     lexical::token::{Identifier, KeywordKind},
     syntax::syntax_tree::{
         expression::{Expression, Primary},
-        statement::{SingleVariableDeclaration, VariableDeclaration},
+        statement::{
+            AssignmentDestination, ScoreVariableDeclaration, SingleVariableDeclaration,
+            VariableDeclaration,
+        },
     },
 };
 
 use super::{
-    error::{AssignmentError, IllegalAnnotationContent},
-    expression::{ComptimeValue, DataLocation},
+    error::{AssignmentError, IllegalAnnotationContent, MismatchedTypes},
+    expression::{ComptimeValue, DataLocation, ExpectedType, StorageType},
     FunctionData, TranspileAnnotationValue, TranspileError, TranspileResult,
 };
 
@@ -87,6 +90,25 @@ pub enum VariableData {
         /// The paths to the booleans.
         paths: Vec<String>,
     },
+}
+
+#[derive(Debug, Clone, Copy, EnumAsInner)]
+pub enum TranspileAssignmentTarget<'a> {
+    Identifier(&'a Identifier),
+    Indexed(&'a Identifier, &'a Expression),
+}
+
+impl<'a> From<&'a AssignmentDestination> for TranspileAssignmentTarget<'a> {
+    fn from(destination: &'a AssignmentDestination) -> Self {
+        match destination {
+            AssignmentDestination::Identifier(ident) => {
+                TranspileAssignmentTarget::Identifier(ident)
+            }
+            AssignmentDestination::Indexed(ident, _, expr, _) => {
+                TranspileAssignmentTarget::Indexed(ident, expr)
+            }
+        }
+    }
 }
 
 /// A scope that stores variables.
@@ -210,8 +232,14 @@ impl Transpiler {
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Vec<Command>> {
         match declaration {
-            VariableDeclaration::Single(single) => self.transpile_single_variable_declaration(
-                single,
+            VariableDeclaration::Single(declaration) => self.transpile_single_variable_declaration(
+                declaration,
+                program_identifier,
+                scope,
+                handler,
+            ),
+            VariableDeclaration::Score(declaration) => self.transpile_score_variable_declaration(
+                declaration,
                 program_identifier,
                 scope,
                 handler,
@@ -222,17 +250,71 @@ impl Transpiler {
 
     fn transpile_single_variable_declaration(
         &mut self,
-        single: &SingleVariableDeclaration,
+        declaration: &SingleVariableDeclaration,
         program_identifier: &str,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Vec<Command>> {
-        let mut deobfuscate_annotations = single
+        let variable_type = declaration.variable_type().keyword;
+
+        let (name, target) = self.get_data_location_identifier_pair(
+            declaration,
+            program_identifier,
+            scope,
+            handler,
+        )?;
+
+        match variable_type {
+            KeywordKind::Int => {
+                if !self.datapack.scoreboards().contains_key(&name) {
+                    self.datapack
+                        .register_scoreboard(&name, None::<&str>, None::<&str>);
+                }
+
+                scope.set_variable(
+                    declaration.identifier().span.str(),
+                    VariableData::ScoreboardValue {
+                        objective: name.clone(),
+                        target,
+                    },
+                );
+            }
+            KeywordKind::Bool => {
+                scope.set_variable(
+                    declaration.identifier().span.str(),
+                    VariableData::BooleanStorage {
+                        storage_name: name,
+                        path: target,
+                    },
+                );
+            }
+            _ => unreachable!("no other variable types"),
+        }
+
+        declaration.assignment().as_ref().map_or_else(
+            || Ok(Vec::new()),
+            |assignment| {
+                self.transpile_assignment(
+                    TranspileAssignmentTarget::Identifier(declaration.identifier()),
+                    assignment.expression(),
+                    scope,
+                    handler,
+                )
+            },
+        )
+    }
+
+    fn transpile_score_variable_declaration(
+        &mut self,
+        declaration: &ScoreVariableDeclaration,
+        program_identifier: &str,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> TranspileResult<Vec<Command>> {
+        let mut deobfuscate_annotations = declaration
             .annotations()
             .iter()
             .filter(|a| a.has_identifier("deobfuscate"));
-
-        let variable_type = single.variable_type().keyword;
 
         let deobfuscate_annotation = deobfuscate_annotations.next();
 
@@ -244,69 +326,73 @@ impl Transpiler {
             handler.receive(error.clone());
             return Err(error);
         }
-        let (name, target) =
-            self.get_single_data_location_identifiers(single, program_identifier, scope, handler)?;
+        let name =
+            self.get_data_location_identifier(declaration, program_identifier, scope, handler)?;
 
-        match variable_type {
-            KeywordKind::Int => {
-                if !self.datapack.scoreboards().contains_key(&name) {
-                    self.datapack
-                        .register_scoreboard(&name, None::<&str>, None::<&str>);
-                }
+        let criteria = declaration
+            .criteria()
+            .as_ref()
+            .map(|(_, c, _)| c.str_content());
 
-                scope.set_variable(
-                    single.identifier().span.str(),
-                    VariableData::ScoreboardValue {
-                        objective: name.clone(),
-                        target,
-                    },
-                );
-            }
-            KeywordKind::Bool => {
-                scope.set_variable(
-                    single.identifier().span.str(),
-                    VariableData::BooleanStorage {
-                        storage_name: name,
-                        path: target,
-                    },
-                );
-            }
-            _ => unreachable!("no other variable types"),
+        if !self.datapack.scoreboards().contains_key(&name) {
+            self.datapack
+                .register_scoreboard(&name, criteria, None::<&str>);
         }
 
-        single.assignment().as_ref().map_or_else(
-            || Ok(Vec::new()),
-            |assignment| {
-                self.transpile_assignment(
-                    single.identifier(),
-                    assignment.expression(),
-                    scope,
-                    handler,
-                )
+        scope.set_variable(
+            declaration.identifier().span.str(),
+            VariableData::Scoreboard {
+                objective: name.clone(),
             },
-        )
+        );
+
+        // TODO: implement assignment when map literal is implemented
+        Ok(Vec::new())
     }
 
     pub(super) fn transpile_assignment(
         &mut self,
-        identifier: &Identifier,
+        destination: TranspileAssignmentTarget,
         expression: &crate::syntax::syntax_tree::expression::Expression,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Vec<Command>> {
+        let (identifier, indexing_value) = match destination {
+            TranspileAssignmentTarget::Identifier(ident) => (ident, None),
+            TranspileAssignmentTarget::Indexed(ident, expression) => {
+                (ident, expression.comptime_eval(scope, handler))
+            }
+        };
         if let Some(target) = scope.get_variable(identifier.span.str()) {
             let data_location = match target.as_ref() {
-                VariableData::BooleanStorage { storage_name, path } => Ok(DataLocation::Storage {
-                    storage_name: storage_name.to_owned(),
-                    path: path.to_owned(),
-                    r#type: super::expression::StorageType::Boolean,
-                }),
+                VariableData::BooleanStorage { storage_name, path } => {
+                    // TODO: make sure that no indexing is done
+                    Ok(DataLocation::Storage {
+                        storage_name: storage_name.to_owned(),
+                        path: path.to_owned(),
+                        r#type: super::expression::StorageType::Boolean,
+                    })
+                }
                 VariableData::ScoreboardValue { objective, target } => {
+                    // TODO: make sure that no indexing is done
                     Ok(DataLocation::ScoreboardValue {
                         objective: objective.to_owned(),
                         target: target.to_owned(),
                     })
                 }
+                VariableData::Scoreboard { objective } => match indexing_value {
+                    Some(ComptimeValue::String(s)) => Ok(DataLocation::ScoreboardValue {
+                        objective: objective.clone(),
+                        target: s,
+                    }),
+                    Some(ComptimeValue::MacroString(s)) => {
+                        todo!("indexing scoreboard with macro string: {s}")
+                    }
+                    Some(_) => todo!("invalid indexing value"),
+                    None => {
+                        todo!("cannot assign to scoreboard without indexing")
+                    }
+                },
                 VariableData::Function { .. } | VariableData::MacroParameter { .. } => {
                     let err = TranspileError::AssignmentError(AssignmentError {
                         identifier: identifier.span(),
@@ -335,9 +421,88 @@ impl Transpiler {
         }
     }
 
+    fn get_data_location_identifier(
+        &mut self,
+        declaration: &ScoreVariableDeclaration,
+        program_identifier: &str,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> TranspileResult<String> {
+        let mut deobfuscate_annotations = declaration
+            .annotations()
+            .iter()
+            .filter(|a| a.has_identifier("deobfuscate"));
+
+        let deobfuscate_annotation = deobfuscate_annotations.next();
+
+        if let Some(duplicate) = deobfuscate_annotations.next() {
+            let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                annotation: duplicate.span(),
+                message: "Multiple deobfuscate annotations are not allowed.".to_string(),
+            });
+            handler.receive(error.clone());
+            return Err(error);
+        }
+        if let Some(deobfuscate_annotation) = deobfuscate_annotation {
+            let deobfuscate_annotation_value =
+                TranspileAnnotationValue::from(deobfuscate_annotation.assignment().value.clone());
+
+            match deobfuscate_annotation_value {
+                TranspileAnnotationValue::Expression(expr) => {
+                    if let Some(name_eval) = expr
+                        .comptime_eval(scope, handler)
+                        .and_then(|val| val.to_string_no_macro())
+                    {
+                        if !crate::util::is_valid_scoreboard_objective_name(&name_eval) {
+                            let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                                                    annotation: deobfuscate_annotation.span(),
+                                                    message: "Deobfuscate annotation must be a valid scoreboard objective name.".to_string()
+                                                });
+                            handler.receive(error.clone());
+                            return Err(error);
+                        }
+                        Ok(name_eval)
+                    } else {
+                        let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                                                annotation: deobfuscate_annotation.span(),
+                                                message: "Deobfuscate annotation could not have been evaluated at compile time.".to_string()
+                                            });
+                        handler.receive(error.clone());
+                        Err(error)
+                    }
+                }
+                TranspileAnnotationValue::None => {
+                    Ok(declaration.identifier().span.str().to_string())
+                }
+                TranspileAnnotationValue::Map(_) => {
+                    let error =
+                        TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                            annotation: deobfuscate_annotation.span(),
+                            message: "Deobfuscate annotation must have no value or must be string."
+                                .to_string(),
+                        });
+                    handler.receive(error.clone());
+                    Err(error)
+                }
+            }
+        } else {
+            let hashed = md5::hash(program_identifier).to_hex_lowercase();
+            let name = "shu_values_".to_string() + &hashed;
+            let identifier_name = declaration.identifier().span.str();
+            let scope_ident = self.temp_counter;
+            self.temp_counter = self.temp_counter.wrapping_add(1);
+            let mut target = md5::hash(format!(
+                "{scope_ident}\0{identifier_name}\0{shadowed}",
+                shadowed = scope.get_variable_shadow_count(identifier_name)
+            ))
+            .to_hex_lowercase();
+
+            Ok(name)
+        }
+    }
+
     #[expect(clippy::too_many_lines)]
-    #[cfg(feature = "shulkerbox")]
-    fn get_single_data_location_identifiers(
+    fn get_data_location_identifier_pair(
         &mut self,
         single: &SingleVariableDeclaration,
         program_identifier: &str,
@@ -385,10 +550,10 @@ impl Transpiler {
                         if let (Some(name_eval), Some(target_eval)) = (
                             objective
                                 .comptime_eval(scope, handler)
-                                .map(|val| val.to_string()),
+                                .and_then(|val| val.to_string_no_macro()),
                             target
                                 .comptime_eval(scope, handler)
-                                .map(|val| val.to_string()),
+                                .and_then(|val| val.to_string_no_macro()),
                         ) {
                             // TODO: change invalid criteria if boolean
                             if !crate::util::is_valid_scoreboard_objective_name(&name_eval) {
@@ -466,6 +631,139 @@ impl Transpiler {
             }
 
             Ok((name, target))
+        }
+    }
+
+    /// Move data from location `from` to location `to`.
+    ///
+    /// # Errors
+    /// - if the data type does not match
+    #[expect(clippy::too_many_lines)]
+    pub fn move_data(
+        &mut self,
+        from: &DataLocation,
+        to: &DataLocation,
+        expression: &impl SourceElement,
+        handler: &impl Handler<base::Error>,
+    ) -> TranspileResult<Vec<Command>> {
+        match from {
+            DataLocation::Storage {
+                storage_name,
+                path,
+                r#type,
+            } => match r#type {
+                StorageType::Boolean
+                | StorageType::Byte
+                | StorageType::Int
+                | StorageType::Long
+                | StorageType::Double => match to {
+                    DataLocation::ScoreboardValue { objective, target } => {
+                        let cmd = Command::Execute(Execute::Store(
+                            format!("store result score {target} {objective}").into(),
+                            Box::new(Execute::Run(Box::new(Command::Raw(format!(
+                                "data get storage {storage_name} {path}"
+                            ))))),
+                        ));
+                        Ok(vec![cmd])
+                    }
+                    DataLocation::Tag { tag_name, entity } => {
+                        let cmd = Command::Execute(Execute::If(
+                            Condition::Atom(
+                                format!("data storage {storage_name} {{{path}: 1b}}").into(),
+                            ),
+                            Box::new(Execute::Run(Box::new(Command::Raw(format!(
+                                "tag {entity} add {tag_name}"
+                            ))))),
+                            Some(Box::new(Execute::Run(Box::new(Command::Raw(format!(
+                                "tag {entity} remove {tag_name}"
+                            )))))),
+                        ));
+
+                        Ok(vec![cmd])
+                    }
+                    DataLocation::Storage {
+                        storage_name: target_storage_name,
+                        path: target_path,
+                        r#type,
+                    } => {
+                        if matches!(r#type, StorageType::Boolean) {
+                            let cmd = Command::Raw(format!(
+                                        "data modify storage {target_storage_name} {target_path} set from storage {storage_name} {path}"
+                                    ));
+                            Ok(vec![cmd])
+                        } else {
+                            let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                                expression: expression.span(),
+                                expected_type: to.value_type().into(),
+                            });
+                            handler.receive(err.clone());
+                            Err(err)
+                        }
+                    }
+                },
+            },
+            DataLocation::ScoreboardValue {
+                objective,
+                target: score_target,
+            } => match to {
+                DataLocation::ScoreboardValue {
+                    objective: target_objective,
+                    target: target_target,
+                } => {
+                    let cmd = Command::Raw(format!(
+                        "scoreboard players operation {target_target} {target_objective} = {score_target} {objective}"
+                    ));
+                    Ok(vec![cmd])
+                }
+                DataLocation::Storage {
+                    storage_name,
+                    path,
+                    r#type,
+                } => {
+                    if matches!(
+                        r#type,
+                        StorageType::Byte
+                            | StorageType::Double
+                            | StorageType::Int
+                            | StorageType::Long
+                    ) {
+                        let cmd = Command::Execute(Execute::Store(
+                            format!(
+                                "result storage {storage_name} {path} {t} 1.0",
+                                t = r#type.as_str()
+                            )
+                            .into(),
+                            Box::new(Execute::Run(Box::new(Command::Raw(format!(
+                                "scoreboard players get {score_target} {objective}"
+                            ))))),
+                        ));
+                        Ok(vec![cmd])
+                    } else {
+                        let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                            expression: expression.span(),
+                            expected_type: to.value_type().into(),
+                        });
+                        handler.receive(err.clone());
+                        Err(err)
+                    }
+                }
+                DataLocation::Tag { .. } => {
+                    let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                        expected_type: ExpectedType::Boolean,
+                        expression: expression.span(),
+                    });
+                    handler.receive(err.clone());
+                    Err(err)
+                }
+            },
+            DataLocation::Tag { .. } => {
+                let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                    expected_type: to.value_type().into(),
+                    expression: expression.span(),
+                });
+                handler.receive(err.clone());
+                Err(err)
+            }
         }
     }
 }

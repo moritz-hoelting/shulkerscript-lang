@@ -1,6 +1,6 @@
 //! The expression transpiler.
 
-use std::{fmt::Display, sync::Arc};
+use std::{fmt::Display, string::ToString, sync::Arc};
 
 use super::{util::MacroString, Scope, VariableData};
 use crate::{
@@ -265,10 +265,7 @@ impl Primary {
                     .get_variable(ident.span.str())
                     .map_or(false, |variable| match r#type {
                         ValueType::Boolean => {
-                            matches!(
-                                variable.as_ref(),
-                                VariableData::Tag { .. } | VariableData::BooleanStorage { .. }
-                            )
+                            matches!(variable.as_ref(), VariableData::BooleanStorage { .. })
                         }
                         ValueType::Integer => {
                             matches!(variable.as_ref(), VariableData::ScoreboardValue { .. })
@@ -289,6 +286,29 @@ impl Primary {
                         && prefix.operand().can_yield_type(r#type, scope)
                 }
             },
+            Self::Indexed(indexed) => {
+                let Self::Identifier(ident) = indexed.object().as_ref() else {
+                    todo!("throw error: cannot index anything except identifiers")
+                };
+                scope
+                    .get_variable(ident.span.str())
+                    .map_or(false, |variable| match r#type {
+                        ValueType::Boolean => {
+                            matches!(
+                                variable.as_ref(),
+                                VariableData::Tag { .. } | VariableData::BooleanStorageArray { .. }
+                            )
+                        }
+                        ValueType::Integer => {
+                            matches!(
+                                variable.as_ref(),
+                                VariableData::Scoreboard { .. }
+                                    | VariableData::ScoreboardArray { .. }
+                            )
+                        }
+                        ValueType::String => false,
+                    })
+            }
             #[cfg_attr(not(feature = "lua"), expect(unused_variables))]
             Self::Lua(lua) => {
                 cfg_if::cfg_if! {
@@ -323,7 +343,7 @@ impl Primary {
             Self::StringLiteral(string_literal) => Some(ComptimeValue::String(
                 string_literal.str_content().to_string(),
             )),
-            Self::Identifier(_) | Self::FunctionCall(_) => None,
+            Self::Identifier(_) | Self::FunctionCall(_) | Self::Indexed(_) => None,
             Self::Parenthesized(parenthesized) => {
                 parenthesized.expression().comptime_eval(scope, handler)
             }
@@ -730,109 +750,21 @@ impl Transpiler {
             },
             Primary::Identifier(ident) => {
                 let variable = scope.get_variable(ident.span.str());
-                #[expect(clippy::option_if_let_else)]
                 if let Some(variable) = variable.as_deref() {
-                    match variable {
-                        VariableData::BooleanStorage { storage_name, path } => match target {
-                            DataLocation::ScoreboardValue { objective, target } => {
-                                let cmd = Command::Execute(Execute::Store(
-                                    format!("store result score {target} {objective}").into(),
-                                    Box::new(Execute::Run(Box::new(Command::Raw(format!(
-                                        "data get storage {storage_name} {path}"
-                                    ))))),
-                                ));
-                                Ok(vec![cmd])
-                            }
-                            DataLocation::Tag { tag_name, entity } => {
-                                let cmd = Command::Execute(Execute::If(
-                                    Condition::Atom(
-                                        format!("data storage {storage_name} {{{path}: 1b}}")
-                                            .into(),
-                                    ),
-                                    Box::new(Execute::Run(Box::new(Command::Raw(format!(
-                                        "tag {entity} add {tag_name}"
-                                    ))))),
-                                    Some(Box::new(Execute::Run(Box::new(Command::Raw(format!(
-                                        "tag {entity} remove {tag_name}"
-                                    )))))),
-                                ));
-
-                                Ok(vec![cmd])
-                            }
-                            DataLocation::Storage {
-                                storage_name: target_storage_name,
-                                path: target_path,
-                                r#type,
-                            } => {
-                                if matches!(r#type, StorageType::Boolean) {
-                                    let cmd = Command::Raw(format!(
-                                        "data modify storage {target_storage_name} {target_path} set from storage {storage_name} {path}"
-                                    ));
-                                    Ok(vec![cmd])
-                                } else {
-                                    let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                                        expression: primary.span(),
-                                        expected_type: target.value_type().into(),
-                                    });
-                                    handler.receive(err.clone());
-                                    Err(err)
-                                }
-                            }
-                        },
-                        VariableData::ScoreboardValue {
-                            objective,
-                            target: score_target,
-                        } => match target {
-                            DataLocation::ScoreboardValue {
-                                objective: target_objective,
-                                target: target_target,
-                            } => {
-                                let cmd = Command::Raw(format!(
-                                    "scoreboard players operation {target_target} {target_objective} = {score_target} {objective}"
-                                ));
-                                Ok(vec![cmd])
-                            }
-                            DataLocation::Storage {
-                                storage_name,
-                                path,
-                                r#type,
-                            } => {
-                                if matches!(
-                                    r#type,
-                                    StorageType::Byte
-                                        | StorageType::Double
-                                        | StorageType::Int
-                                        | StorageType::Long
-                                ) {
-                                    let cmd = Command::Execute(Execute::Store(
-                                        format!(
-                                            "result storage {storage_name} {path} {t} 1.0",
-                                            t = r#type.as_str()
-                                        )
-                                        .into(),
-                                        Box::new(Execute::Run(Box::new(Command::Raw(format!(
-                                            "scoreboard players get {score_target} {objective}"
-                                        ))))),
-                                    ));
-                                    Ok(vec![cmd])
-                                } else {
-                                    let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                                        expression: primary.span(),
-                                        expected_type: target.value_type().into(),
-                                    });
-                                    handler.receive(err.clone());
-                                    Err(err)
-                                }
-                            }
-                            DataLocation::Tag { .. } => {
-                                let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                                    expected_type: ExpectedType::Boolean,
-                                    expression: primary.span(),
-                                });
-                                handler.receive(err.clone());
-                                Err(err)
-                            }
-                        },
+                    let from = match variable {
+                        VariableData::BooleanStorage { storage_name, path } => {
+                            Ok(DataLocation::Storage {
+                                storage_name: storage_name.to_string(),
+                                path: path.to_string(),
+                                r#type: StorageType::Boolean,
+                            })
+                        }
+                        VariableData::ScoreboardValue { objective, target } => {
+                            Ok(DataLocation::ScoreboardValue {
+                                objective: objective.to_string(),
+                                target: target.to_string(),
+                            })
+                        }
                         _ => {
                             let err = TranspileError::MismatchedTypes(MismatchedTypes {
                                 expected_type: target.value_type().into(),
@@ -841,7 +773,92 @@ impl Transpiler {
                             handler.receive(err.clone());
                             Err(err)
                         }
-                    }
+                    }?;
+
+                    self.move_data(&from, target, primary, handler)
+                } else {
+                    let err = TranspileError::UnknownIdentifier(UnknownIdentifier {
+                        identifier: ident.span.clone(),
+                    });
+                    handler.receive(err.clone());
+                    Err(err)
+                }
+            }
+            Primary::Indexed(indexed) => {
+                let Primary::Identifier(ident) = indexed.object().as_ref() else {
+                    todo!("can only index identifier")
+                };
+                let variable = scope.get_variable(ident.span.str());
+                #[expect(clippy::option_if_let_else)]
+                if let Some(variable) = variable.as_deref() {
+                    let from = match variable {
+                        VariableData::Scoreboard { objective } => {
+                            if let Some(ComptimeValue::String(target)) =
+                                indexed.index().comptime_eval(scope, handler)
+                            {
+                                Ok(DataLocation::ScoreboardValue {
+                                    objective: objective.to_string(),
+                                    target,
+                                })
+                            } else {
+                                todo!("can only index scoreboard with comptime string")
+                            }
+                        }
+                        VariableData::ScoreboardArray { objective, targets } => {
+                            if let Some(ComptimeValue::Integer(index)) =
+                                indexed.index().comptime_eval(scope, handler)
+                            {
+                                if let Some(target) = usize::try_from(index)
+                                    .ok()
+                                    .and_then(|index| targets.get(index))
+                                    .map(ToString::to_string)
+                                {
+                                    Ok(DataLocation::ScoreboardValue {
+                                        objective: objective.to_string(),
+                                        target,
+                                    })
+                                } else {
+                                    todo!("index out of bounds")
+                                }
+                            } else {
+                                todo!("can only index array with comptime integer")
+                            }
+                        }
+                        VariableData::BooleanStorageArray {
+                            storage_name,
+                            paths,
+                        } => {
+                            if let Some(ComptimeValue::Integer(index)) =
+                                indexed.index().comptime_eval(scope, handler)
+                            {
+                                if let Some(path) = usize::try_from(index)
+                                    .ok()
+                                    .and_then(|index| paths.get(index))
+                                    .map(ToString::to_string)
+                                {
+                                    Ok(DataLocation::Storage {
+                                        storage_name: storage_name.to_string(),
+                                        path,
+                                        r#type: StorageType::Boolean,
+                                    })
+                                } else {
+                                    todo!("index out of bounds")
+                                }
+                            } else {
+                                todo!("can only index array with comptime integer")
+                            }
+                        }
+                        _ => {
+                            let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                                expected_type: target.value_type().into(),
+                                expression: primary.span(),
+                            });
+                            handler.receive(err.clone());
+                            Err(err)
+                        }
+                    }?;
+
+                    self.move_data(&from, target, primary, handler)
                 } else {
                     let err = TranspileError::UnknownIdentifier(UnknownIdentifier {
                         identifier: ident.span.clone(),
@@ -1003,6 +1020,57 @@ impl Transpiler {
             }
             Primary::Parenthesized(parenthesized) => {
                 self.transpile_expression_as_condition(parenthesized.expression(), scope, handler)
+            }
+            Primary::Indexed(indexed) => {
+                let Primary::Identifier(ident) = indexed.object().as_ref() else {
+                    todo!("can only index identifier")
+                };
+                #[expect(clippy::option_if_let_else)]
+                if let Some(variable) = scope.get_variable(ident.span.str()).as_deref() {
+                    #[expect(clippy::single_match_else)]
+                    match variable {
+                        VariableData::BooleanStorageArray {
+                            storage_name,
+                            paths,
+                        } => {
+                            if let Some(ComptimeValue::Integer(index)) =
+                                indexed.index().comptime_eval(scope, handler)
+                            {
+                                if let Some(path) = usize::try_from(index)
+                                    .ok()
+                                    .and_then(|index| paths.get(index))
+                                    .map(ToString::to_string)
+                                {
+                                    Ok((
+                                        Vec::new(),
+                                        ExtendedCondition::Runtime(Condition::Atom(
+                                            format!("data storage {storage_name} {{{path}: 1b}}")
+                                                .into(),
+                                        )),
+                                    ))
+                                } else {
+                                    todo!("index out of bounds")
+                                }
+                            } else {
+                                todo!("can only index array with comptime integer")
+                            }
+                        }
+                        _ => {
+                            let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                                expected_type: ExpectedType::Boolean,
+                                expression: primary.span(),
+                            });
+                            handler.receive(err.clone());
+                            Err(err)
+                        }
+                    }
+                } else {
+                    let err = TranspileError::UnknownIdentifier(UnknownIdentifier {
+                        identifier: ident.span.clone(),
+                    });
+                    handler.receive(err.clone());
+                    Err(err)
+                }
             }
             Primary::Prefix(prefix) => match prefix.operator() {
                 PrefixOperator::LogicalNot(_) => {

@@ -185,6 +185,7 @@ pub enum Primary {
     Identifier(Identifier),
     Prefix(Prefix),
     Parenthesized(Parenthesized),
+    Indexed(Indexed),
     Integer(Integer),
     Boolean(Boolean),
     StringLiteral(StringLiteral),
@@ -199,6 +200,7 @@ impl SourceElement for Primary {
             Self::Identifier(identifier) => identifier.span(),
             Self::Prefix(prefix) => prefix.span(),
             Self::Parenthesized(parenthesized) => parenthesized.span(),
+            Self::Indexed(indexed) => indexed.span(),
             Self::Integer(int) => int.span(),
             Self::Boolean(bool) => bool.span(),
             Self::StringLiteral(string_literal) => string_literal.span(),
@@ -242,6 +244,50 @@ impl Parenthesized {
 impl SourceElement for Parenthesized {
     fn span(&self) -> Span {
         self.open.span().join(&self.close.span).unwrap()
+    }
+}
+
+/// Represents a indexed expression in the syntax tree.
+///
+/// Syntax Synopsis:    
+/// ```ebnf
+/// Indexed:
+///     PrimaryExpression '[' Expression ']'
+///     ;
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct Indexed {
+    /// The object that is indexed.
+    #[get = "pub"]
+    object: Box<Primary>,
+    /// The left bracket.
+    #[get = "pub"]
+    left_bracket: Punctuation,
+    /// The index expression.
+    #[get = "pub"]
+    index: Box<Expression>,
+    /// The right bracket.
+    #[get = "pub"]
+    right_bracket: Punctuation,
+}
+
+impl Indexed {
+    /// Dissolves the indexed expression into its components
+    #[must_use]
+    pub fn dissolve(self) -> (Primary, Punctuation, Expression, Punctuation) {
+        (
+            *self.object,
+            self.left_bracket,
+            *self.index,
+            self.right_bracket,
+        )
+    }
+}
+
+impl SourceElement for Indexed {
+    fn span(&self) -> Span {
+        self.object.span().join(&self.right_bracket.span).unwrap()
     }
 }
 

@@ -17,7 +17,7 @@ use crate::{
     lexical::{
         token::{
             CommandLiteral, DocComment, Identifier, Integer, Keyword, KeywordKind, Punctuation,
-            Token,
+            StringLiteral, Token,
         },
         token_stream::Delimiter,
     },
@@ -542,7 +542,7 @@ impl ArrayVariableDeclaration {
     }
 }
 
-type CriteriaSelection = (Punctuation, AnyStringLiteral, Punctuation);
+type CriteriaSelection = (Punctuation, StringLiteral, Punctuation);
 
 /// Represents a scoreboard variable declaration in the syntax tree.
 ///
@@ -550,7 +550,7 @@ type CriteriaSelection = (Punctuation, AnyStringLiteral, Punctuation);
 ///
 /// ```ebnf
 /// ScoreVariableDeclaration:
-///     'int' ('<' AnyStringLiteral '>')? identifier '[' AnyStringLiteral? ']' VariableDeclarationAssignment?
+///     'int' ('<' StringLiteral '>')? identifier '[' AnyStringLiteral? ']' VariableDeclarationAssignment?
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
@@ -685,14 +685,14 @@ impl TagVariableDeclaration {
 /// Syntax Synopsis:
 /// ```ebnf
 /// Assignment:
-///    Identifier '=' Expression
+///    AssignmentDestination '=' Expression
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct Assignment {
     /// The identifier of the assignment.
     #[get = "pub"]
-    identifier: Identifier,
+    destination: AssignmentDestination,
     /// The equals sign of the assignment.
     #[get = "pub"]
     equals: Punctuation,
@@ -703,7 +703,7 @@ pub struct Assignment {
 
 impl SourceElement for Assignment {
     fn span(&self) -> Span {
-        self.identifier
+        self.destination
             .span()
             .join(&self.expression.span())
             .expect("The span of the assignment is invalid.")
@@ -713,8 +713,38 @@ impl SourceElement for Assignment {
 impl Assignment {
     /// Dissolves the [`Assignment`] into its components.
     #[must_use]
-    pub fn dissolve(self) -> (Identifier, Punctuation, Expression) {
-        (self.identifier, self.equals, self.expression)
+    pub fn dissolve(self) -> (AssignmentDestination, Punctuation, Expression) {
+        (self.destination, self.equals, self.expression)
+    }
+}
+
+/// Represents an assignment destination in the syntax tree.
+///
+/// Syntax Synopsis:
+/// ```ebnf
+/// AssignmentDestination:
+///     Identifier
+///     | Identifier '[' Expression ']'
+///     ;
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum AssignmentDestination {
+    /// Assignment to an identifier.
+    Identifier(Identifier),
+    /// Assignment to an indexed identifier.
+    Indexed(Identifier, Punctuation, Expression, Punctuation),
+}
+
+impl SourceElement for AssignmentDestination {
+    fn span(&self) -> Span {
+        match self {
+            Self::Identifier(identifier) => identifier.span(),
+            Self::Indexed(identifier, _, _, close) => identifier
+                .span()
+                .join(&close.span())
+                .expect("The span of the indexed assignment destination is invalid."),
+        }
     }
 }
 
@@ -859,15 +889,30 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 // try to parse assignment
-                // TODO: improve
                 #[expect(clippy::option_if_let_else)]
                 if let Ok(assignment) = self.try_parse(|p| {
-                    let identifier = p.parse_identifier(&VoidHandler)?;
+                    let destination = {
+                        let identifier = p.parse_identifier(&VoidHandler)?;
+
+                        if let Ok(tree) = p.step_into(
+                            Delimiter::Bracket,
+                            |pp| pp.parse_expression(&VoidHandler),
+                            &VoidHandler,
+                        ) {
+                            let open = tree.open;
+                            let close = tree.close;
+                            let expression = tree.tree?;
+
+                            AssignmentDestination::Indexed(identifier, open, expression, close)
+                        } else {
+                            AssignmentDestination::Identifier(identifier)
+                        }
+                    };
                     let equals = p.parse_punctuation('=', true, &VoidHandler)?;
                     let expression = p.parse_expression(&VoidHandler)?;
 
                     Ok(SemicolonStatement::Assignment(Assignment {
-                        identifier,
+                        destination,
                         equals,
                         expression,
                     }))
@@ -923,7 +968,7 @@ impl<'a> Parser<'a> {
         let criteria_selection = if variable_type.keyword == KeywordKind::Int {
             self.try_parse(|p| {
                 let open = p.parse_punctuation('<', true, &VoidHandler)?;
-                let criteria = p.parse_any_string_literal(&VoidHandler)?;
+                let criteria = p.parse_string_literal(&VoidHandler)?;
                 let close = p.parse_punctuation('>', true, &VoidHandler)?;
                 Ok((open, criteria, close))
             })

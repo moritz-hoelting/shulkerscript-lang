@@ -36,7 +36,7 @@ use crate::{
 use super::{
     error::{MismatchedTypes, TranspileError, TranspileResult, UnknownIdentifier},
     expression::{ComptimeValue, ExpectedType, ExtendedCondition, StorageType},
-    variables::{Scope, VariableData},
+    variables::{Scope, TranspileAssignmentTarget, VariableData},
     FunctionData, TranspileAnnotationValue,
 };
 
@@ -514,6 +514,7 @@ impl Transpiler {
                         Expression::Primary(
                             Primary::Parenthesized(_)
                             | Primary::Prefix(_)
+                            | Primary::Indexed(_)
                             | Primary::FunctionCall(_),
                         )
                         | Expression::Binary(_) => {
@@ -745,7 +746,7 @@ impl Transpiler {
                     self.transpile_variable_declaration(decl, program_identifier, scope, handler)
                 }
                 SemicolonStatement::Assignment(assignment) => self.transpile_assignment(
-                    assignment.identifier(),
+                    TranspileAssignmentTarget::from(assignment.destination()),
                     assignment.expression(),
                     scope,
                     handler,
@@ -770,7 +771,8 @@ impl Transpiler {
                 Primary::Integer(_)
                 | Primary::Boolean(_)
                 | Primary::Prefix(_)
-                | Primary::Identifier(_),
+                | Primary::Identifier(_)
+                | Primary::Indexed(_),
             ) => {
                 let error =
                     TranspileError::UnexpectedExpression(UnexpectedExpression(expression.clone()));
