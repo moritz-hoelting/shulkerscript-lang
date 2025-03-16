@@ -4,14 +4,11 @@
 
 use std::collections::HashSet;
 
-use error::{
-    IncompatibleFunctionAnnotation, InvalidNamespaceName, MissingFunctionDeclaration,
-    UnresolvedMacroUsage,
-};
+use error::{IncompatibleFunctionAnnotation, InvalidNamespaceName};
 
 use crate::{
     base::{self, source_file::SourceElement as _, Handler},
-    lexical::token::{MacroStringLiteral, MacroStringLiteralPart},
+    lexical::token::MacroStringLiteral,
     syntax::syntax_tree::{
         declaration::{Declaration, Function, ImportItems},
         expression::{Expression, FunctionCall, Parenthesized, Primary},
@@ -387,28 +384,29 @@ impl MacroStringLiteral {
     /// Analyzes the semantics of the macro string literal.
     pub fn analyze_semantics(
         &self,
-        macro_names: &HashSet<String>,
-        handler: &impl Handler<base::Error>,
+        _macro_names: &HashSet<String>,
+        _handler: &impl Handler<base::Error>,
     ) -> Result<(), error::Error> {
-        let mut errors = Vec::new();
-        for part in self.parts() {
-            if let MacroStringLiteralPart::MacroUsage { identifier, .. } = part {
-                if !macro_names.contains(identifier.span.str()) {
-                    let err = error::Error::UnresolvedMacroUsage(UnresolvedMacroUsage {
-                        span: identifier.span(),
-                    });
-                    handler.receive(err.clone());
-                    errors.push(err);
-                }
-            }
-        }
+        // let mut errors = Vec::new();
+        // TODO: allow macro string literals to also contain other variables
+        // for part in self.parts() {
+        //     if let MacroStringLiteralPart::MacroUsage { identifier, .. } = part {
+        //         if !macro_names.contains(identifier.span.str()) {
+        //             let err = error::Error::UnresolvedMacroUsage(UnresolvedMacroUsage {
+        //                 span: identifier.span(),
+        //             });
+        //             handler.receive(err.clone());
+        //             errors.push(err);
+        //         }
+        //     }
+        // }
 
-        #[expect(clippy::option_if_let_else)]
-        if let Some(err) = errors.first() {
-            Err(err.clone())
-        } else {
-            Ok(())
-        }
+        // #[expect(clippy::option_if_let_else)]
+        // if let Some(err) = errors.first() {
+        //     Err(err.clone())
+        // } else {
+        Ok(())
+        // }
     }
 }
 
@@ -462,13 +460,14 @@ impl FunctionCall {
     ) -> Result<(), error::Error> {
         let mut errors = Vec::new();
 
-        if !function_names.contains(self.identifier().span.str()) {
-            let err = error::Error::MissingFunctionDeclaration(
-                MissingFunctionDeclaration::from_context(self.identifier().span(), function_names),
-            );
-            handler.receive(err.clone());
-            errors.push(err);
-        }
+        // TODO: also check for internal functions
+        // if !function_names.contains(self.identifier().span.str()) {
+        //     let err = error::Error::MissingFunctionDeclaration(
+        //         MissingFunctionDeclaration::from_context(self.identifier().span(), function_names),
+        //     );
+        //     handler.receive(err.clone());
+        //     errors.push(err);
+        // }
 
         for expression in self
             .arguments()

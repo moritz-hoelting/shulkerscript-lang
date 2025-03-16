@@ -545,6 +545,20 @@ impl<'a> Parser<'a> {
                             arguments: token_tree.list,
                         }))
                     }
+                    Reading::IntoDelimited(punc) if punc.punctuation == '[' => {
+                        let token_tree = self.step_into(
+                            Delimiter::Bracket,
+                            |p| p.parse_expression(handler),
+                            handler,
+                        )?;
+
+                        Ok(Primary::Indexed(Indexed {
+                            object: Box::new(Primary::Identifier(identifier)),
+                            left_bracket: token_tree.open,
+                            index: Box::new(token_tree.tree?),
+                            right_bracket: token_tree.close,
+                        }))
+                    }
                     _ => {
                         // regular identifier
                         Ok(Primary::Identifier(identifier))

@@ -18,8 +18,8 @@ license = "MIT OR Apache-2.0"
 default = ["fs_access", "lua", "shulkerbox", "zip"]
 fs_access = ["shulkerbox?/fs_access"]
 lua = ["dep:mlua"]
-serde = ["dep:serde", "dep:flexbuffers", "shulkerbox?/serde"]
-shulkerbox = ["dep:shulkerbox", "dep:chksum-md5"]
+serde = ["dep:serde", "dep:serde_json", "shulkerbox?/serde"]
+shulkerbox = ["dep:shulkerbox", "dep:chksum-md5", "dep:serde_json"]
 zip = ["shulkerbox?/zip"]
 
 [dependencies]
@@ -28,12 +28,12 @@ chksum-md5 = { version = "0.1.0", optional = true }
 colored = "3.0.0"
 derive_more = { version = "2.0.1", default-features = false, features = ["deref", "deref_mut", "from"] }
 enum-as-inner = "0.6.0"
-flexbuffers = { version = "25.2.10", optional = true }
 getset = "0.1.2"
 itertools = "0.14.0"
 mlua = { version = "0.10.2", features = ["lua54", "vendored"], optional = true }
 pathdiff = "0.2.3"
 serde = { version = "1.0.217", features = ["derive"], optional = true }
+serde_json = { version = "1.0.138", optional = true }
 # shulkerbox = { version = "0.1.0", default-features = false, optional = true }
 shulkerbox = { git = "https://github.com/moritz-hoelting/shulkerbox", rev = "e9f2b9b91d72322ec2e063ce7b83415071306468", default-features = false, optional = true }
 strsim = "0.11.1"

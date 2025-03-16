@@ -262,8 +262,8 @@ mod enabled {
                         .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
                     Value::Table(table)
                 }
-                Some(VariableData::Function { .. }) => {
-                    todo!("functions are not supported yet");
+                Some(VariableData::Function { .. } | VariableData::InternalFunction { .. }) => {
+                    todo!("(internal) functions are not supported yet");
                 }
                 None => {
                     return Err(TranspileError::UnknownIdentifier(UnknownIdentifier {

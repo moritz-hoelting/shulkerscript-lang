@@ -33,6 +33,7 @@ pub enum Error {
     IncompatibleFunctionAnnotation(#[from] IncompatibleFunctionAnnotation),
 }
 
+// TODO: remove duplicate error (also in transpile)
 /// An error that occurs when a function declaration is missing.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Getters)]
 pub struct MissingFunctionDeclaration {
@@ -43,6 +44,7 @@ pub struct MissingFunctionDeclaration {
 }
 
 impl MissingFunctionDeclaration {
+    #[expect(dead_code)]
     pub(super) fn from_context(identifier_span: Span, functions: &HashSet<String>) -> Self {
         let own_name = identifier_span.str();
         let alternatives = functions

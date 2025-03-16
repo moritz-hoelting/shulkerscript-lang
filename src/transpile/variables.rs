@@ -33,6 +33,7 @@ use super::{
         MismatchedTypes,
     },
     expression::{ComptimeValue, DataLocation, ExpectedType, StorageType},
+    internal_functions::InternalFunction,
     FunctionData, TranspileAnnotationValue, TranspileError, TranspileResult,
 };
 
@@ -94,6 +95,11 @@ pub enum VariableData {
         /// The paths to the booleans.
         paths: Vec<String>,
     },
+    /// Compiler internal function.
+    InternalFunction {
+        /// The implementation
+        implementation: InternalFunction,
+    },
 }
 
 #[derive(Debug, Clone, Copy, EnumAsInner)]
@@ -131,6 +137,19 @@ impl<'a> Scope<'a> {
     #[must_use]
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
+    }
+
+    /// Creates a new scope with internal functions.
+    #[cfg(feature = "shulkerbox")]
+    #[must_use]
+    pub fn with_internal_functions() -> Arc<Self> {
+        use super::internal_functions;
+
+        let scope = Self::new();
+
+        internal_functions::add_all_to_scope(&scope);
+
+        scope
     }
 
     /// Creates a new scope with a parent.
@@ -624,15 +643,18 @@ impl Transpiler {
                         return Err(err);
                     }
                 },
-                VariableData::Function { .. } | VariableData::MacroParameter { .. } => {
+                VariableData::Function { .. }
+                | VariableData::MacroParameter { .. }
+                | VariableData::InternalFunction { .. } => {
                     let err = TranspileError::AssignmentError(AssignmentError {
                         identifier: identifier.span(),
                         message: format!(
                             "Cannot assign to a {}.",
-                            if matches!(target.as_ref(), VariableData::Function { .. }) {
-                                "function"
-                            } else {
-                                "function argument"
+                            match target.as_ref() {
+                                VariableData::Function { .. } => "function",
+                                VariableData::MacroParameter { .. } => "macro parameter",
+                                VariableData::InternalFunction { .. } => "internal function",
+                                _ => unreachable!(),
                             }
                         ),
                     });

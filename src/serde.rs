@@ -42,7 +42,7 @@ where
         // hold guard so no other can serialize at the same time in same thread
         let s = DEDUPLICATE_SOURCE_FILES.with(|d| {
             let guard = d.read().unwrap();
-            let mut serialized_data = flexbuffers::FlexbufferSerializer::new();
+            let mut serialized_data = serde_json::Serializer::new(Vec::new());
             self.0
                 .serialize(&mut serialized_data)
                 .map_err(|_| serde::ser::Error::custom("could not buffer serialization"))?;
