@@ -1,7 +1,7 @@
 #![expect(unused)]
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fmt::Debug,
     ops::Deref,
     sync::{Arc, OnceLock, RwLock},
@@ -20,9 +20,10 @@ use crate::{
     syntax::syntax_tree::{
         expression::{Expression, Primary},
         statement::{
-            AssignmentDestination, ScoreVariableDeclaration, SingleVariableDeclaration,
-            VariableDeclaration,
+            ArrayVariableDeclaration, AssignmentDestination, ScoreVariableDeclaration,
+            SingleVariableDeclaration, TagVariableDeclaration, VariableDeclaration,
         },
+        Annotation,
     },
 };
 
@@ -247,8 +248,17 @@ impl Transpiler {
                 scope,
                 handler,
             ),
-            _ => todo!(
-                "declarations other than single and scoreboard not supported yet: {declaration:?}"
+            VariableDeclaration::Array(declaration) => self.transpile_array_variable_declaration(
+                declaration,
+                program_identifier,
+                scope,
+                handler,
+            ),
+            VariableDeclaration::Tag(declaration) => self.transpile_tag_variable_declaration(
+                declaration,
+                program_identifier,
+                scope,
+                handler,
             ),
         }
     }
@@ -316,23 +326,14 @@ impl Transpiler {
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Vec<Command>> {
-        let mut deobfuscate_annotations = declaration
-            .annotations()
-            .iter()
-            .filter(|a| a.has_identifier("deobfuscate"));
-
-        let deobfuscate_annotation = deobfuscate_annotations.next();
-
-        if let Some(duplicate) = deobfuscate_annotations.next() {
-            let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                annotation: duplicate.span(),
-                message: "Multiple deobfuscate annotations are not allowed.".to_string(),
-            });
-            handler.receive(error.clone());
-            return Err(error);
-        }
-        let name =
-            self.get_data_location_identifier(declaration, program_identifier, scope, handler)?;
+        let name = self.get_data_location_identifier(
+            declaration.int_keyword().keyword,
+            declaration.identifier(),
+            declaration.annotations(),
+            program_identifier,
+            scope,
+            handler,
+        )?;
 
         let criteria = declaration
             .criteria()
@@ -355,6 +356,84 @@ impl Transpiler {
         Ok(Vec::new())
     }
 
+    fn transpile_array_variable_declaration(
+        &mut self,
+        declaration: &ArrayVariableDeclaration,
+        program_identifier: &str,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> TranspileResult<Vec<Command>> {
+        let variable_type = declaration.variable_type().keyword;
+
+        let (name, targets) =
+            self.get_array_data_location_pair(declaration, program_identifier, scope, handler)?;
+
+        match variable_type {
+            KeywordKind::Int => {
+                if !self.datapack.scoreboards().contains_key(&name) {
+                    self.datapack
+                        .register_scoreboard(&name, None::<&str>, None::<&str>);
+                }
+
+                scope.set_variable(
+                    declaration.identifier().span.str(),
+                    VariableData::ScoreboardArray {
+                        objective: name,
+                        targets,
+                    },
+                );
+            }
+            KeywordKind::Bool => {
+                scope.set_variable(
+                    declaration.identifier().span.str(),
+                    VariableData::BooleanStorageArray {
+                        storage_name: name,
+                        paths: targets,
+                    },
+                );
+            }
+            _ => unreachable!("no other variable types"),
+        }
+
+        declaration.assignment().as_ref().map_or_else(
+            || Ok(Vec::new()),
+            |assignment| {
+                self.transpile_assignment(
+                    TranspileAssignmentTarget::Identifier(declaration.identifier()),
+                    assignment.expression(),
+                    scope,
+                    handler,
+                )
+            },
+        )
+    }
+
+    fn transpile_tag_variable_declaration(
+        &mut self,
+        declaration: &TagVariableDeclaration,
+        program_identifier: &str,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> TranspileResult<Vec<Command>> {
+        let name = self.get_data_location_identifier(
+            declaration.bool_keyword().keyword,
+            declaration.identifier(),
+            declaration.annotations(),
+            program_identifier,
+            scope,
+            handler,
+        )?;
+
+        scope.set_variable(
+            declaration.identifier().span.str(),
+            VariableData::Tag { tag_name: name },
+        );
+
+        // TODO: implement assignment when map literal is implemented
+        Ok(Vec::new())
+    }
+
+    #[expect(clippy::too_many_lines)]
     pub(super) fn transpile_assignment(
         &mut self,
         destination: TranspileAssignmentTarget,
@@ -404,9 +483,142 @@ impl Transpiler {
                         return Err(err);
                     }
                     None => {
+                        // TODO: allow when map literals are implemented
                         let err = TranspileError::AssignmentError(AssignmentError {
                             identifier: identifier.span(),
                             message: "Cannot assign to a scoreboard without indexing".to_string(),
+                        });
+                        handler.receive(err.clone());
+                        return Err(err);
+                    }
+                },
+                VariableData::ScoreboardArray { objective, targets } => {
+                    match indexing_value {
+                        Some(ComptimeValue::Integer(index)) => {
+                            if let Some(target) = usize::try_from(index)
+                                .ok()
+                                .and_then(|index| targets.get(index))
+                            {
+                                Ok(DataLocation::ScoreboardValue {
+                                    objective: objective.to_string(),
+                                    target: target.to_string(),
+                                })
+                            } else {
+                                let index_span = match destination {
+                                    TranspileAssignmentTarget::Indexed(_, expr) => expr.span(),
+                                    TranspileAssignmentTarget::Identifier(_) => unreachable!(
+                                        "indexing value must be present (checked before)"
+                                    ),
+                                };
+                                let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                                    expression: index_span,
+                                    reason: IllegalIndexingReason::IndexOutOfBounds {
+                                        index: usize::try_from(index).unwrap_or(usize::MAX),
+                                        length: targets.len(),
+                                    },
+                                });
+                                handler.receive(err.clone());
+                                return Err(err);
+                            }
+                        }
+                        Some(_) => {
+                            let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                                expression: expression.span(),
+                                reason: IllegalIndexingReason::InvalidComptimeType {
+                                    expected: ExpectedType::Integer,
+                                },
+                            });
+                            handler.receive(err.clone());
+                            return Err(err);
+                        }
+                        None => {
+                            // TODO: implement when array literals are implemented
+                            let err = TranspileError::AssignmentError(AssignmentError {
+                                identifier: identifier.span(),
+                                message: "Cannot assign to an array without indexing".to_string(),
+                            });
+                            handler.receive(err.clone());
+                            return Err(err);
+                        }
+                    }
+                }
+                VariableData::BooleanStorageArray {
+                    storage_name,
+                    paths,
+                } => {
+                    match indexing_value {
+                        Some(ComptimeValue::Integer(index)) => {
+                            if let Some(path) = usize::try_from(index)
+                                .ok()
+                                .and_then(|index| paths.get(index))
+                            {
+                                Ok(DataLocation::Storage {
+                                    storage_name: storage_name.to_string(),
+                                    path: path.to_string(),
+                                    r#type: StorageType::Boolean,
+                                })
+                            } else {
+                                let index_span = match destination {
+                                    TranspileAssignmentTarget::Indexed(_, expr) => expr.span(),
+                                    TranspileAssignmentTarget::Identifier(_) => unreachable!(
+                                        "indexing value must be present (checked before)"
+                                    ),
+                                };
+                                let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                                    expression: index_span,
+                                    reason: IllegalIndexingReason::IndexOutOfBounds {
+                                        index: usize::try_from(index).unwrap_or(usize::MAX),
+                                        length: paths.len(),
+                                    },
+                                });
+                                handler.receive(err.clone());
+                                return Err(err);
+                            }
+                        }
+                        Some(_) => {
+                            let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                                expression: expression.span(),
+                                reason: IllegalIndexingReason::InvalidComptimeType {
+                                    expected: ExpectedType::Integer,
+                                },
+                            });
+                            handler.receive(err.clone());
+                            return Err(err);
+                        }
+                        None => {
+                            // TODO: implement when array literals are implemented
+                            let err = TranspileError::AssignmentError(AssignmentError {
+                                identifier: identifier.span(),
+                                message: "Cannot assign to an array without indexing".to_string(),
+                            });
+                            handler.receive(err.clone());
+                            return Err(err);
+                        }
+                    }
+                }
+                VariableData::Tag { tag_name } => match indexing_value {
+                    Some(ComptimeValue::String(s)) => Ok(DataLocation::Tag {
+                        tag_name: tag_name.to_string(),
+                        entity: s,
+                    }),
+                    Some(ComptimeValue::MacroString(s)) => {
+                        todo!("indexing tag with macro string: {s}")
+                    }
+                    Some(_) => {
+                        let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                            expression: expression.span(),
+                            reason: IllegalIndexingReason::InvalidComptimeType {
+                                expected: ExpectedType::String,
+                            },
+                        });
+                        handler.receive(err.clone());
+                        return Err(err);
+                    }
+                    None => {
+                        // TODO: allow when map literals are implemented
+                        let err = TranspileError::AssignmentError(AssignmentError {
+                            identifier: identifier.span(),
+                            message: "Cannot assign to a tag without indexing".to_string(),
                         });
                         handler.receive(err.clone());
                         return Err(err);
@@ -427,7 +639,6 @@ impl Transpiler {
                     handler.receive(err.clone());
                     Err(err)
                 }
-                _ => todo!("implement other variable types"),
             }?;
             self.transpile_expression(expression, &data_location, scope, handler)
         } else {
@@ -442,13 +653,14 @@ impl Transpiler {
 
     fn get_data_location_identifier(
         &mut self,
-        declaration: &ScoreVariableDeclaration,
+        variable_type: KeywordKind,
+        identifier: &Identifier,
+        annotations: &VecDeque<Annotation>,
         program_identifier: &str,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<String> {
-        let mut deobfuscate_annotations = declaration
-            .annotations()
+        let mut deobfuscate_annotations = annotations
             .iter()
             .filter(|a| a.has_identifier("deobfuscate"));
 
@@ -472,6 +684,7 @@ impl Transpiler {
                         .comptime_eval(scope, handler)
                         .and_then(|val| val.to_string_no_macro())
                     {
+                        // TODO: change invalid criteria if boolean
                         if !crate::util::is_valid_scoreboard_objective_name(&name_eval) {
                             let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
                                                     annotation: deobfuscate_annotation.span(),
@@ -490,9 +703,7 @@ impl Transpiler {
                         Err(error)
                     }
                 }
-                TranspileAnnotationValue::None => {
-                    Ok(declaration.identifier().span.str().to_string())
-                }
+                TranspileAnnotationValue::None => Ok(identifier.span.str().to_string()),
                 TranspileAnnotationValue::Map(_) => {
                     let error =
                         TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
@@ -507,7 +718,7 @@ impl Transpiler {
         } else {
             let hashed = md5::hash(program_identifier).to_hex_lowercase();
             let name = "shu_values_".to_string() + &hashed;
-            let identifier_name = declaration.identifier().span.str();
+            let identifier_name = identifier.span.str();
             let scope_ident = self.temp_counter;
             self.temp_counter = self.temp_counter.wrapping_add(1);
             let mut target = md5::hash(format!(
@@ -650,6 +861,97 @@ impl Transpiler {
             }
 
             Ok((name, target))
+        }
+    }
+
+    fn get_array_data_location_pair(
+        &mut self,
+        declaration: &ArrayVariableDeclaration,
+        program_identifier: &str,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> TranspileResult<(String, Vec<String>)> {
+        let mut deobfuscate_annotations = declaration
+            .annotations()
+            .iter()
+            .filter(|a| a.has_identifier("deobfuscate"));
+
+        let variable_type = declaration.variable_type().keyword;
+
+        let deobfuscate_annotation = deobfuscate_annotations.next();
+
+        if let Some(duplicate) = deobfuscate_annotations.next() {
+            let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                annotation: duplicate.span(),
+                message: "Multiple deobfuscate annotations are not allowed.".to_string(),
+            });
+            handler.receive(error.clone());
+            return Err(error);
+        }
+        if let Some(deobfuscate_annotation) = deobfuscate_annotation {
+            let deobfuscate_annotation_value =
+                TranspileAnnotationValue::from(deobfuscate_annotation.assignment().value.clone());
+
+            match deobfuscate_annotation_value {
+                TranspileAnnotationValue::None => {
+                    let ident_str = declaration.identifier().span.str();
+                    let name = if matches!(variable_type, KeywordKind::Int) {
+                        ident_str.to_string()
+                    } else {
+                        format!(
+                            "{namespace}:{ident_str}",
+                            namespace = self.main_namespace_name
+                        )
+                    };
+
+                    let len = declaration.size().as_i64();
+                    let targets = (0..len).map(|i| i.to_string()).collect();
+                    Ok((name, targets))
+                }
+                TranspileAnnotationValue::Map(map) => {
+                    todo!("allow map deobfuscate annotation for array variables")
+                }
+                TranspileAnnotationValue::Expression(_) => {
+                    let error =
+                        TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                            annotation: deobfuscate_annotation.span(),
+                            message: "Deobfuscate annotation value must be a map or none."
+                                .to_string(),
+                        });
+                    handler.receive(error.clone());
+                    Err(error)
+                }
+            }
+        } else {
+            let hashed = md5::hash(program_identifier).to_hex_lowercase();
+            let name = if matches!(variable_type, KeywordKind::Int) {
+                "shu_values_"
+            } else {
+                "shulkerbox:values_"
+            }
+            .to_string()
+                + &hashed;
+            let identifier_name = declaration.identifier().span.str();
+            let scope_ident = self.temp_counter;
+            self.temp_counter = self.temp_counter.wrapping_add(1);
+            let len = declaration.size().as_i64();
+            let targets = (0..len)
+                .map(|i| {
+                    let mut target = md5::hash(format!(
+                        "{scope_ident}\0{identifier_name}\0{i}\0{shadowed}",
+                        shadowed = scope.get_variable_shadow_count(identifier_name)
+                    ))
+                    .to_hex_lowercase();
+
+                    if matches!(variable_type, KeywordKind::Int) {
+                        target.split_off(16);
+                    }
+
+                    target
+                })
+                .collect();
+
+            Ok((name, targets))
         }
     }
 

@@ -41,17 +41,6 @@ pub enum ComptimeValue {
     MacroString(MacroString),
 }
 
-impl Display for ComptimeValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Boolean(boolean) => write!(f, "{boolean}"),
-            Self::Integer(int) => write!(f, "{int}"),
-            Self::String(string) => write!(f, "{string}"),
-            Self::MacroString(macro_string) => write!(f, "{macro_string}"),
-        }
-    }
-}
-
 impl ComptimeValue {
     /// Returns the value as a string not containing a macro.
     #[must_use]
@@ -61,6 +50,17 @@ impl ComptimeValue {
             Self::Integer(int) => Some(int.to_string()),
             Self::String(string) => Some(string.clone()),
             Self::MacroString(_) => None,
+        }
+    }
+
+    /// Returns the value as a [`MacroString`].
+    #[must_use]
+    pub fn to_macro_string(&self) -> MacroString {
+        match self {
+            Self::Boolean(boolean) => MacroString::String(boolean.to_string()),
+            Self::Integer(int) => MacroString::String(int.to_string()),
+            Self::String(string) => MacroString::String(string.clone()),
+            Self::MacroString(macro_string) => macro_string.clone(),
         }
     }
 }

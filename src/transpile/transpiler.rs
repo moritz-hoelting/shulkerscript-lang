@@ -441,7 +441,7 @@ impl Transpiler {
                         Expression::Primary(Primary::Lua(lua)) => {
                             lua.eval_comptime(scope, handler).and_then(|val| match val {
                                 Some(ComptimeValue::MacroString(s)) => Ok(Parameter::Static(s)),
-                                Some(val) => Ok(Parameter::Static(val.to_string().into())),
+                                Some(val) => Ok(Parameter::Static(val.to_macro_string())),
                                 None => {
                                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
                                         expression: expression.span(),

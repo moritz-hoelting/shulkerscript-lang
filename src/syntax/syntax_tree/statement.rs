@@ -572,7 +572,7 @@ pub struct ScoreVariableDeclaration {
     close_bracket: Punctuation,
     /// The optional assignment of the variable.
     #[get = "pub"]
-    target_assignment: Option<(AnyStringLiteral, VariableDeclarationAssignment)>,
+    assignment: Option<VariableDeclarationAssignment>,
     /// The annotations of the variable declaration.
     #[get = "pub"]
     annotations: VecDeque<Annotation>,
@@ -582,17 +582,18 @@ impl SourceElement for ScoreVariableDeclaration {
     fn span(&self) -> Span {
         self.int_keyword
             .span()
-            .join(&self.target_assignment.as_ref().map_or_else(
-                || self.close_bracket.span(),
-                |(_, assignment)| assignment.span(),
-            ))
+            .join(
+                &self
+                    .assignment
+                    .as_ref()
+                    .map_or_else(|| self.close_bracket.span(), SourceElement::span),
+            )
             .expect("The span of the score variable declaration is invalid.")
     }
 }
 
 impl ScoreVariableDeclaration {
     /// Dissolves the [`ScoreVariableDeclaration`] into its components.
-    #[expect(clippy::type_complexity)]
     #[must_use]
     pub fn dissolve(
         self,
@@ -602,7 +603,7 @@ impl ScoreVariableDeclaration {
         Identifier,
         Punctuation,
         Punctuation,
-        Option<(AnyStringLiteral, VariableDeclarationAssignment)>,
+        Option<VariableDeclarationAssignment>,
     ) {
         (
             self.int_keyword,
@@ -610,7 +611,7 @@ impl ScoreVariableDeclaration {
             self.identifier,
             self.open_bracket,
             self.close_bracket,
-            self.target_assignment,
+            self.assignment,
         )
     }
 }
@@ -939,9 +940,9 @@ impl<'a> Parser<'a> {
         &mut self,
         handler: &impl Handler<base::Error>,
     ) -> ParseResult<VariableDeclaration> {
+        #[derive(Debug, Clone)]
         enum IndexingType {
             IntegerSize(Integer),
-            AnyString(AnyStringLiteral),
             None,
         }
 
@@ -992,27 +993,13 @@ impl<'a> Parser<'a> {
                                 IndexingType::IntegerSize(int)
                             }
 
-                            Reading::Atomic(Token::StringLiteral(s)) => {
-                                let selector = AnyStringLiteral::from(s);
-                                p.forward();
-                                IndexingType::AnyString(selector)
-                            }
-                            Reading::Atomic(Token::MacroStringLiteral(s)) => {
-                                let selector = AnyStringLiteral::from(s);
-                                p.forward();
-                                IndexingType::AnyString(selector)
-                            }
-
                             Reading::DelimitedEnd(punc) if punc.punctuation == ']' => {
                                 IndexingType::None
                             }
 
                             unexpected => {
                                 let err = Error::UnexpectedSyntax(UnexpectedSyntax {
-                                    expected: SyntaxKind::Either(&[
-                                        SyntaxKind::Integer,
-                                        SyntaxKind::AnyStringLiteral,
-                                    ]),
+                                    expected: SyntaxKind::Integer,
                                     found: unexpected.into_token(),
                                 });
                                 handler.receive(err.clone());
@@ -1034,10 +1021,10 @@ impl<'a> Parser<'a> {
                         let assignment = self
                             .try_parse(|p| {
                                 // read equals sign
-                                let equals = p.parse_punctuation('=', true, handler)?;
+                                let equals = p.parse_punctuation('=', true, &VoidHandler)?;
 
                                 // read expression
-                                let expression = p.parse_expression(handler)?;
+                                let expression = p.parse_expression(&VoidHandler)?;
 
                                 Ok(VariableDeclarationAssignment { equals, expression })
                             })
@@ -1053,37 +1040,6 @@ impl<'a> Parser<'a> {
                             annotations: VecDeque::new(),
                         }))
                     }
-                    IndexingType::AnyString(selector) => {
-                        let equals = self.parse_punctuation('=', true, handler)?;
-                        let expression = self.parse_expression(handler)?;
-
-                        let assignment = VariableDeclarationAssignment { equals, expression };
-
-                        match variable_type.keyword {
-                            KeywordKind::Int => {
-                                Ok(VariableDeclaration::Score(ScoreVariableDeclaration {
-                                    int_keyword: variable_type,
-                                    criteria: criteria_selection,
-                                    identifier,
-                                    open_bracket,
-                                    close_bracket,
-                                    target_assignment: Some((selector, assignment)),
-                                    annotations: VecDeque::new(),
-                                }))
-                            }
-                            KeywordKind::Bool => {
-                                Ok(VariableDeclaration::Tag(TagVariableDeclaration {
-                                    bool_keyword: variable_type,
-                                    identifier,
-                                    open_bracket,
-                                    close_bracket,
-                                    target_assignment: Some((selector, assignment)),
-                                    annotations: VecDeque::new(),
-                                }))
-                            }
-                            _ => unreachable!(),
-                        }
-                    }
                     IndexingType::None => match variable_type.keyword {
                         KeywordKind::Int => {
                             Ok(VariableDeclaration::Score(ScoreVariableDeclaration {
@@ -1092,7 +1048,7 @@ impl<'a> Parser<'a> {
                                 identifier,
                                 open_bracket,
                                 close_bracket,
-                                target_assignment: None,
+                                assignment: None,
                                 annotations: VecDeque::new(),
                             }))
                         }
