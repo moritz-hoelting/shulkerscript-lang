@@ -42,6 +42,8 @@ pub enum TranspileError {
     UnknownIdentifier(#[from] UnknownIdentifier),
     #[error(transparent)]
     MissingValue(#[from] MissingValue),
+    #[error(transparent)]
+    IllegalIndexing(#[from] IllegalIndexing),
 }
 
 /// The result of a transpilation operation.
@@ -309,3 +311,54 @@ impl Display for MissingValue {
 }
 
 impl std::error::Error for MissingValue {}
+
+/// An error that occurs when an indexing operation is not permitted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IllegalIndexing {
+    pub reason: IllegalIndexingReason,
+    pub expression: Span,
+}
+
+impl Display for IllegalIndexing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", Message::new(Severity::Error, &self.reason))?;
+
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(&self.expression, Option::<u8>::None)
+        )
+    }
+}
+
+impl std::error::Error for IllegalIndexing {}
+
+/// The reason why an indexing operation is not permitted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IllegalIndexingReason {
+    NotIdentifier,
+    InvalidComptimeType { expected: ExpectedType },
+    IndexOutOfBounds { index: usize, length: usize },
+}
+
+impl Display for IllegalIndexingReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotIdentifier => {
+                write!(f, "The expression is not an identifier.")
+            }
+            Self::InvalidComptimeType { expected } => {
+                write!(
+                    f,
+                    "The expression can only be indexed with type {expected} that can be evaluated at compile time."
+                )
+            }
+            Self::IndexOutOfBounds { index, length } => {
+                write!(
+                    f,
+                    "The index {index} is out of bounds for the expression with length {length}."
+                )
+            }
+        }
+    }
+}

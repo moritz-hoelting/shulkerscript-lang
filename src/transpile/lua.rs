@@ -4,13 +4,17 @@
 mod enabled {
     use std::sync::Arc;
 
-    use mlua::{Lua, Value};
+    use mlua::{Lua, Table, Value};
 
     use crate::{
         base::{self, source_file::SourceElement, Handler},
+        lexical::token::Identifier,
         syntax::syntax_tree::expression::LuaCode,
         transpile::{
-            error::{LuaRuntimeError, MismatchedTypes, TranspileError, TranspileResult},
+            error::{
+                LuaRuntimeError, MismatchedTypes, TranspileError, TranspileResult,
+                UnknownIdentifier,
+            },
             expression::{ComptimeValue, ExpectedType},
             Scope, VariableData,
         },
@@ -53,14 +57,8 @@ mod enabled {
                 )
             };
 
-            if let Err(err) = self.add_globals(&lua, scope) {
-                let err = TranspileError::LuaRuntimeError(LuaRuntimeError::from_lua_err(
-                    &err,
-                    self.span(),
-                ));
-                handler.receive(crate::Error::from(err.clone()));
-                return Err(err);
-            }
+            self.add_globals(&lua, scope)
+                .inspect_err(|err| handler.receive(err.clone()))?;
 
             let res = lua
                 .load(self.code())
@@ -95,109 +93,186 @@ mod enabled {
             self.handle_lua_result(lua_result, handler)
         }
 
-        fn add_globals(&self, lua: &Lua, scope: &Arc<Scope>) -> mlua::Result<()> {
+        fn add_globals(&self, lua: &Lua, scope: &Arc<Scope>) -> TranspileResult<()> {
             let globals = lua.globals();
 
-            let shulkerscript_globals = {
-                let table = lua.create_table()?;
-
-                let (location_path, location_start, location_end) = {
-                    let span = self.span();
-                    let file = span.source_file();
-                    let path = file.path().to_owned();
-                    let start_location = span.start_location();
-                    let end_location = span.end_location().unwrap_or_else(|| {
-                        let line_amount = file.line_amount();
-                        let column = file.get_line(line_amount).expect("line amount used").len();
-
-                        crate::base::source_file::Location {
-                            line: line_amount,
-                            column,
-                        }
-                    });
-
-                    (path, start_location, end_location)
-                };
-
-                table.set("file_path", location_path.to_string_lossy())?;
-                table.set("start_line", location_start.line)?;
-                table.set("start_column", location_start.column)?;
-                table.set("end_line", location_end.line)?;
-                table.set("end_column", location_end.column)?;
-
-                table.set("version", crate::VERSION)?;
-
-                table
-            };
+            let shulkerscript_globals = self
+                .get_std_library(lua)
+                .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
 
             if let Some(inputs) = self.inputs() {
-                for x in inputs.elements() {
-                    let name = x.span.str();
-                    let value = match scope.get_variable(name).as_deref() {
-                        Some(VariableData::MacroParameter { macro_name, .. }) => {
-                            Value::String(lua.create_string(format!("$({macro_name})"))?)
-                        }
-                        Some(VariableData::Scoreboard { objective }) => {
-                            let table = lua.create_table()?;
-                            table.set("objective", objective.as_str())?;
-                            Value::Table(table)
-                        }
-                        Some(VariableData::ScoreboardValue { objective, target }) => {
-                            let table = lua.create_table()?;
-                            table.set("objective", lua.create_string(objective)?)?;
-                            table.set("target", lua.create_string(target)?)?;
-                            Value::Table(table)
-                        }
-                        Some(VariableData::ScoreboardArray { objective, targets }) => {
-                            let table = lua.create_table()?;
-                            table.set("objective", objective.as_str())?;
-                            let values = lua.create_table_from(
-                                targets
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, target)| (i + 1, target.as_str())),
-                            )?;
-                            table.set("targets", values)?;
-                            Value::Table(table)
-                        }
-                        Some(VariableData::BooleanStorage { storage_name, path }) => {
-                            let table = lua.create_table()?;
-                            table.set("storage", lua.create_string(storage_name)?)?;
-                            table.set("path", lua.create_string(path)?)?;
-                            Value::Table(table)
-                        }
-                        Some(VariableData::BooleanStorageArray {
-                            storage_name,
-                            paths,
-                        }) => {
-                            let table = lua.create_table()?;
-                            table.set("storage", storage_name.as_str())?;
-                            let values = lua.create_table_from(
-                                paths
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, path)| (i + 1, path.as_str())),
-                            )?;
-                            table.set("paths", values)?;
-                            Value::Table(table)
-                        }
-                        Some(VariableData::Tag { tag_name }) => {
-                            let table = lua.create_table()?;
-                            table.set("name", tag_name.as_str())?;
-                            Value::Table(table)
-                        }
-                        Some(VariableData::Function { .. }) => {
-                            todo!("allow function variable type")
-                        }
-                        None => todo!("throw correct error"),
-                    };
-                    globals.set(name, value)?;
+                for identifier in inputs.elements() {
+                    let (name, value) = self.add_input_to_globals(identifier, lua, scope)?;
+                    globals
+                        .set(name, value)
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
                 }
             }
 
-            globals.set("shulkerscript", shulkerscript_globals)?;
+            globals
+                .set("shulkerscript", shulkerscript_globals)
+                .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
 
             Ok(())
+        }
+
+        fn get_std_library(&self, lua: &Lua) -> mlua::Result<Table> {
+            let table = lua.create_table()?;
+
+            let (location_path, location_start, location_end) = {
+                let span = self.span();
+                let file = span.source_file();
+                let path = file.path().to_owned();
+                let start_location = span.start_location();
+                let end_location = span.end_location().unwrap_or_else(|| {
+                    let line_amount = file.line_amount();
+                    let column = file.get_line(line_amount).expect("line amount used").len();
+
+                    crate::base::source_file::Location {
+                        line: line_amount,
+                        column,
+                    }
+                });
+
+                (path, start_location, end_location)
+            };
+
+            table.set("file_path", location_path.to_string_lossy())?;
+            table.set("start_line", location_start.line)?;
+            table.set("start_column", location_start.column)?;
+            table.set("end_line", location_end.line)?;
+            table.set("end_column", location_end.column)?;
+
+            table.set("version", crate::VERSION)?;
+
+            Ok(table)
+        }
+
+        #[expect(clippy::too_many_lines)]
+        fn add_input_to_globals<'a>(
+            &self,
+            identifier: &'a Identifier,
+            lua: &Lua,
+            scope: &Arc<Scope>,
+        ) -> TranspileResult<(&'a str, Value)> {
+            let name = identifier.span.str();
+            let value = match scope.get_variable(name).as_deref() {
+                Some(VariableData::MacroParameter { macro_name, .. }) => Value::String(
+                    lua.create_string(format!("$({macro_name})"))
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?,
+                ),
+                Some(VariableData::Scoreboard { objective }) => {
+                    let table = lua
+                        .create_table()
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
+                    table
+                        .set("objective", objective.as_str())
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
+                    Value::Table(table)
+                }
+                Some(VariableData::ScoreboardValue { objective, target }) => {
+                    let table = lua
+                        .create_table()
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
+                    table
+                        .set(
+                            "objective",
+                            lua.create_string(objective)
+                                .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?,
+                        )
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
+                    table
+                        .set(
+                            "target",
+                            lua.create_string(target)
+                                .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?,
+                        )
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
+                    Value::Table(table)
+                }
+                Some(VariableData::ScoreboardArray { objective, targets }) => {
+                    let table = lua
+                        .create_table()
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
+                    table
+                        .set("objective", objective.as_str())
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
+                    let values = lua
+                        .create_table_from(
+                            targets
+                                .iter()
+                                .enumerate()
+                                .map(|(i, target)| (i + 1, target.as_str())),
+                        )
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
+                    table
+                        .set("targets", values)
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
+                    Value::Table(table)
+                }
+                Some(VariableData::BooleanStorage { storage_name, path }) => {
+                    let table = lua
+                        .create_table()
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
+                    table
+                        .set(
+                            "storage",
+                            lua.create_string(storage_name)
+                                .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?,
+                        )
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
+                    table
+                        .set(
+                            "path",
+                            lua.create_string(path)
+                                .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?,
+                        )
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
+                    Value::Table(table)
+                }
+                Some(VariableData::BooleanStorageArray {
+                    storage_name,
+                    paths,
+                }) => {
+                    let table = lua
+                        .create_table()
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
+                    table
+                        .set("storage", storage_name.as_str())
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
+                    let values = lua
+                        .create_table_from(
+                            paths
+                                .iter()
+                                .enumerate()
+                                .map(|(i, path)| (i + 1, path.as_str())),
+                        )
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
+                    table
+                        .set("paths", values)
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
+                    Value::Table(table)
+                }
+                Some(VariableData::Tag { tag_name }) => {
+                    let table = lua
+                        .create_table()
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
+                    table
+                        .set("name", tag_name.as_str())
+                        .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
+                    Value::Table(table)
+                }
+                Some(VariableData::Function { .. }) => {
+                    todo!("functions are not supported yet");
+                }
+                None => {
+                    return Err(TranspileError::UnknownIdentifier(UnknownIdentifier {
+                        identifier: identifier.span(),
+                    }));
+                }
+            };
+
+            Ok((name, value))
         }
 
         fn handle_lua_result(

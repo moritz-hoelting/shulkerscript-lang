@@ -27,7 +27,10 @@ use crate::{
 };
 
 use super::{
-    error::{AssignmentError, IllegalAnnotationContent, MismatchedTypes},
+    error::{
+        AssignmentError, IllegalAnnotationContent, IllegalIndexing, IllegalIndexingReason,
+        MismatchedTypes,
+    },
     expression::{ComptimeValue, DataLocation, ExpectedType, StorageType},
     FunctionData, TranspileAnnotationValue, TranspileError, TranspileResult,
 };
@@ -244,7 +247,9 @@ impl Transpiler {
                 scope,
                 handler,
             ),
-            _ => todo!("declarations other than single not supported yet: {declaration:?}"),
+            _ => todo!(
+                "declarations other than single and scoreboard not supported yet: {declaration:?}"
+            ),
         }
     }
 
@@ -388,9 +393,23 @@ impl Transpiler {
                     Some(ComptimeValue::MacroString(s)) => {
                         todo!("indexing scoreboard with macro string: {s}")
                     }
-                    Some(_) => todo!("invalid indexing value"),
+                    Some(_) => {
+                        let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                            expression: expression.span(),
+                            reason: IllegalIndexingReason::InvalidComptimeType {
+                                expected: ExpectedType::String,
+                            },
+                        });
+                        handler.receive(err.clone());
+                        return Err(err);
+                    }
                     None => {
-                        todo!("cannot assign to scoreboard without indexing")
+                        let err = TranspileError::AssignmentError(AssignmentError {
+                            identifier: identifier.span(),
+                            message: "Cannot assign to a scoreboard without indexing".to_string(),
+                        });
+                        handler.receive(err.clone());
+                        return Err(err);
                     }
                 },
                 VariableData::Function { .. } | VariableData::MacroParameter { .. } => {

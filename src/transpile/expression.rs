@@ -19,7 +19,7 @@ use shulkerbox::prelude::{Command, Condition, Execute};
 
 #[cfg(feature = "shulkerbox")]
 use super::{
-    error::{MismatchedTypes, UnknownIdentifier},
+    error::{IllegalIndexing, IllegalIndexingReason, MismatchedTypes, UnknownIdentifier},
     TranspileResult, Transpiler,
 };
 #[cfg(feature = "shulkerbox")]
@@ -31,7 +31,6 @@ use crate::{
     },
 };
 
-// TODO: fix this leading to compile errors without 'shulkerbox' feature
 /// Compile-time evaluated value
 #[allow(missing_docs)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -287,27 +286,29 @@ impl Primary {
                 }
             },
             Self::Indexed(indexed) => {
-                let Self::Identifier(ident) = indexed.object().as_ref() else {
-                    todo!("throw error: cannot index anything except identifiers")
-                };
-                scope
-                    .get_variable(ident.span.str())
-                    .map_or(false, |variable| match r#type {
-                        ValueType::Boolean => {
-                            matches!(
-                                variable.as_ref(),
-                                VariableData::Tag { .. } | VariableData::BooleanStorageArray { .. }
-                            )
-                        }
-                        ValueType::Integer => {
-                            matches!(
-                                variable.as_ref(),
-                                VariableData::Scoreboard { .. }
-                                    | VariableData::ScoreboardArray { .. }
-                            )
-                        }
-                        ValueType::String => false,
-                    })
+                if let Self::Identifier(ident) = indexed.object().as_ref() {
+                    scope
+                        .get_variable(ident.span.str())
+                        .map_or(false, |variable| match r#type {
+                            ValueType::Boolean => {
+                                matches!(
+                                    variable.as_ref(),
+                                    VariableData::Tag { .. }
+                                        | VariableData::BooleanStorageArray { .. }
+                                )
+                            }
+                            ValueType::Integer => {
+                                matches!(
+                                    variable.as_ref(),
+                                    VariableData::Scoreboard { .. }
+                                        | VariableData::ScoreboardArray { .. }
+                                )
+                            }
+                            ValueType::String => false,
+                        })
+                } else {
+                    false
+                }
             }
             #[cfg_attr(not(feature = "lua"), expect(unused_variables))]
             Self::Lua(lua) => {
@@ -785,9 +786,16 @@ impl Transpiler {
                 }
             }
             Primary::Indexed(indexed) => {
-                let Primary::Identifier(ident) = indexed.object().as_ref() else {
-                    todo!("can only index identifier")
-                };
+                let ident = if let Primary::Identifier(ident) = indexed.object().as_ref() {
+                    Ok(ident)
+                } else {
+                    let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                        reason: IllegalIndexingReason::NotIdentifier,
+                        expression: indexed.object().span(),
+                    });
+                    handler.receive(err.clone());
+                    Err(err)
+                }?;
                 let variable = scope.get_variable(ident.span.str());
                 #[expect(clippy::option_if_let_else)]
                 if let Some(variable) = variable.as_deref() {
@@ -801,7 +809,14 @@ impl Transpiler {
                                     target,
                                 })
                             } else {
-                                todo!("can only index scoreboard with comptime string")
+                                let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                                    reason: IllegalIndexingReason::InvalidComptimeType {
+                                        expected: ExpectedType::String,
+                                    },
+                                    expression: indexed.index().span(),
+                                });
+                                handler.receive(err.clone());
+                                Err(err)
                             }
                         }
                         VariableData::ScoreboardArray { objective, targets } => {
@@ -818,10 +833,25 @@ impl Transpiler {
                                         target,
                                     })
                                 } else {
-                                    todo!("index out of bounds")
+                                    let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                                        reason: IllegalIndexingReason::IndexOutOfBounds {
+                                            length: targets.len(),
+                                            index: usize::try_from(index).unwrap_or(usize::MAX),
+                                        },
+                                        expression: indexed.index().span(),
+                                    });
+                                    handler.receive(err.clone());
+                                    Err(err)
                                 }
                             } else {
-                                todo!("can only index array with comptime integer")
+                                let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                                    reason: IllegalIndexingReason::InvalidComptimeType {
+                                        expected: ExpectedType::Integer,
+                                    },
+                                    expression: indexed.index().span(),
+                                });
+                                handler.receive(err.clone());
+                                Err(err)
                             }
                         }
                         VariableData::BooleanStorageArray {
@@ -842,10 +872,25 @@ impl Transpiler {
                                         r#type: StorageType::Boolean,
                                     })
                                 } else {
-                                    todo!("index out of bounds")
+                                    let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                                        reason: IllegalIndexingReason::IndexOutOfBounds {
+                                            length: paths.len(),
+                                            index: usize::try_from(index).unwrap_or(usize::MAX),
+                                        },
+                                        expression: indexed.index().span(),
+                                    });
+                                    handler.receive(err.clone());
+                                    Err(err)
                                 }
                             } else {
-                                todo!("can only index array with comptime integer")
+                                let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                                    reason: IllegalIndexingReason::InvalidComptimeType {
+                                        expected: ExpectedType::Integer,
+                                    },
+                                    expression: indexed.index().span(),
+                                });
+                                handler.receive(err.clone());
+                                Err(err)
                             }
                         }
                         _ => {
@@ -1022,9 +1067,16 @@ impl Transpiler {
                 self.transpile_expression_as_condition(parenthesized.expression(), scope, handler)
             }
             Primary::Indexed(indexed) => {
-                let Primary::Identifier(ident) = indexed.object().as_ref() else {
-                    todo!("can only index identifier")
-                };
+                let ident = if let Primary::Identifier(ident) = indexed.object().as_ref() {
+                    Ok(ident)
+                } else {
+                    let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                        reason: IllegalIndexingReason::NotIdentifier,
+                        expression: indexed.object().span(),
+                    });
+                    handler.receive(err.clone());
+                    Err(err)
+                }?;
                 #[expect(clippy::option_if_let_else)]
                 if let Some(variable) = scope.get_variable(ident.span.str()).as_deref() {
                     #[expect(clippy::single_match_else)]
@@ -1049,10 +1101,25 @@ impl Transpiler {
                                         )),
                                     ))
                                 } else {
-                                    todo!("index out of bounds")
+                                    let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                                        reason: IllegalIndexingReason::IndexOutOfBounds {
+                                            length: paths.len(),
+                                            index: usize::try_from(index).unwrap_or(usize::MAX),
+                                        },
+                                        expression: indexed.index().span(),
+                                    });
+                                    handler.receive(err.clone());
+                                    Err(err)
                                 }
                             } else {
-                                todo!("can only index array with comptime integer")
+                                let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                                    reason: IllegalIndexingReason::InvalidComptimeType {
+                                        expected: ExpectedType::Integer,
+                                    },
+                                    expression: indexed.index().span(),
+                                });
+                                handler.receive(err.clone());
+                                Err(err)
                             }
                         }
                         _ => {
