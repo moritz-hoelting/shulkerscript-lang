@@ -756,7 +756,7 @@ impl Summon {
     }
 }
 
-impl<'a> Parser<'a> {
+impl Parser<'_> {
     /// Parses an [`ExecuteBlock`].
     ///
     /// # Errors

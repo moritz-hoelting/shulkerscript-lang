@@ -342,13 +342,13 @@ pub struct SourceIterator<'a> {
     #[get_copy = "pub"]
     prev: Option<(usize, char)>,
 }
-impl<'a> SourceIterator<'a> {
+impl SourceIterator<'_> {
     /// Peek at the next character in the source file.
     pub fn peek(&mut self) -> Option<(usize, char)> {
         self.iterator.peek().copied()
     }
 }
-impl<'a> Iterator for SourceIterator<'a> {
+impl Iterator for SourceIterator<'_> {
     type Item = (usize, char);
 
     fn next(&mut self) -> Option<Self::Item> {

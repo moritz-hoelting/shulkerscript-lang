@@ -228,7 +228,7 @@ impl SourceElement for AnnotationAssignment {
     }
 }
 
-impl<'a> Parser<'a> {
+impl Parser<'_> {
     /// Parses a list of elements enclosed by a pair of delimiters, separated by a separator.
     ///
     /// The parser position must be at the delimited list of the given delimiter. It will

@@ -118,7 +118,7 @@ impl Error {
     /// return [`Some`], otherwise it will return [`None`].
     #[must_use]
     pub fn get_ref(&self) -> Option<&(dyn std::error::Error + Send + Sync + 'static)> {
-        return self.error.as_deref();
+        self.error.as_deref()
     }
 
     /// Consumes the [`Error`], returning its inner error (if any).

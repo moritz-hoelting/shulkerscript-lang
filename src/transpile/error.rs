@@ -237,7 +237,6 @@ impl Display for FunctionArgumentsNotAllowed {
 impl std::error::Error for FunctionArgumentsNotAllowed {}
 
 /// An error that occurs when an expression can not evaluate to the wanted type.
-#[expect(clippy::module_name_repetitions)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssignmentError {
     pub identifier: Span,

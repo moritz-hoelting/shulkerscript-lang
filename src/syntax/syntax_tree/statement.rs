@@ -749,7 +749,7 @@ impl SourceElement for AssignmentDestination {
     }
 }
 
-impl<'a> Parser<'a> {
+impl Parser<'_> {
     /// Parses a [`Block`].
     ///
     /// # Errors

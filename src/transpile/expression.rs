@@ -262,7 +262,7 @@ impl Primary {
             Self::Identifier(ident) => {
                 scope
                     .get_variable(ident.span.str())
-                    .map_or(false, |variable| match r#type {
+                    .is_some_and(|variable| match r#type {
                         ValueType::Boolean => {
                             matches!(variable.as_ref(), VariableData::BooleanStorage { .. })
                         }
@@ -289,7 +289,7 @@ impl Primary {
                 if let Self::Identifier(ident) = indexed.object().as_ref() {
                     scope
                         .get_variable(ident.span.str())
-                        .map_or(false, |variable| match r#type {
+                        .is_some_and(|variable| match r#type {
                             ValueType::Boolean => {
                                 matches!(
                                     variable.as_ref(),
@@ -314,7 +314,7 @@ impl Primary {
             Self::Lua(lua) => {
                 cfg_if::cfg_if! {
                     if #[cfg(feature = "lua")] {
-                        lua.eval(scope, &VoidHandler).map_or(false, |(value, _)| match value {
+                        lua.eval(scope, &VoidHandler).is_ok_and(|(value, _)| match value {
                             mlua::Value::Boolean(_) => matches!(r#type, ValueType::Boolean),
                             mlua::Value::Integer(_) => matches!(r#type, ValueType::Integer),
                             mlua::Value::String(_) => matches!(r#type, ValueType::String),

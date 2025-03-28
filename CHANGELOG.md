@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Macro strings
 - Function parameters/arguments
+- Variables:
+    - Integer (scoreboard)
+    - Boolean (data storage)
+    - Integer and boolean arrays (scoreboard and data storage)
+    - Integer map (scoreboard)
+    - Boolean map (tag)
 - Example: barebones compiler
 
 ### Changed

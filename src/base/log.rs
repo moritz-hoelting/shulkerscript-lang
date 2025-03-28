@@ -73,7 +73,7 @@ impl<'a, T> SourceCodeDisplay<'a, T> {
     }
 }
 
-impl<'a, T: Display> Display for SourceCodeDisplay<'a, T> {
+impl<T: Display> Display for SourceCodeDisplay<'_, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let start_location = self.span.start_location();
         let end_location = self.span.end_location();

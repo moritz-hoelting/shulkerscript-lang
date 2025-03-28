@@ -432,7 +432,7 @@ impl LuaCode {
     }
 }
 
-impl<'a> Parser<'a> {
+impl Parser<'_> {
     /// Parses an [`Expression`]
     ///
     /// # Errors

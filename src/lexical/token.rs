@@ -730,7 +730,7 @@ impl Token {
             }
         }
         // When there is no second slash and at the start of a line
-        else if prev_token.map_or(true, |token| token.span().str().contains('\n')) {
+        else if prev_token.is_none_or(|token| token.span().str().contains('\n')) {
             Ok(Self::handle_command_literal(iter, start))
         }
         // Just a single slash punctuation

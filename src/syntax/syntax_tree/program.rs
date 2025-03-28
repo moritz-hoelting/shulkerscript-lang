@@ -92,7 +92,7 @@ impl Namespace {
     }
 }
 
-impl<'a> Parser<'a> {
+impl Parser<'_> {
     /// Parses a [`ProgramFile`].
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn parse_program(

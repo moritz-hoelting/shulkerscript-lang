@@ -211,7 +211,7 @@ pub struct Frame<'a> {
     current_index: usize,
 }
 
-impl<'a> Frame<'a> {
+impl Frame<'_> {
     /// Checks if the current [`Frame`] doesn't have any more significant [`TokenTree`]s to
     /// parse.
     #[must_use]

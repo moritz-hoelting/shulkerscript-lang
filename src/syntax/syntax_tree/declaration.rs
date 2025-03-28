@@ -286,7 +286,7 @@ impl SourceElement for Tag {
     }
 }
 
-impl<'a> Parser<'a> {
+impl Parser<'_> {
     #[tracing::instrument(level = "trace", skip_all)]
     pub fn parse_declaration(
         &mut self,

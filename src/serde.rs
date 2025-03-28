@@ -25,7 +25,6 @@ thread_local! {
 }
 
 /// Wrapper to remove duplicate source file data during (de-)serialization
-#[expect(clippy::module_name_repetitions)]
 #[derive(Debug)]
 pub struct SerdeWrapper<T>(pub T);
 

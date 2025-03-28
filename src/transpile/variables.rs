@@ -226,10 +226,10 @@ impl<'a> Scope<'a> {
     }
 }
 
-impl<'a> Debug for Scope<'a> {
+impl Debug for Scope<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         struct VariableWrapper<'a>(&'a RwLock<HashMap<String, Arc<VariableData>>>);
-        impl<'a> Debug for VariableWrapper<'a> {
+        impl Debug for VariableWrapper<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let s = self.0.read().unwrap();
                 s.deref().fmt(f)
@@ -489,7 +489,7 @@ impl Transpiler {
                         target: s,
                     }),
                     Some(ComptimeValue::MacroString(s)) => {
-                        todo!("indexing scoreboard with macro string: {s}")
+                        todo!("indexing scoreboard with macro string: {s:?}")
                     }
                     Some(_) => {
                         let err = TranspileError::IllegalIndexing(IllegalIndexing {
@@ -621,7 +621,7 @@ impl Transpiler {
                         entity: s,
                     }),
                     Some(ComptimeValue::MacroString(s)) => {
-                        todo!("indexing tag with macro string: {s}")
+                        todo!("indexing tag with macro string: {s:?}")
                     }
                     Some(_) => {
                         let err = TranspileError::IllegalIndexing(IllegalIndexing {

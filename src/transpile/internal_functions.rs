@@ -5,14 +5,14 @@ use std::{
     sync::Arc,
 };
 
-use shulkerbox::prelude::Command;
+use shulkerbox::prelude::{Command, Execute};
 
 use serde_json::{json, Value as JsonValue};
 
 use crate::{
     base::{source_file::SourceElement as _, VoidHandler},
     lexical::token::{Identifier, MacroStringLiteralPart},
-    semantic::error::InvalidFunctionArguments,
+    semantic::error::{InvalidFunctionArguments, UnexpectedExpression},
     syntax::syntax_tree::expression::{Expression, FunctionCall, Primary},
     transpile::{
         error::{IllegalIndexing, IllegalIndexingReason, LuaRuntimeError, UnknownIdentifier},
@@ -97,34 +97,42 @@ fn print_function(
     #[expect(clippy::option_if_let_else)]
     fn get_identifier_part(
         ident: &Identifier,
-        _transpiler: &mut Transpiler,
+        transpiler: &mut Transpiler,
         scope: &Arc<Scope>,
-    ) -> TranspileResult<(bool, Vec<Command>, JsonValue)> {
+    ) -> TranspileResult<(bool, Option<Command>, JsonValue)> {
         if let Some(var) = scope.get_variable(ident.span.str()).as_deref() {
             match var {
                 VariableData::MacroParameter { macro_name, .. } => Ok((
                     true,
-                    Vec::new(),
+                    None,
                     json!({"text": format!("$({macro_name})"), "color": PARAM_COLOR}),
                 )),
-                VariableData::ScoreboardValue { objective, target } => Ok((
-                    false,
-                    Vec::new(),
-                    get_data_location(&DataLocation::ScoreboardValue {
-                        objective: objective.to_string(),
-                        target: target.to_string(),
-                    }),
-                )),
-                VariableData::BooleanStorage { storage_name, path } => Ok((
-                    false,
-                    Vec::new(),
-                    get_data_location(&DataLocation::Storage {
-                        storage_name: storage_name.to_string(),
-                        path: path.to_string(),
-                        r#type: StorageType::Boolean,
-                    }),
-                )),
-                _ => todo!("get_identifier_part"),
+                VariableData::ScoreboardValue { objective, target } => {
+                    let (cmd, value) = get_data_location(
+                        &DataLocation::ScoreboardValue {
+                            objective: objective.to_string(),
+                            target: target.to_string(),
+                        },
+                        transpiler,
+                    );
+
+                    Ok((false, cmd, value))
+                }
+                VariableData::BooleanStorage { storage_name, path } => {
+                    let (cmd, value) = get_data_location(
+                        &DataLocation::Storage {
+                            storage_name: storage_name.to_string(),
+                            path: path.to_string(),
+                            r#type: StorageType::Boolean,
+                        },
+                        transpiler,
+                    );
+
+                    Ok((false, cmd, value))
+                }
+                _ => Err(TranspileError::UnexpectedExpression(UnexpectedExpression(
+                    Expression::Primary(Primary::Identifier(ident.to_owned())),
+                ))),
             }
         } else {
             Err(TranspileError::UnknownIdentifier(UnknownIdentifier {
@@ -133,15 +141,42 @@ fn print_function(
         }
     }
 
-    fn get_data_location(location: &DataLocation) -> JsonValue {
+    fn get_data_location(
+        location: &DataLocation,
+        transpiler: &mut Transpiler,
+    ) -> (Option<Command>, JsonValue) {
         match location {
-            DataLocation::ScoreboardValue { objective, target } => {
-                json!({"score": {"name": target, "objective": objective}, "color": PARAM_COLOR})
-            }
+            DataLocation::ScoreboardValue { objective, target } => (
+                None,
+                json!({"score": {"name": target, "objective": objective}, "color": PARAM_COLOR}),
+            ),
             DataLocation::Storage {
                 storage_name, path, ..
-            } => json!({"nbt": path, "storage": storage_name, "color": PARAM_COLOR}),
-            DataLocation::Tag { .. } => todo!("implement tag"),
+            } => (
+                None,
+                json!({"nbt": path, "storage": storage_name, "color": PARAM_COLOR}),
+            ),
+            DataLocation::Tag { tag_name, entity } => {
+                let (temp_storage_name, temp_storage_paths) =
+                    transpiler.get_temp_storage_locations(1);
+                let selector =
+                    super::util::add_to_entity_selector(entity, &format!("tag={tag_name}"));
+                let cmd = Command::Execute(Execute::Store(
+                    format!(
+                        "success storage {temp_storage_name} {path} byte 1.0",
+                        path = temp_storage_paths[0]
+                    )
+                    .into(),
+                    Box::new(Execute::Run(Box::new(Command::Raw(format!(
+                        "execute if entity {selector}"
+                    ))))),
+                ));
+
+                (
+                    Some(cmd),
+                    json!({"nbt": temp_storage_paths[0], "storage": temp_storage_name, "color": PARAM_COLOR}),
+                )
+            }
         }
     }
 
@@ -188,11 +223,10 @@ fn print_function(
                 ))
             }
             Primary::Identifier(ident) => {
-                // TODO: get_identifier_part
-                let (cur_contains_macro, cmds, part) =
-                    get_identifier_part(ident, transpiler, scope).expect("failed");
+                let (cur_contains_macro, cmd, part) =
+                    get_identifier_part(ident, transpiler, scope)?;
                 contains_macro |= cur_contains_macro;
-                Ok((cmds, vec![part]))
+                Ok((cmd.into_iter().collect(), vec![part]))
             }
             Primary::Indexed(indexed) => match indexed.object().as_ref() {
                 Primary::Identifier(ident) => {
@@ -201,13 +235,14 @@ fn print_function(
                             if let Some(ComptimeValue::String(index)) =
                                 indexed.index().comptime_eval(scope, &VoidHandler)
                             {
-                                Ok((
-                                    Vec::new(),
-                                    vec![get_data_location(&DataLocation::ScoreboardValue {
+                                let (cmd, value) = get_data_location(
+                                    &DataLocation::ScoreboardValue {
                                         objective: objective.to_string(),
                                         target: index,
-                                    })],
-                                ))
+                                    },
+                                    transpiler,
+                                );
+                                Ok((cmd.into_iter().collect(), vec![value]))
                             } else {
                                 todo!("allow macro string, but throw error when index is not constant string")
                             }
@@ -221,15 +256,22 @@ fn print_function(
                                     .ok()
                                     .and_then(|index| targets.get(index))
                                 {
-                                    Ok((
-                                        Vec::new(),
-                                        vec![get_data_location(&DataLocation::ScoreboardValue {
+                                    let (cmd, value) = get_data_location(
+                                        &DataLocation::ScoreboardValue {
                                             objective: objective.to_string(),
                                             target: target.to_string(),
-                                        })],
-                                    ))
+                                        },
+                                        transpiler,
+                                    );
+                                    Ok((cmd.into_iter().collect(), vec![value]))
                                 } else {
-                                    todo!("throw error when index is out of bounds")
+                                    Err(TranspileError::IllegalIndexing(IllegalIndexing {
+                                        reason: IllegalIndexingReason::IndexOutOfBounds {
+                                            index: usize::try_from(index).unwrap_or(usize::MAX),
+                                            length: targets.len(),
+                                        },
+                                        expression: indexed.index().span(),
+                                    }))
                                 }
                             } else {
                                 todo!("throw error when index is not constant integer")
@@ -247,16 +289,23 @@ fn print_function(
                                     .ok()
                                     .and_then(|index| paths.get(index))
                                 {
-                                    Ok((
-                                        Vec::new(),
-                                        vec![get_data_location(&DataLocation::Storage {
+                                    let (cmd, value) = get_data_location(
+                                        &DataLocation::Storage {
                                             storage_name: storage_name.to_string(),
                                             path: path.to_string(),
                                             r#type: StorageType::Boolean,
-                                        })],
-                                    ))
+                                        },
+                                        transpiler,
+                                    );
+                                    Ok((cmd.into_iter().collect(), vec![value]))
                                 } else {
-                                    todo!("throw error when index is out of bounds")
+                                    Err(TranspileError::IllegalIndexing(IllegalIndexing {
+                                        reason: IllegalIndexingReason::IndexOutOfBounds {
+                                            index: usize::try_from(index).unwrap_or(usize::MAX),
+                                            length: paths.len(),
+                                        },
+                                        expression: indexed.index().span(),
+                                    }))
                                 }
                             } else {
                                 todo!("throw error when index is not constant integer")

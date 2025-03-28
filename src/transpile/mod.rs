@@ -98,7 +98,7 @@ impl Debug for FunctionData {
         {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 struct AnnotationValueWrapper<'a>(&'a TranspileAnnotationValue);
-                impl<'a> Debug for AnnotationValueWrapper<'a> {
+                impl Debug for AnnotationValueWrapper<'_> {
                     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                         match self.0 {
                             TranspileAnnotationValue::None => None::<u8>.fmt(f),

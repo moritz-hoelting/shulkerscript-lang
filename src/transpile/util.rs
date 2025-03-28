@@ -13,7 +13,7 @@ use crate::{
 pub enum MacroString {
     /// A normal string
     String(String),
-    /// A string containing macros
+    /// A string containing expressions
     MacroString(Vec<MacroStringPart>),
 }
 
@@ -112,6 +112,21 @@ where
                 }
             },
         })
+}
+
+/// Add additional information to an entity selector
+#[must_use]
+pub fn add_to_entity_selector(selector: impl Into<String>, additional: &str) -> String {
+    let selector: String = selector.into();
+    if selector.starts_with('@') {
+        if selector.ends_with(']') {
+            selector[..selector.len() - 1].to_string() + "," + additional + "]"
+        } else {
+            selector + "[" + additional + "]"
+        }
+    } else {
+        format!("@a[name={selector},{additional}]")
+    }
 }
 
 impl FromStr for MacroString {

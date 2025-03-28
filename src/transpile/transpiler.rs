@@ -574,7 +574,7 @@ impl Transpiler {
                             }
                             Parameter::Dynamic { prepare_cmds, storage_name, path } => {
                                 acc_setup.extend(prepare_cmds);
-                                acc_move.push(Command::Raw(format!(r#"data modify storage shulkerscript:function_arguments {arg_name} set from storage {storage_name} {path}"#)));
+                                acc_move.push(Command::Raw(format!(r"data modify storage shulkerscript:function_arguments {arg_name} set from storage {storage_name} {path}")));
                             }
                         }
                         (acc_setup, acc_move, statics)},
@@ -603,7 +603,7 @@ impl Transpiler {
                         ));
                     let statics_cmd = match joined_statics {
                         MacroString::String(s) => Command::Raw(format!(
-                            r#"data merge storage shulkerscript:function_arguments {{{s}}}"#
+                            r"data merge storage shulkerscript:function_arguments {{{s}}}"
                         )),
                         MacroString::MacroString(_) => Command::UsesMacro(
                             super::util::join_macro_strings([
