@@ -311,7 +311,7 @@ fn print_function(
                                 todo!("throw error when index is not constant integer")
                             }
                         }
-                        _ => todo!(),
+                        _ => todo!("catch illegal indexing"),
                     }
                 }
                 _ => Err(TranspileError::IllegalIndexing(IllegalIndexing {

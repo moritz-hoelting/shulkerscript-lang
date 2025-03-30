@@ -4,6 +4,7 @@
 
 use std::collections::VecDeque;
 
+use enum_as_inner::EnumAsInner;
 use getset::Getters;
 
 use crate::{
@@ -87,7 +88,7 @@ impl Declaration {
 ///     ;
 ///
 /// ParameterList:
-///     Identifier (',' Identifier)* ','?  
+///     FunctionArgument (',' FunctionArgument)* ','?  
 ///     ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -104,7 +105,7 @@ pub struct Function {
     #[get = "pub"]
     open_paren: Punctuation,
     #[get = "pub"]
-    parameters: Option<ConnectedList<Identifier, Punctuation>>,
+    parameters: Option<ConnectedList<FunctionParameter, Punctuation>>,
     #[get = "pub"]
     close_paren: Punctuation,
     #[get = "pub"]
@@ -123,7 +124,7 @@ impl Function {
         Keyword,
         Identifier,
         Punctuation,
-        Option<ConnectedList<Identifier, Punctuation>>,
+        Option<ConnectedList<FunctionParameter, Punctuation>>,
         Punctuation,
         Block,
     ) {
@@ -154,6 +155,41 @@ impl SourceElement for Function {
             .join(&self.block.span())
             .unwrap()
     }
+}
+
+// Represents a variable type keyword for function arguments.
+///
+/// Syntax Synopsis:
+///
+/// ``` ebnf
+/// FunctionVariableType:
+///     'macro' | 'int' | 'bool'
+///     ;
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner)]
+pub enum FunctionVariableType {
+    Macro(Keyword),
+    Integer(Keyword),
+    Boolean(Keyword),
+}
+
+/// Represents a function argument in the syntax tree.
+///
+/// Syntax Synopsis:
+///
+/// ``` ebnf
+/// FunctionArgument:
+///     FunctionVariableType Identifier
+///     ;
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct FunctionParameter {
+    #[get = "pub"]
+    variable_type: FunctionVariableType,
+    #[get = "pub"]
+    identifier: Identifier,
 }
 
 /// Represents an import declaration in the syntax tree.
@@ -451,7 +487,7 @@ impl Parser<'_> {
                 let delimited_tree = self.parse_enclosed_list(
                     Delimiter::Parenthesis,
                     ',',
-                    |parser: &mut Parser<'_>| parser.parse_identifier(handler),
+                    |parser: &mut Parser<'_>| parser.parse_function_parameter(handler),
                     handler,
                 )?;
 
@@ -472,6 +508,59 @@ impl Parser<'_> {
             unexpected => {
                 let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                     expected: SyntaxKind::Keyword(KeywordKind::Function),
+                    found: unexpected.into_token(),
+                });
+                handler.receive(err.clone());
+                Err(err)
+            }
+        }
+    }
+
+    fn parse_function_parameter(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> ParseResult<FunctionParameter> {
+        match self.stop_at_significant() {
+            Reading::Atomic(Token::Keyword(keyword)) if keyword.keyword == KeywordKind::Int => {
+                let variable_type = FunctionVariableType::Integer(keyword);
+                self.forward();
+
+                let identifier = self.parse_identifier(handler)?;
+
+                Ok(FunctionParameter {
+                    variable_type,
+                    identifier,
+                })
+            }
+            Reading::Atomic(Token::Keyword(keyword)) if keyword.keyword == KeywordKind::Bool => {
+                let variable_type = FunctionVariableType::Boolean(keyword);
+                self.forward();
+
+                let identifier = self.parse_identifier(handler)?;
+
+                Ok(FunctionParameter {
+                    variable_type,
+                    identifier,
+                })
+            }
+            Reading::Atomic(Token::Keyword(keyword)) if keyword.keyword == KeywordKind::Macro => {
+                let variable_type = FunctionVariableType::Macro(keyword);
+                self.forward();
+
+                let identifier = self.parse_identifier(handler)?;
+
+                Ok(FunctionParameter {
+                    variable_type,
+                    identifier,
+                })
+            }
+            unexpected => {
+                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
+                    expected: SyntaxKind::Either(&[
+                        SyntaxKind::Keyword(KeywordKind::Int),
+                        SyntaxKind::Keyword(KeywordKind::Bool),
+                        SyntaxKind::Keyword(KeywordKind::Macro),
+                    ]),
                     found: unexpected.into_token(),
                 });
                 handler.receive(err.clone());

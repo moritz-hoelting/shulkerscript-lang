@@ -1,7 +1,5 @@
 //! Transpiler for `Shulkerscript`
 
-use chksum_md5 as md5;
-use enum_as_inner::EnumAsInner;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     ops::Deref,
@@ -11,12 +9,8 @@ use std::{
 use shulkerbox::datapack::{self, Command, Datapack, Execute};
 
 use crate::{
-    base::{
-        self,
-        source_file::{SourceElement, Span},
-        Handler,
-    },
-    semantic::error::{ConflictingFunctionNames, InvalidFunctionArguments, UnexpectedExpression},
+    base::{self, source_file::SourceElement, Handler},
+    semantic::error::UnexpectedExpression,
     syntax::syntax_tree::{
         declaration::{Declaration, ImportItems},
         expression::{Expression, FunctionCall, Primary},
@@ -27,17 +21,14 @@ use crate::{
         },
         AnnotationAssignment,
     },
-    transpile::{
-        error::{IllegalAnnotationContent, MissingFunctionDeclaration},
-        util::{MacroString, MacroStringPart},
-    },
+    transpile::util::{MacroString, MacroStringPart},
 };
 
 use super::{
-    error::{MismatchedTypes, TranspileError, TranspileResult, UnknownIdentifier},
-    expression::{ComptimeValue, ExpectedType, ExtendedCondition, StorageType},
+    error::{MismatchedTypes, TranspileError, TranspileResult},
+    expression::{ComptimeValue, ExpectedType, ExtendedCondition},
     variables::{Scope, TranspileAssignmentTarget, VariableData},
-    FunctionData, TranspileAnnotationValue,
+    FunctionData, TranspileAnnotationValue, TranspiledFunctionArguments,
 };
 
 /// A transpiler for `Shulkerscript`.
@@ -49,18 +40,11 @@ pub struct Transpiler {
     pub(super) initialized_constant_scores: HashSet<i64>,
     pub(super) temp_counter: usize,
     /// Top-level [`Scope`] for each program identifier
-    scopes: BTreeMap<String, Arc<Scope<'static>>>,
+    pub(super) scopes: BTreeMap<String, Arc<Scope<'static>>>,
     /// Key: (program identifier, function name)
-    functions: BTreeMap<(String, String), FunctionData>,
+    pub(super) functions: BTreeMap<(String, String), FunctionData>,
     /// Key: alias, Value: target
-    aliases: HashMap<(String, String), (String, String)>,
-}
-
-#[derive(Debug, Clone)]
-pub enum TranspiledFunctionArguments {
-    None,
-    Static(BTreeMap<String, MacroString>),
-    Dynamic(Vec<Command>),
+    pub(super) aliases: HashMap<(String, String), (String, String)>,
 }
 
 impl Transpiler {
@@ -202,11 +186,7 @@ impl Transpiler {
                     parameters: function
                         .parameters()
                         .as_ref()
-                        .map(|l| {
-                            l.elements()
-                                .map(|i| i.span.str().to_string())
-                                .collect::<Vec<_>>()
-                        })
+                        .map(|l| l.elements().cloned().collect::<Vec<_>>())
                         .unwrap_or_default(),
                     statements,
                     public: function.is_public(),
@@ -266,412 +246,7 @@ impl Transpiler {
         };
     }
 
-    /// Gets the function at the given path, or transpiles it if it hasn't been transpiled yet.
-    /// Returns the location of the function or None if the function does not exist.
-    #[tracing::instrument(level = "trace", skip(self, handler))]
-    pub(super) fn get_or_transpile_function(
-        &mut self,
-        identifier_span: &Span,
-        arguments: Option<&[&Expression]>,
-        scope: &Arc<Scope>,
-        handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<(String, TranspiledFunctionArguments)> {
-        let program_identifier = identifier_span.source_file().identifier();
-        let program_query = (
-            program_identifier.to_string(),
-            identifier_span.str().to_string(),
-        );
-        let alias_query = self.aliases.get(&program_query).cloned();
-        let already_transpiled = scope
-            .get_variable(identifier_span.str())
-            .expect("called function should be in scope")
-            .as_ref()
-            .as_function()
-            .map(|(_, path)| path.get().is_some())
-            .expect("called variable should be of type function");
-
-        let function_data = scope
-            .get_variable(identifier_span.str())
-            .or_else(|| {
-                alias_query
-                    .clone()
-                    .and_then(|(alias_program_identifier, alias_function_name)| {
-                        self.scopes
-                            .get(&alias_program_identifier)
-                            .and_then(|s| s.get_variable(&alias_function_name))
-                    })
-            })
-            .ok_or_else(|| {
-                let error = TranspileError::MissingFunctionDeclaration(
-                    MissingFunctionDeclaration::from_scope(identifier_span.clone(), scope),
-                );
-                handler.receive(error.clone());
-                error
-            })?;
-
-        let VariableData::Function {
-            function_data,
-            path: function_path,
-        } = function_data.as_ref()
-        else {
-            unreachable!("must be of correct type, otherwise errored out before");
-        };
-
-        if !already_transpiled {
-            tracing::trace!("Function not transpiled yet, transpiling.");
-
-            let function_scope = Scope::with_parent(scope);
-
-            for (i, param) in function_data.parameters.iter().enumerate() {
-                function_scope.set_variable(
-                    param,
-                    VariableData::MacroParameter {
-                        index: i,
-                        macro_name: crate::util::identifier_to_macro(param).to_string(),
-                    },
-                );
-            }
-
-            let statements = function_data.statements.clone();
-
-            let modified_name = function_data.annotations.get("deobfuscate").map_or_else(
-                || {
-                    let hash_data = program_identifier.to_string() + "\0" + identifier_span.str();
-                    Ok("shu/".to_string() + &md5::hash(hash_data).to_hex_lowercase())
-                },
-                |val| match val {
-                    TranspileAnnotationValue::None => Ok(identifier_span.str().to_string()),
-                    TranspileAnnotationValue::Expression(expr) => expr
-                        .comptime_eval(scope, handler)
-                        .and_then(|val| val.to_string_no_macro())
-                        .ok_or_else(|| {
-                            let err = TranspileError::IllegalAnnotationContent(
-                                IllegalAnnotationContent {
-                                    annotation: identifier_span.clone(),
-                                    message: "Cannot evaluate annotation at compile time"
-                                        .to_string(),
-                                },
-                            );
-                            handler.receive(err.clone());
-                            err
-                        }),
-                    TranspileAnnotationValue::Map(_) => {
-                        let err =
-                            TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                                annotation: identifier_span.clone(),
-                                message: "Deobfuscate annotation cannot be a map.".to_string(),
-                            });
-                        handler.receive(err.clone());
-                        Err(err)
-                    }
-                },
-            )?;
-
-            let function_location = format!(
-                "{namespace}:{modified_name}",
-                namespace = function_data.namespace
-            );
-
-            function_path.set(function_location.clone()).unwrap();
-
-            let commands =
-                self.transpile_function(&statements, program_identifier, &function_scope, handler)?;
-
-            let namespace = self.datapack.namespace_mut(&function_data.namespace);
-
-            if namespace.function(&modified_name).is_some() {
-                let err = TranspileError::ConflictingFunctionNames(ConflictingFunctionNames {
-                    name: modified_name,
-                    definition: identifier_span.clone(),
-                });
-                handler.receive(err.clone());
-                return Err(err);
-            }
-
-            let function = namespace.function_mut(&modified_name);
-            function.get_commands_mut().extend(commands);
-
-            if function_data.annotations.contains_key("tick") {
-                self.datapack.add_tick(&function_location);
-            }
-            if function_data.annotations.contains_key("load") {
-                self.datapack.add_load(&function_location);
-            }
-        }
-
-        let parameters = &function_data.parameters;
-
-        let function_location = function_path
-            .get()
-            .ok_or_else(|| {
-                let error = TranspileError::MissingFunctionDeclaration(
-                    MissingFunctionDeclaration::from_scope(identifier_span.clone(), scope),
-                );
-                handler.receive(error.clone());
-                error
-            })
-            .map(String::to_owned)?;
-
-        let arg_count = arguments.map(<[&Expression]>::len);
-        if arg_count.is_some_and(|arg_count| arg_count != parameters.len()) {
-            let err = TranspileError::InvalidFunctionArguments(InvalidFunctionArguments {
-                expected: parameters.len(),
-                actual: arg_count.unwrap_or_default(),
-                span: identifier_span.clone(),
-            });
-            handler.receive(err.clone());
-            Err(err)
-        } else if arg_count.is_some_and(|arg_count| arg_count > 0) {
-            {
-                #[derive(Debug, Clone, EnumAsInner)]
-                enum Parameter {
-                    Static(MacroString),
-                    Dynamic {
-                        prepare_cmds: Vec<Command>,
-                        storage_name: String,
-                        path: String,
-                    },
-                }
-
-                let mut compiled_args = Vec::new();
-                let mut errs = Vec::new();
-
-                for expression in arguments.iter().flat_map(|x| x.iter()) {
-                    let value = match expression {
-                        Expression::Primary(Primary::Lua(lua)) => {
-                            lua.eval_comptime(scope, handler).and_then(|val| match val {
-                                Some(ComptimeValue::MacroString(s)) => Ok(Parameter::Static(s)),
-                                Some(val) => Ok(Parameter::Static(val.to_macro_string())),
-                                None => {
-                                    let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                                        expression: expression.span(),
-                                        expected_type: ExpectedType::String,
-                                    });
-                                    handler.receive(err.clone());
-                                    Err(err)
-                                }
-                            })
-                        }
-                        Expression::Primary(Primary::Integer(num)) => {
-                            Ok(Parameter::Static(num.span.str().to_string().into()))
-                        }
-                        Expression::Primary(Primary::Boolean(bool)) => {
-                            Ok(Parameter::Static(bool.span.str().to_string().into()))
-                        }
-                        Expression::Primary(Primary::StringLiteral(string)) => {
-                            Ok(Parameter::Static(string.str_content().to_string().into()))
-                        }
-                        Expression::Primary(Primary::MacroStringLiteral(literal)) => {
-                            Ok(Parameter::Static(literal.into()))
-                        }
-                        Expression::Primary(primary @ Primary::Identifier(ident)) => {
-                            let var = scope.get_variable(ident.span.str()).ok_or_else(|| {
-                                let err = TranspileError::UnknownIdentifier(UnknownIdentifier {
-                                    identifier: ident.span(),
-                                });
-                                handler.receive(err.clone());
-                                err
-                            })?;
-                            match var.as_ref() {
-                                VariableData::MacroParameter { macro_name, .. } => {
-                                    Ok(Parameter::Static(MacroString::MacroString(vec![
-                                        MacroStringPart::MacroUsage(macro_name.clone()),
-                                    ])))
-                                }
-
-                                VariableData::BooleanStorage { .. }
-                                | VariableData::ScoreboardValue { .. } => {
-                                    let (temp_storage, mut temp_path) =
-                                        self.get_temp_storage_locations(1);
-                                    let prepare_cmds = self.transpile_primary_expression(
-                                        primary,
-                                        &super::expression::DataLocation::Storage {
-                                            storage_name: temp_storage.clone(),
-                                            path: temp_path[0].clone(),
-                                            r#type: match var.as_ref() {
-                                                VariableData::BooleanStorage { .. } => {
-                                                    StorageType::Boolean
-                                                }
-                                                VariableData::ScoreboardValue { .. } => {
-                                                    StorageType::Int
-                                                }
-                                                _ => unreachable!("checked in parent match"),
-                                            },
-                                        },
-                                        scope,
-                                        handler,
-                                    )?;
-
-                                    Ok(Parameter::Dynamic {
-                                        prepare_cmds,
-                                        storage_name: temp_storage,
-                                        path: std::mem::take(&mut temp_path[0]),
-                                    })
-                                }
-                                _ => todo!("other variable types"),
-                            }
-                        }
-                        Expression::Primary(
-                            Primary::Parenthesized(_)
-                            | Primary::Prefix(_)
-                            | Primary::Indexed(_)
-                            | Primary::FunctionCall(_),
-                        )
-                        | Expression::Binary(_) => {
-                            let (temp_storage, mut temp_path) = self.get_temp_storage_locations(1);
-                            let prepare_cmds = self.transpile_expression(
-                                expression,
-                                &super::expression::DataLocation::Storage {
-                                    storage_name: temp_storage.clone(),
-                                    path: temp_path[0].clone(),
-                                    r#type: StorageType::Int,
-                                },
-                                scope,
-                                handler,
-                            )?;
-
-                            Ok(Parameter::Dynamic {
-                                prepare_cmds,
-                                storage_name: temp_storage,
-                                path: std::mem::take(&mut temp_path[0]),
-                            })
-                        }
-                    };
-
-                    match value {
-                        Ok(value) => {
-                            compiled_args.push(value);
-                        }
-                        Err(err) => {
-                            compiled_args
-                                .push(Parameter::Static(MacroString::String(String::new())));
-                            errs.push(err.clone());
-                        }
-                    }
-                }
-                if let Some(err) = errs.first() {
-                    return Err(err.clone());
-                }
-                if compiled_args.iter().any(|arg| !arg.is_static()) {
-                    let (mut setup_cmds, move_cmds, static_params) = parameters.clone().into_iter().zip(compiled_args).fold(
-                        (Vec::new(), Vec::new(), BTreeMap::new()),
-                        |(mut acc_setup, mut acc_move, mut statics), (arg_name, data)| {
-                            let arg_name = crate::util::identifier_to_macro(&arg_name);
-                            match data {
-                            Parameter::Static(s) => {
-                                match s {
-                                    MacroString::String(value) => statics.insert(arg_name.to_string(), MacroString::String(crate::util::escape_str(&value).to_string())),
-                                    MacroString::MacroString(parts) => {
-                                        let parts = parts.into_iter().map(|part| {
-                                            match part {
-                                                MacroStringPart::String(s) => MacroStringPart::String(crate::util::escape_str(&s).to_string()),
-                                                MacroStringPart::MacroUsage(m) => MacroStringPart::MacroUsage(m),
-                                            }
-                                        }).collect();
-                                        statics.insert(arg_name.to_string(), MacroString::MacroString(parts))
-                                    }
-                                };
-                            }
-                            Parameter::Dynamic { prepare_cmds, storage_name, path } => {
-                                acc_setup.extend(prepare_cmds);
-                                acc_move.push(Command::Raw(format!(r"data modify storage shulkerscript:function_arguments {arg_name} set from storage {storage_name} {path}")));
-                            }
-                        }
-                        (acc_setup, acc_move, statics)},
-                    );
-                    let statics_len = static_params.len();
-                    let joined_statics =
-                        super::util::join_macro_strings(static_params.into_iter().enumerate().map(
-                            |(i, (k, v))| match v {
-                                MacroString::String(s) => {
-                                    let mut s = format!(r#"{k}:"{s}""#);
-                                    if i < statics_len - 1 {
-                                        s.push(',');
-                                    }
-                                    MacroString::String(s)
-                                }
-                                MacroString::MacroString(mut parts) => {
-                                    parts.insert(0, MacroStringPart::String(format!(r#"{k}:""#)));
-                                    let mut ending = '"'.to_string();
-                                    if i < statics_len - 1 {
-                                        ending.push(',');
-                                    }
-                                    parts.push(MacroStringPart::String(ending));
-                                    MacroString::MacroString(parts)
-                                }
-                            },
-                        ));
-                    let statics_cmd = match joined_statics {
-                        MacroString::String(s) => Command::Raw(format!(
-                            r"data merge storage shulkerscript:function_arguments {{{s}}}"
-                        )),
-                        MacroString::MacroString(_) => Command::UsesMacro(
-                            super::util::join_macro_strings([
-                                MacroString::String(
-                                    "data merge storage shulkerscript:function_arguments {"
-                                        .to_string(),
-                                ),
-                                joined_statics,
-                                MacroString::String("}".to_string()),
-                            ])
-                            .into(),
-                        ),
-                    };
-                    setup_cmds.push(statics_cmd);
-                    setup_cmds.extend(move_cmds);
-
-                    Ok((
-                        function_location,
-                        TranspiledFunctionArguments::Dynamic(setup_cmds),
-                    ))
-                } else {
-                    let function_args = parameters
-                        .clone()
-                        .into_iter()
-                        .zip(
-                            compiled_args
-                                .into_iter()
-                                .map(|arg| arg.into_static().expect("checked in if condition")),
-                        )
-                        .collect();
-                    Ok((
-                        function_location,
-                        TranspiledFunctionArguments::Static(function_args),
-                    ))
-                }
-            }
-        } else {
-            Ok((function_location, TranspiledFunctionArguments::None))
-        }
-    }
-
-    fn transpile_function(
-        &mut self,
-        statements: &[Statement],
-        program_identifier: &str,
-        scope: &Arc<Scope>,
-        handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<Vec<Command>> {
-        let mut errors = Vec::new();
-        let commands = statements
-            .iter()
-            .flat_map(|statement| {
-                self.transpile_statement(statement, program_identifier, scope, handler)
-                    .unwrap_or_else(|err| {
-                        errors.push(err);
-                        Vec::new()
-                    })
-            })
-            .collect();
-
-        if !errors.is_empty() {
-            return Err(errors.remove(0));
-        }
-
-        Ok(commands)
-    }
-
-    fn transpile_statement(
+    pub(super) fn transpile_statement(
         &mut self,
         statement: &Statement,
         program_identifier: &str,

@@ -165,7 +165,7 @@ impl Function {
 
             parameters
                 .elements()
-                .map(|el| el.span.str().to_string())
+                .map(|el| el.identifier().span.str().to_string())
                 .collect()
         } else {
             HashSet::new()

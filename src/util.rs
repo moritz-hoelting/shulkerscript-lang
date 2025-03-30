@@ -79,6 +79,48 @@ pub fn identifier_to_macro(ident: &str) -> std::borrow::Cow<str> {
     }
 }
 
+/// Transforms an identifier to a macro name that only contains `a-zA-Z0-9_`.
+#[cfg(feature = "shulkerbox")]
+#[must_use]
+pub fn identifier_to_scoreboard_target(ident: &str) -> std::borrow::Cow<str> {
+    if !(..=16).contains(&ident.len())
+        || ident
+            .chars()
+            .any(|c| c != '_' || !c.is_ascii_alphanumeric())
+    {
+        std::borrow::Cow::Owned(chksum_md5::hash(ident).to_hex_lowercase().split_off(16))
+    } else {
+        std::borrow::Cow::Borrowed(ident)
+    }
+}
+
+/// Transforms an identifier to a name that only contains `a-zA-Z0-9_`.
+/// Does only strip invalid characters if the `shulkerbox` feature is not enabled.
+#[cfg(not(feature = "shulkerbox"))]
+#[must_use]
+pub fn identifier_to_scoreboard_target(ident: &str) -> std::borrow::Cow<str> {
+    if !(..=16).contains(&ident.len())
+        || ident
+            .chars()
+            .any(|c| c != '_' || !c.is_ascii_alphanumeric())
+    {
+        let new_ident = ident
+            .chars()
+            .map(|c| {
+                if *c != '_' && !c.is_ascii_alphanumeric() {
+                    '_'
+                } else {
+                    c
+                }
+            })
+            .collect::<String>();
+
+        std::borrow::Cow::Owned(new_ident)
+    } else {
+        std::borrow::Cow::Borrowed(ident)
+    }
+}
+
 /// Returns whether a string is a valid scoreboard name.
 #[must_use]
 pub fn is_valid_scoreboard_objective_name(name: &str) -> bool {

@@ -7,7 +7,10 @@ use std::{
 
 use crate::{
     base::source_file::{SourceElement, Span},
-    syntax::syntax_tree::{expression::Expression, statement::Statement, AnnotationValue},
+    syntax::syntax_tree::{
+        declaration::FunctionParameter, expression::Expression, statement::Statement,
+        AnnotationValue,
+    },
 };
 
 #[doc(hidden)]
@@ -32,6 +35,11 @@ pub use transpiler::Transpiler;
 #[cfg(feature = "shulkerbox")]
 pub mod internal_functions;
 
+#[doc(hidden)]
+#[cfg(feature = "shulkerbox")]
+pub mod function;
+pub use function::TranspiledFunctionArguments;
+
 mod variables;
 pub use variables::{Scope, VariableData};
 
@@ -42,7 +50,7 @@ pub mod util;
 pub struct FunctionData {
     pub(super) namespace: String,
     pub(super) identifier_span: Span,
-    pub(super) parameters: Vec<String>,
+    pub(super) parameters: Vec<FunctionParameter>,
     pub(super) statements: Vec<Statement>,
     pub(super) public: bool,
     pub(super) annotations: HashMap<String, TranspileAnnotationValue>,

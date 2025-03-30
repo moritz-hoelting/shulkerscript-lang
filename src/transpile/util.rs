@@ -44,6 +44,39 @@ impl Display for MacroString {
     }
 }
 
+impl MacroString {
+    /// Check if the macro string contains any macros
+    #[must_use]
+    pub fn contains_macros(&self) -> bool {
+        match self {
+            Self::String(_) => false,
+            Self::MacroString(parts) => parts
+                .iter()
+                .any(|p| matches!(p, MacroStringPart::MacroUsage(_))),
+        }
+    }
+
+    /// Get the string representation of the macro string or the parts if it contains macros
+    ///
+    /// # Errors
+    /// - If the macro string contains macros
+    pub fn as_str(&self) -> Result<std::borrow::Cow<str>, &[MacroStringPart]> {
+        match self {
+            Self::String(s) => Ok(std::borrow::Cow::Borrowed(s)),
+            Self::MacroString(parts) if self.contains_macros() => Err(parts),
+            Self::MacroString(parts) => Ok(std::borrow::Cow::Owned(
+                parts
+                    .iter()
+                    .map(|p| match p {
+                        MacroStringPart::String(s) => s.clone(),
+                        MacroStringPart::MacroUsage(m) => format!("$({m})"),
+                    })
+                    .collect::<String>(),
+            )),
+        }
+    }
+}
+
 fn normalize_program_identifier<S>(identifier: S) -> String
 where
     S: AsRef<str>,
