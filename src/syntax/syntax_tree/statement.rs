@@ -325,6 +325,7 @@ pub enum VariableDeclaration {
     Array(ArrayVariableDeclaration),
     Score(ScoreVariableDeclaration),
     Tag(TagVariableDeclaration),
+    ComptimeValue(ComptimeValueDeclaration),
 }
 
 impl SourceElement for VariableDeclaration {
@@ -334,6 +335,7 @@ impl SourceElement for VariableDeclaration {
             Self::Array(declaration) => declaration.span(),
             Self::Score(declaration) => declaration.span(),
             Self::Tag(declaration) => declaration.span(),
+            Self::ComptimeValue(declaration) => declaration.span(),
         }
     }
 }
@@ -347,6 +349,7 @@ impl VariableDeclaration {
             Self::Array(declaration) => &declaration.identifier,
             Self::Score(declaration) => &declaration.identifier,
             Self::Tag(declaration) => &declaration.identifier,
+            Self::ComptimeValue(declaration) => &declaration.identifier,
         }
     }
 
@@ -358,6 +361,7 @@ impl VariableDeclaration {
             Self::Array(declaration) => &declaration.variable_type,
             Self::Score(declaration) => &declaration.int_keyword,
             Self::Tag(declaration) => &declaration.bool_keyword,
+            Self::ComptimeValue(declaration) => &declaration.val_keyword,
         }
     }
 
@@ -382,6 +386,14 @@ impl VariableDeclaration {
             Self::Tag(mut declaration) => {
                 declaration.annotations.push_front(annotation);
                 Ok(Self::Tag(declaration))
+            }
+            Self::ComptimeValue(_) => {
+                let err = Error::InvalidAnnotation(InvalidAnnotation {
+                    annotation: annotation.assignment.identifier.span,
+                    target: "comptime values".to_string(),
+                });
+
+                Err(err)
             }
         }
     }
@@ -681,6 +693,53 @@ impl TagVariableDeclaration {
     }
 }
 
+/// Represents a compile time value declaration in the syntax tree.
+///
+/// Syntax Synopsis:
+///
+/// ```ebnf
+/// ComptimeValueDeclaration:
+///     'val' identifier VariableDeclarationAssignment?
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct ComptimeValueDeclaration {
+    /// The type of the variable.
+    #[get = "pub"]
+    val_keyword: Keyword,
+    /// The identifier of the variable.
+    #[get = "pub"]
+    identifier: Identifier,
+    /// The optional assignment of the variable.
+    #[get = "pub"]
+    assignment: Option<VariableDeclarationAssignment>,
+    /// The annotations of the variable declaration.
+    #[get = "pub"]
+    annotations: VecDeque<Annotation>,
+}
+
+impl SourceElement for ComptimeValueDeclaration {
+    fn span(&self) -> Span {
+        self.val_keyword
+            .span()
+            .join(
+                &self
+                    .assignment
+                    .as_ref()
+                    .map_or_else(|| self.identifier.span(), SourceElement::span),
+            )
+            .expect("The span of the single variable declaration is invalid.")
+    }
+}
+
+impl ComptimeValueDeclaration {
+    /// Dissolves the [`ComptimeValueDeclaration`] into its components.
+    #[must_use]
+    pub fn dissolve(self) -> (Keyword, Identifier, Option<VariableDeclarationAssignment>) {
+        (self.val_keyword, self.identifier, self.assignment)
+    }
+}
+
 /// Represents an assignment in the syntax tree.
 ///
 /// Syntax Synopsis:
@@ -883,7 +942,10 @@ impl Parser<'_> {
     ) -> ParseResult<Semicolon> {
         let statement = match self.stop_at_significant() {
             Reading::Atomic(Token::Keyword(keyword))
-                if matches!(keyword.keyword, KeywordKind::Int | KeywordKind::Bool) =>
+                if matches!(
+                    keyword.keyword,
+                    KeywordKind::Int | KeywordKind::Bool | KeywordKind::Val
+                ) =>
             {
                 self.parse_variable_declaration(handler)
                     .map(SemicolonStatement::VariableDeclaration)
@@ -895,18 +957,20 @@ impl Parser<'_> {
                     let destination = {
                         let identifier = p.parse_identifier(&VoidHandler)?;
 
-                        if let Ok(tree) = p.step_into(
-                            Delimiter::Bracket,
-                            |pp| pp.parse_expression(&VoidHandler),
-                            &VoidHandler,
-                        ) {
-                            let open = tree.open;
-                            let close = tree.close;
-                            let expression = tree.tree?;
+                        match p.stop_at_significant() {
+                            Reading::IntoDelimited(punc) if punc.punctuation == '[' => {
+                                let tree = p.step_into(
+                                    Delimiter::Bracket,
+                                    |pp| pp.parse_expression(&VoidHandler),
+                                    &VoidHandler,
+                                )?;
+                                let open = tree.open;
+                                let close = tree.close;
+                                let expression = tree.tree?;
 
-                            AssignmentDestination::Indexed(identifier, open, expression, close)
-                        } else {
-                            AssignmentDestination::Identifier(identifier)
+                                AssignmentDestination::Indexed(identifier, open, expression, close)
+                            }
+                            _ => AssignmentDestination::Identifier(identifier),
                         }
                     };
                     let equals = p.parse_punctuation('=', true, &VoidHandler)?;
@@ -948,7 +1012,10 @@ impl Parser<'_> {
 
         let variable_type = match self.stop_at_significant() {
             Reading::Atomic(Token::Keyword(keyword))
-                if matches!(keyword.keyword, KeywordKind::Int | KeywordKind::Bool) =>
+                if matches!(
+                    keyword.keyword,
+                    KeywordKind::Int | KeywordKind::Bool | KeywordKind::Val
+                ) =>
             {
                 self.forward();
                 keyword
@@ -983,7 +1050,10 @@ impl Parser<'_> {
         let identifier = self.parse_identifier(handler)?;
 
         match self.stop_at_significant() {
-            Reading::IntoDelimited(punc) if punc.punctuation == '[' => {
+            Reading::IntoDelimited(punc)
+                if punc.punctuation == '['
+                    && matches!(variable_type.keyword, KeywordKind::Int | KeywordKind::Bool) =>
+            {
                 let tree = self.step_into(
                     Delimiter::Bracket,
                     |p| {
@@ -1071,12 +1141,23 @@ impl Parser<'_> {
                 let expression = self.parse_expression(handler)?;
                 let assignment = VariableDeclarationAssignment { equals, expression };
 
-                Ok(VariableDeclaration::Single(SingleVariableDeclaration {
-                    variable_type,
-                    identifier,
-                    assignment: Some(assignment),
-                    annotations: VecDeque::new(),
-                }))
+                if variable_type.keyword == KeywordKind::Val {
+                    Ok(VariableDeclaration::ComptimeValue(
+                        ComptimeValueDeclaration {
+                            val_keyword: variable_type,
+                            identifier,
+                            assignment: Some(assignment),
+                            annotations: VecDeque::new(),
+                        },
+                    ))
+                } else {
+                    Ok(VariableDeclaration::Single(SingleVariableDeclaration {
+                        variable_type,
+                        identifier,
+                        assignment: Some(assignment),
+                        annotations: VecDeque::new(),
+                    }))
+                }
             }
             // SingleVariableDeclaration without Assignment
             _ => Ok(VariableDeclaration::Single(SingleVariableDeclaration {

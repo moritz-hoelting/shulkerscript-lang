@@ -12,7 +12,9 @@ use shulkerbox::prelude::{Command, Condition, Execute};
 
 #[cfg(feature = "shulkerbox")]
 use super::{
-    error::{IllegalIndexing, IllegalIndexingReason, MismatchedTypes, UnknownIdentifier},
+    error::{
+        IllegalIndexing, IllegalIndexingReason, MismatchedTypes, NotComptime, UnknownIdentifier,
+    },
     Scope, TranspileResult, Transpiler, VariableData,
 };
 #[cfg(feature = "shulkerbox")]
@@ -238,12 +240,14 @@ impl Expression {
     }
 
     /// Evaluate at compile-time.
-    #[must_use]
+    ///
+    /// # Errors
+    /// - If the expression is not compile-time evaluatable.
     pub fn comptime_eval(
         &self,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> Option<ComptimeValue> {
+    ) -> Result<ComptimeValue, NotComptime> {
         match self {
             Self::Primary(primary) => primary.comptime_eval(scope, handler),
             Self::Binary(binary) => binary.comptime_eval(scope, handler),
@@ -333,19 +337,40 @@ impl Primary {
     }
 
     /// Evaluate at compile-time.
-    #[must_use]
+    ///
+    /// # Errors
+    /// - If the expression is not compile-time evaluatable.
     pub fn comptime_eval(
         &self,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> Option<ComptimeValue> {
+    ) -> Result<ComptimeValue, NotComptime> {
         match self {
-            Self::Boolean(boolean) => Some(ComptimeValue::Boolean(boolean.value())),
-            Self::Integer(int) => Some(ComptimeValue::Integer(int.as_i64())),
-            Self::StringLiteral(string_literal) => Some(ComptimeValue::String(
+            Self::Boolean(boolean) => Ok(ComptimeValue::Boolean(boolean.value())),
+            Self::Integer(int) => Ok(ComptimeValue::Integer(int.as_i64())),
+            Self::StringLiteral(string_literal) => Ok(ComptimeValue::String(
                 string_literal.str_content().to_string(),
             )),
-            Self::Identifier(_) | Self::FunctionCall(_) | Self::Indexed(_) => None,
+            Self::Identifier(ident) => scope.get_variable(ident.span.str()).map_or_else(
+                || {
+                    Err(NotComptime {
+                        expression: self.span(),
+                    })
+                },
+                |var| match var.as_ref() {
+                    VariableData::ComptimeValue { value } => {
+                        value.read().unwrap().clone().ok_or_else(|| NotComptime {
+                            expression: ident.span.clone(),
+                        })
+                    }
+                    _ => Err(NotComptime {
+                        expression: self.span(),
+                    }),
+                },
+            ),
+            Self::FunctionCall(_) | Self::Indexed(_) => Err(NotComptime {
+                expression: self.span(),
+            }),
             Self::Parenthesized(parenthesized) => {
                 parenthesized.expression().comptime_eval(scope, handler)
             }
@@ -355,12 +380,14 @@ impl Primary {
                     .comptime_eval(scope, handler)
                     .and_then(|val| match (prefix.operator(), val) {
                         (PrefixOperator::LogicalNot(_), ComptimeValue::Boolean(boolean)) => {
-                            Some(ComptimeValue::Boolean(!boolean))
+                            Ok(ComptimeValue::Boolean(!boolean))
                         }
                         (PrefixOperator::Negate(_), ComptimeValue::Integer(int)) => {
-                            Some(ComptimeValue::Integer(-int))
+                            Ok(ComptimeValue::Integer(-int))
                         }
-                        _ => None,
+                        _ => Err(NotComptime {
+                            expression: prefix.span(),
+                        }),
                     })
             }
             Self::Lua(lua) => lua
@@ -368,19 +395,21 @@ impl Primary {
                 .inspect_err(|err| {
                     handler.receive(err.clone());
                 })
-                .ok()
-                .flatten(),
+                .map_err(|_| NotComptime {
+                    expression: lua.span(),
+                })
+                .and_then(|val| val),
             Self::MacroStringLiteral(macro_string_literal) => {
                 if macro_string_literal
                     .parts()
                     .iter()
                     .any(|part| matches!(part, MacroStringLiteralPart::MacroUsage { .. }))
                 {
-                    Some(ComptimeValue::MacroString(
+                    Ok(ComptimeValue::MacroString(
                         macro_string_literal.clone().into(),
                     ))
                 } else {
-                    Some(ComptimeValue::String(macro_string_literal.str_content()))
+                    Ok(ComptimeValue::String(macro_string_literal.str_content()))
                 }
             }
         }
@@ -430,12 +459,14 @@ impl Binary {
     }
 
     /// Evaluate at compile-time.
-    #[must_use]
+    ///
+    /// # Errors
+    /// - If the expression is not compile-time evaluatable.
     pub fn comptime_eval(
         &self,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> Option<ComptimeValue> {
+    ) -> Result<ComptimeValue, NotComptime> {
         let left = self.left_operand().comptime_eval(scope, handler)?;
         let right = self.right_operand().comptime_eval(scope, handler)?;
 
@@ -449,7 +480,7 @@ impl Binary {
                         .right_operand()
                         .can_yield_type(ValueType::Boolean, scope) =>
             {
-                Some(ComptimeValue::Boolean(true))
+                Ok(ComptimeValue::Boolean(true))
             }
             (ComptimeValue::Boolean(false), _) | (_, ComptimeValue::Boolean(false))
                 if matches!(self.operator(), BinaryOperator::LogicalAnd(..))
@@ -460,15 +491,17 @@ impl Binary {
                         .right_operand()
                         .can_yield_type(ValueType::Boolean, scope) =>
             {
-                Some(ComptimeValue::Boolean(false))
+                Ok(ComptimeValue::Boolean(false))
             }
             (ComptimeValue::Boolean(left), ComptimeValue::Boolean(right)) => {
                 match self.operator() {
-                    BinaryOperator::Equal(..) => Some(ComptimeValue::Boolean(left == right)),
-                    BinaryOperator::NotEqual(..) => Some(ComptimeValue::Boolean(left != right)),
-                    BinaryOperator::LogicalAnd(..) => Some(ComptimeValue::Boolean(left && right)),
-                    BinaryOperator::LogicalOr(..) => Some(ComptimeValue::Boolean(left || right)),
-                    _ => None,
+                    BinaryOperator::Equal(..) => Ok(ComptimeValue::Boolean(left == right)),
+                    BinaryOperator::NotEqual(..) => Ok(ComptimeValue::Boolean(left != right)),
+                    BinaryOperator::LogicalAnd(..) => Ok(ComptimeValue::Boolean(left && right)),
+                    BinaryOperator::LogicalOr(..) => Ok(ComptimeValue::Boolean(left || right)),
+                    _ => Err(NotComptime {
+                        expression: self.span(),
+                    }),
                 }
             }
             (ComptimeValue::Integer(left), ComptimeValue::Integer(right)) => {
@@ -498,14 +531,37 @@ impl Binary {
                     }
                     _ => None,
                 }
+                .ok_or_else(|| NotComptime {
+                    expression: self.span(),
+                })
             }
             (ComptimeValue::String(left), ComptimeValue::String(right)) => match self.operator() {
-                BinaryOperator::Add(..) => Some(ComptimeValue::String(left + &right)),
-                BinaryOperator::Equal(..) => Some(ComptimeValue::Boolean(left == right)),
-                BinaryOperator::NotEqual(..) => Some(ComptimeValue::Boolean(left != right)),
-                _ => None,
+                BinaryOperator::Add(..) => Ok(ComptimeValue::String(left + &right)),
+                BinaryOperator::Equal(..) => Ok(ComptimeValue::Boolean(left == right)),
+                BinaryOperator::NotEqual(..) => Ok(ComptimeValue::Boolean(left != right)),
+                _ => Err(NotComptime {
+                    expression: self.span(),
+                }),
             },
-            _ => None,
+            // TODO: also allow macro strings
+            (
+                left @ ComptimeValue::String(_),
+                right @ (ComptimeValue::Boolean(_) | ComptimeValue::Integer(_)),
+            )
+            | (
+                left @ (ComptimeValue::Boolean(_) | ComptimeValue::Integer(_)),
+                right @ ComptimeValue::String(_),
+            ) => match self.operator() {
+                BinaryOperator::Add(_) => Ok(ComptimeValue::String(
+                    left.to_string_no_macro().unwrap() + &right.to_string_no_macro().unwrap(),
+                )),
+                _ => Err(NotComptime {
+                    expression: self.span(),
+                }),
+            },
+            _ => Err(NotComptime {
+                expression: self.span(),
+            }),
         }
     }
 }
@@ -641,7 +697,7 @@ impl Transpiler {
             Primary::Lua(lua) =>
             {
                 #[expect(clippy::option_if_let_else)]
-                if let Some(value) = lua.eval_comptime(scope, handler)? {
+                if let Ok(value) = lua.eval_comptime(scope, handler)? {
                     self.store_comptime_value(&value, target, lua, handler)
                 } else {
                     let err = TranspileError::MissingValue(MissingValue {
@@ -803,7 +859,7 @@ impl Transpiler {
                 if let Some(variable) = variable.as_deref() {
                     let from = match variable {
                         VariableData::Scoreboard { objective } => {
-                            if let Some(ComptimeValue::String(target)) =
+                            if let Ok(ComptimeValue::String(target)) =
                                 indexed.index().comptime_eval(scope, handler)
                             {
                                 Ok(DataLocation::ScoreboardValue {
@@ -822,7 +878,7 @@ impl Transpiler {
                             }
                         }
                         VariableData::ScoreboardArray { objective, targets } => {
-                            if let Some(ComptimeValue::Integer(index)) =
+                            if let Ok(ComptimeValue::Integer(index)) =
                                 indexed.index().comptime_eval(scope, handler)
                             {
                                 if let Some(target) = usize::try_from(index)
@@ -860,7 +916,7 @@ impl Transpiler {
                             storage_name,
                             paths,
                         } => {
-                            if let Some(ComptimeValue::Integer(index)) =
+                            if let Ok(ComptimeValue::Integer(index)) =
                                 indexed.index().comptime_eval(scope, handler)
                             {
                                 if let Some(path) = usize::try_from(index)
@@ -924,7 +980,7 @@ impl Transpiler {
         scope: &Arc<super::Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Vec<Command>> {
-        if let Some(value) = binary.comptime_eval(scope, handler) {
+        if let Ok(value) = binary.comptime_eval(scope, handler) {
             self.store_comptime_value(&value, target, binary, handler)
         } else {
             match binary.operator() {
@@ -1087,7 +1143,7 @@ impl Transpiler {
                             storage_name,
                             paths,
                         } => {
-                            if let Some(ComptimeValue::Integer(index)) =
+                            if let Ok(ComptimeValue::Integer(index)) =
                                 indexed.index().comptime_eval(scope, handler)
                             {
                                 if let Some(path) = usize::try_from(index)
@@ -1168,15 +1224,15 @@ impl Transpiler {
                 }
             },
             Primary::Lua(lua) => match lua.eval_comptime(scope, handler)? {
-                Some(ComptimeValue::String(value)) => Ok((
+                Ok(ComptimeValue::String(value)) => Ok((
                     Vec::new(),
                     ExtendedCondition::Runtime(Condition::Atom(value.into())),
                 )),
-                Some(ComptimeValue::MacroString(value)) => Ok((
+                Ok(ComptimeValue::MacroString(value)) => Ok((
                     Vec::new(),
                     ExtendedCondition::Runtime(Condition::Atom(value.into())),
                 )),
-                Some(ComptimeValue::Boolean(boolean)) => {
+                Ok(ComptimeValue::Boolean(boolean)) => {
                     Ok((Vec::new(), ExtendedCondition::Comptime(boolean)))
                 }
                 _ => {

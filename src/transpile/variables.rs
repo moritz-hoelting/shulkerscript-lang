@@ -30,7 +30,7 @@ use crate::{
 use super::{
     error::{
         AssignmentError, IllegalAnnotationContent, IllegalIndexing, IllegalIndexingReason,
-        MismatchedTypes,
+        MismatchedTypes, NotComptime,
     },
     expression::{ComptimeValue, DataLocation, ExpectedType, StorageType},
     FunctionData, TranspileAnnotationValue, TranspileError, TranspileResult,
@@ -99,6 +99,11 @@ pub enum VariableData {
     InternalFunction {
         /// The implementation
         implementation: InternalFunction,
+    },
+    /// Compiler internal variable.
+    ComptimeValue {
+        /// The value.
+        value: Arc<RwLock<Option<ComptimeValue>>>,
     },
 }
 
@@ -282,6 +287,31 @@ impl Transpiler {
                 scope,
                 handler,
             ),
+            VariableDeclaration::ComptimeValue(declaration) => {
+                let value = if let Some(assignment) = declaration.assignment() {
+                    Some(
+                        assignment
+                            .expression()
+                            .comptime_eval(scope, handler)
+                            .map_err(|err| {
+                                let err = TranspileError::NotComptime(err);
+                                handler.receive(err.clone());
+                                err
+                            })?,
+                    )
+                } else {
+                    None
+                };
+
+                scope.set_variable(
+                    declaration.identifier().span.str(),
+                    VariableData::ComptimeValue {
+                        value: Arc::new(RwLock::new(value)),
+                    },
+                );
+
+                Ok(Vec::new())
+            }
         }
     }
 
@@ -466,7 +496,7 @@ impl Transpiler {
         let (identifier, indexing_value) = match destination {
             TranspileAssignmentTarget::Identifier(ident) => (ident, None),
             TranspileAssignmentTarget::Indexed(ident, expression) => {
-                (ident, expression.comptime_eval(scope, handler))
+                (ident, expression.comptime_eval(scope, handler).ok())
             }
         };
         if let Some(target) = scope.get_variable(identifier.span.str()) {
@@ -662,6 +692,16 @@ impl Transpiler {
                         return Err(err);
                     }
                 },
+                VariableData::ComptimeValue { value } => {
+                    let comptime_value =
+                        expression.comptime_eval(scope, handler).map_err(|err| {
+                            let err = TranspileError::NotComptime(err);
+                            handler.receive(err.clone());
+                            err
+                        })?;
+                    *value.write().unwrap() = Some(comptime_value);
+                    return Ok(Vec::new());
+                }
                 VariableData::Function { .. }
                 | VariableData::MacroParameter { .. }
                 | VariableData::InternalFunction { .. } => {
@@ -723,6 +763,7 @@ impl Transpiler {
                 TranspileAnnotationValue::Expression(expr) => {
                     if let Some(name_eval) = expr
                         .comptime_eval(scope, handler)
+                        .ok()
                         .and_then(|val| val.to_string_no_macro())
                     {
                         // TODO: change invalid criteria if boolean
@@ -821,9 +862,11 @@ impl Transpiler {
                         if let (Some(name_eval), Some(target_eval)) = (
                             objective
                                 .comptime_eval(scope, handler)
+                                .ok()
                                 .and_then(|val| val.to_string_no_macro()),
                             target
                                 .comptime_eval(scope, handler)
+                                .ok()
                                 .and_then(|val| val.to_string_no_macro()),
                         ) {
                             // TODO: change invalid criteria if boolean

@@ -52,6 +52,7 @@ pub enum KeywordKind {
     Int,
     Bool,
     Macro,
+    Val,
 }
 
 impl Display for KeywordKind {
@@ -117,6 +118,7 @@ impl KeywordKind {
             Self::Int => "int",
             Self::Bool => "bool",
             Self::Macro => "macro",
+            Self::Val => "val",
         }
     }
 

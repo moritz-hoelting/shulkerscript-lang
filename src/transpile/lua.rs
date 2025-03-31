@@ -12,8 +12,8 @@ mod enabled {
         syntax::syntax_tree::expression::LuaCode,
         transpile::{
             error::{
-                InvalidArgument, LuaRuntimeError, MismatchedTypes, TranspileError, TranspileResult,
-                UnknownIdentifier,
+                InvalidArgument, LuaRuntimeError, MismatchedTypes, NotComptime, TranspileError,
+                TranspileResult, UnknownIdentifier,
             },
             expression::{ComptimeValue, ExpectedType},
             Scope, VariableData,
@@ -86,11 +86,15 @@ mod enabled {
             &self,
             scope: &Arc<Scope>,
             handler: &impl Handler<base::Error>,
-        ) -> TranspileResult<Option<ComptimeValue>> {
+        ) -> TranspileResult<Result<ComptimeValue, NotComptime>> {
             // required to keep the lua instance alive
             let (lua_result, _lua) = self.eval(scope, handler)?;
 
-            self.handle_lua_result(lua_result, handler)
+            self.handle_lua_result(lua_result, handler).map(|res| {
+                res.ok_or_else(|| NotComptime {
+                    expression: self.span(),
+                })
+            })
         }
 
         fn add_globals(&self, lua: &Lua, scope: &Arc<Scope>) -> TranspileResult<()> {
@@ -261,6 +265,22 @@ mod enabled {
                         .set("name", tag_name.as_str())
                         .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
                     Value::Table(table)
+                }
+                Some(VariableData::ComptimeValue { value }) => {
+                    let value = value.read().unwrap();
+                    match &*value {
+                        Some(ComptimeValue::Boolean(b)) => Value::Boolean(*b),
+                        Some(ComptimeValue::Integer(i)) => Value::Integer(*i),
+                        Some(ComptimeValue::String(s)) => Value::String(
+                            lua.create_string(s)
+                                .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?,
+                        ),
+                        Some(ComptimeValue::MacroString(s)) => Value::String(
+                            lua.create_string(s.to_string())
+                                .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?,
+                        ),
+                        None => Value::Nil,
+                    }
                 }
                 Some(VariableData::Function { .. } | VariableData::InternalFunction { .. }) => {
                     // TODO: add support for functions

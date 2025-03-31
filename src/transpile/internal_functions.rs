@@ -183,17 +183,17 @@ fn print_function(
 
     let args = get_args_assert_in_range(call, 1..=2)?;
     let first = args.first().expect("checked range");
-    let (target, message_expression) = args.get(1).map_or_else(
-        || ("@a".into(), first),
-        |second| {
-            (
-                first
-                    .comptime_eval(scope, &VoidHandler)
-                    .map_or_else(|| "@a".into(), |val| val.to_macro_string()),
-                second,
-            )
-        },
-    );
+    let (target, message_expression) = if let Some(second) = args.get(1) {
+        (
+            first
+                .comptime_eval(scope, &VoidHandler)
+                .map(|val| val.to_macro_string())
+                .map_err(TranspileError::NotComptime)?,
+            second,
+        )
+    } else {
+        ("@a".into(), first)
+    };
 
     let mut contains_macro = matches!(target, MacroString::MacroString(_));
 
@@ -240,7 +240,7 @@ fn print_function(
                 Primary::Identifier(ident) => {
                     match scope.get_variable(ident.span.str()).as_deref() {
                         Some(VariableData::Scoreboard { objective }) => {
-                            if let Some(ComptimeValue::String(index)) =
+                            if let Ok(ComptimeValue::String(index)) =
                                 indexed.index().comptime_eval(scope, &VoidHandler)
                             {
                                 let (cmd, value) = get_data_location(
@@ -262,7 +262,7 @@ fn print_function(
                             }
                         }
                         Some(VariableData::ScoreboardArray { objective, targets }) => {
-                            if let Some(ComptimeValue::Integer(index)) =
+                            if let Ok(ComptimeValue::Integer(index)) =
                                 indexed.index().comptime_eval(scope, &VoidHandler)
                             {
                                 #[expect(clippy::option_if_let_else)]
@@ -300,7 +300,7 @@ fn print_function(
                             storage_name,
                             paths,
                         }) => {
-                            if let Some(ComptimeValue::Integer(index)) =
+                            if let Ok(ComptimeValue::Integer(index)) =
                                 indexed.index().comptime_eval(scope, &VoidHandler)
                             {
                                 #[expect(clippy::option_if_let_else)]

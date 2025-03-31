@@ -25,7 +25,7 @@ use crate::{
 };
 
 use super::{
-    error::{MismatchedTypes, TranspileError, TranspileResult},
+    error::{MismatchedTypes, MissingValue, TranspileError, TranspileResult, UnknownIdentifier},
     expression::{ComptimeValue, ExpectedType, ExtendedCondition},
     variables::{Scope, TranspileAssignmentTarget, VariableData},
     FunctionData, TranspileAnnotationValue, TranspiledFunctionArguments,
@@ -342,11 +342,46 @@ impl Transpiler {
             Expression::Primary(Primary::FunctionCall(func)) => {
                 self.transpile_function_call(func, scope, handler)
             }
+            Expression::Primary(Primary::Identifier(ident)) => {
+                match scope.get_variable(ident.span.str()).as_deref() {
+                    Some(VariableData::ComptimeValue { value }) => {
+                        value.read().unwrap().as_ref().map_or_else(
+                            || {
+                                let error = TranspileError::MissingValue(MissingValue {
+                                    expression: ident.span.clone(),
+                                });
+                                handler.receive(error.clone());
+                                Err(error)
+                            },
+                            |val| {
+                                let cmd = val.to_string_no_macro().map_or_else(
+                                    || Command::UsesMacro(val.to_macro_string().into()),
+                                    Command::Raw,
+                                );
+                                Ok(vec![cmd])
+                            },
+                        )
+                    }
+                    Some(_) => {
+                        let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
+                            expression.clone(),
+                        ));
+                        handler.receive(error.clone());
+                        Err(error)
+                    }
+                    None => {
+                        let error = TranspileError::UnknownIdentifier(UnknownIdentifier {
+                            identifier: ident.span.clone(),
+                        });
+                        handler.receive(error.clone());
+                        Err(error)
+                    }
+                }
+            }
             expression @ Expression::Primary(
                 Primary::Integer(_)
                 | Primary::Boolean(_)
                 | Primary::Prefix(_)
-                | Primary::Identifier(_)
                 | Primary::Indexed(_),
             ) => {
                 let error =
@@ -361,9 +396,9 @@ impl Transpiler {
                 Ok(vec![Command::UsesMacro(string.into())])
             }
             Expression::Primary(Primary::Lua(code)) => match code.eval_comptime(scope, handler)? {
-                Some(ComptimeValue::String(cmd)) => Ok(vec![Command::Raw(cmd)]),
-                Some(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd.into())]),
-                Some(ComptimeValue::Boolean(_) | ComptimeValue::Integer(_)) => {
+                Ok(ComptimeValue::String(cmd)) => Ok(vec![Command::Raw(cmd)]),
+                Ok(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd.into())]),
+                Ok(ComptimeValue::Boolean(_) | ComptimeValue::Integer(_)) => {
                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
                         expected_type: ExpectedType::String,
                         expression: code.span(),
@@ -371,7 +406,13 @@ impl Transpiler {
                     handler.receive(err.clone());
                     Err(err)
                 }
-                None => Ok(Vec::new()),
+                Err(_) => {
+                    let err = TranspileError::MissingValue(MissingValue {
+                        expression: code.span(),
+                    });
+                    handler.receive(err.clone());
+                    Err(err)
+                }
             },
 
             Expression::Primary(Primary::Parenthesized(parenthesized)) => self
@@ -382,8 +423,8 @@ impl Transpiler {
                     handler,
                 ),
             Expression::Binary(bin) => match bin.comptime_eval(scope, handler) {
-                Some(ComptimeValue::String(cmd)) => Ok(vec![Command::Raw(cmd)]),
-                Some(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd.into())]),
+                Ok(ComptimeValue::String(cmd)) => Ok(vec![Command::Raw(cmd)]),
+                Ok(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd.into())]),
                 _ => {
                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
                         expression: bin.span(),
@@ -621,7 +662,7 @@ impl Transpiler {
             }
         });
 
-        if let Some(ComptimeValue::Boolean(value)) = cond_expression.comptime_eval(scope, handler) {
+        if let Ok(ComptimeValue::Boolean(value)) = cond_expression.comptime_eval(scope, handler) {
             if value {
                 Ok(Some((Vec::new(), then)))
             } else {

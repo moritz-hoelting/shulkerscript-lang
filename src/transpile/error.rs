@@ -46,6 +46,8 @@ pub enum TranspileError {
     IllegalIndexing(#[from] IllegalIndexing),
     #[error(transparent)]
     InvalidArgument(#[from] InvalidArgument),
+    #[error(transparent)]
+    NotComptime(#[from] NotComptime),
 }
 
 /// The result of a transpilation operation.
@@ -447,3 +449,32 @@ impl Display for InvalidArgument {
 }
 
 impl std::error::Error for InvalidArgument {}
+
+/// An error that occurs when an indexing operation is not permitted.
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
+pub struct NotComptime {
+    /// The expression that cannot be evaluated at compile time.
+    #[get = "pub"]
+    pub expression: Span,
+}
+
+impl Display for NotComptime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            Message::new(
+                Severity::Error,
+                "The expression cannot be evaluated at compile time but is required to."
+            )
+        )?;
+
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(&self.expression, Option::<u8>::None)
+        )
+    }
+}
+
+impl std::error::Error for NotComptime {}

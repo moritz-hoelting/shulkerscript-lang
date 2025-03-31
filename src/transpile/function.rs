@@ -102,6 +102,7 @@ impl Transpiler {
                     TranspileAnnotationValue::None => Ok(identifier_span.str().to_string()),
                     TranspileAnnotationValue::Expression(expr) => expr
                         .comptime_eval(scope, handler)
+                        .ok()
                         .and_then(|val| val.to_string_no_macro())
                         .ok_or_else(|| {
                             let err = TranspileError::IllegalAnnotationContent(
@@ -293,13 +294,10 @@ impl Transpiler {
                     let value = match expression {
                         Expression::Primary(Primary::Lua(lua)) => {
                             lua.eval_comptime(scope, handler).and_then(|val| match val {
-                                Some(ComptimeValue::MacroString(s)) => Ok(Parameter::Static(s)),
-                                Some(val) => Ok(Parameter::Static(val.to_macro_string())),
-                                None => {
-                                    let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                                        expression: expression.span(),
-                                        expected_type: ExpectedType::String,
-                                    });
+                                Ok(ComptimeValue::MacroString(s)) => Ok(Parameter::Static(s)),
+                                Ok(val) => Ok(Parameter::Static(val.to_macro_string())),
+                                Err(err) => {
+                                    let err = TranspileError::NotComptime(err);
                                     handler.receive(err.clone());
                                     Err(err)
                                 }

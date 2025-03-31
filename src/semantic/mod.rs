@@ -396,6 +396,10 @@ impl Assignment {
             let expected = match variable_type {
                 VariableType::BooleanStorage | VariableType::Tag => ValueType::Boolean,
                 VariableType::ScoreboardValue => ValueType::Integer,
+                VariableType::ComptimeValue => {
+                    // TODO: check if the expression is a constant expression
+                    return Ok(());
+                }
                 _ => {
                     let err = error::Error::AssignmentError(AssignmentError {
                         identifier: self.destination().span(),
@@ -445,6 +449,12 @@ impl VariableDeclaration {
                 KeywordKind::Int => (VariableType::ScoreboardValue, ExpectedType::Integer),
                 _ => unreachable!("variable type is not a valid type"),
             },
+            Self::ComptimeValue(decl) => {
+                if let Some(assignment) = decl.assignment() {
+                    assignment.expression().analyze_semantics(scope, handler)?;
+                }
+                (VariableType::ComptimeValue, ExpectedType::Any)
+            }
         };
         scope.set_variable(name, var);
         let assignment = match self {
@@ -459,7 +469,12 @@ impl VariableDeclaration {
                 }
             }
             Self::Single(single) => single.assignment().as_ref(),
+            Self::ComptimeValue(decl) => decl.assignment().as_ref(),
         };
+        if var == VariableType::ComptimeValue {
+            // TODO: check if the expression is a constant expression
+            return Ok(());
+        }
         if let Some(assignment) = assignment {
             let expected = match var {
                 VariableType::BooleanStorage | VariableType::Tag => ValueType::Boolean,
@@ -689,8 +704,35 @@ impl Binary {
         handler: &impl Handler<base::Error>,
     ) -> Result<(), error::Error> {
         match self.operator() {
-            BinaryOperator::Add(_)
-            | BinaryOperator::Subtract(_)
+            BinaryOperator::Add(_) => {
+                if (self
+                    .left_operand()
+                    .can_yield_type_semantics(ValueType::Integer, scope)
+                    && self
+                        .right_operand()
+                        .can_yield_type_semantics(ValueType::Integer, scope))
+                    || self
+                        .left_operand()
+                        .can_yield_type_semantics(ValueType::String, scope)
+                    || self
+                        .right_operand()
+                        .can_yield_type_semantics(ValueType::String, scope)
+                {
+                    self.left_operand().analyze_semantics(scope, handler)?;
+                    self.right_operand().analyze_semantics(scope, handler)
+                } else {
+                    let err = error::Error::MismatchedTypes(MismatchedTypes {
+                        expected_type: ExpectedType::AnyOf(vec![
+                            ExpectedType::Integer,
+                            ExpectedType::String,
+                        ]),
+                        expression: self.span(),
+                    });
+                    handler.receive(err.clone());
+                    Err(err)
+                }
+            }
+            BinaryOperator::Subtract(_)
             | BinaryOperator::Multiply(_)
             | BinaryOperator::Divide(_)
             | BinaryOperator::Modulo(_) => {
@@ -779,8 +821,8 @@ impl Binary {
 }
 
 impl LuaCode {
-    #[expect(clippy::unused_self, clippy::unnecessary_wraps)]
-    #[cfg_attr(feature = "lua", expect(unused_variables))]
+    #[expect(clippy::unused_self)]
+    #[cfg_attr(feature = "lua", expect(unused_variables, clippy::unnecessary_wraps))]
     fn analyze_semantics(
         &self,
         _scope: &SemanticScope,

@@ -21,6 +21,8 @@ pub enum VariableType {
     BooleanStorageArray,
     /// Compiler internal function.
     InternalFunction,
+    /// Compiler internal value.
+    ComptimeValue,
 }
 
 /// A scope that stores variables.
