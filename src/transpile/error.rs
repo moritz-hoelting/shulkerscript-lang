@@ -44,6 +44,8 @@ pub enum TranspileError {
     MissingValue(#[from] MissingValue),
     #[error(transparent)]
     IllegalIndexing(#[from] IllegalIndexing),
+    #[error(transparent)]
+    InvalidArgument(#[from] InvalidArgument),
 }
 
 /// The result of a transpilation operation.
@@ -52,8 +54,10 @@ pub type TranspileResult<T> = Result<T, TranspileError>;
 /// An error that occurs when a function declaration is missing.
 #[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct MissingFunctionDeclaration {
+    /// The span of the identifier that is missing.
     #[get = "pub"]
     span: Span,
+    /// Possible alternatives for the missing function declaration.
     #[get = "pub"]
     alternatives: Vec<FunctionData>,
 }
@@ -127,11 +131,26 @@ impl Display for MissingFunctionDeclaration {
 
 impl std::error::Error for MissingFunctionDeclaration {}
 
+impl std::hash::Hash for MissingFunctionDeclaration {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.span.hash(state);
+        for alternative in &self.alternatives {
+            alternative.identifier_span.hash(state);
+            alternative.namespace.hash(state);
+            alternative.parameters.hash(state);
+            alternative.public.hash(state);
+            alternative.statements.hash(state);
+        }
+    }
+}
+
 /// An error that occurs when a function declaration is missing.
 #[allow(clippy::module_name_repetitions)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LuaRuntimeError {
+    /// The span of the code block that caused the error.
     pub code_block: Span,
+    /// The error message of the Lua runtime.
     pub error_message: String,
 }
 
@@ -155,6 +174,8 @@ impl std::error::Error for LuaRuntimeError {}
 
 #[cfg(feature = "lua")]
 impl LuaRuntimeError {
+    /// Creates a new Lua runtime error from an mlua error.
+    #[must_use]
     pub fn from_lua_err(err: &mlua::Error, span: Span) -> Self {
         let err_string = err.to_string();
         Self {
@@ -168,9 +189,13 @@ impl LuaRuntimeError {
 }
 
 /// An error that occurs when an annotation has an illegal content.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct IllegalAnnotationContent {
+    /// The span of the annotation.
+    #[get = "pub"]
     pub annotation: Span,
+    /// The error message.
+    #[get = "pub"]
     pub message: String,
 }
 
@@ -194,9 +219,13 @@ impl Display for IllegalAnnotationContent {
 impl std::error::Error for IllegalAnnotationContent {}
 
 /// An error that occurs when an expression can not evaluate to the wanted type.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Getters)]
 pub struct MismatchedTypes {
+    /// The expression that can not evaluate to the wanted type.
+    #[get = "pub"]
     pub expression: Span,
+    /// The expected type.
+    #[get = "pub"]
     pub expected_type: ExpectedType,
 }
 
@@ -216,9 +245,13 @@ impl Display for MismatchedTypes {
 impl std::error::Error for MismatchedTypes {}
 
 /// An error that occurs when an expression can not evaluate to the wanted type.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct FunctionArgumentsNotAllowed {
+    /// The arguments that are not allowed.
+    #[get = "pub"]
     pub arguments: Span,
+    /// The error message.
+    #[get = "pub"]
     pub message: String,
 }
 
@@ -237,9 +270,13 @@ impl Display for FunctionArgumentsNotAllowed {
 impl std::error::Error for FunctionArgumentsNotAllowed {}
 
 /// An error that occurs when an expression can not evaluate to the wanted type.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Getters)]
 pub struct AssignmentError {
+    /// The identifier that is assigned to.
+    #[get = "pub"]
     pub identifier: Span,
+    /// The error message.
+    #[get = "pub"]
     pub message: String,
 }
 
@@ -258,8 +295,10 @@ impl Display for AssignmentError {
 impl std::error::Error for AssignmentError {}
 
 /// An error that occurs when an unknown identifier is used.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Getters)]
 pub struct UnknownIdentifier {
+    /// The unknown identifier.
+    #[get = "pub"]
     pub identifier: Span,
 }
 
@@ -285,8 +324,10 @@ impl Display for UnknownIdentifier {
 impl std::error::Error for UnknownIdentifier {}
 
 /// An error that occurs when there is a value expected but none provided.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct MissingValue {
+    /// The expression that is missing a value.
+    #[get = "pub"]
     pub expression: Span,
 }
 
@@ -312,9 +353,13 @@ impl Display for MissingValue {
 impl std::error::Error for MissingValue {}
 
 /// An error that occurs when an indexing operation is not permitted.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Getters)]
 pub struct IllegalIndexing {
+    /// The reason why the indexing operation is not permitted.
+    #[get = "pub"]
     pub reason: IllegalIndexingReason,
+    /// The expression that is the reason for the indexing being illegal.
+    #[get = "pub"]
     pub expression: Span,
 }
 
@@ -333,11 +378,24 @@ impl Display for IllegalIndexing {
 impl std::error::Error for IllegalIndexing {}
 
 /// The reason why an indexing operation is not permitted.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IllegalIndexingReason {
+    /// The expression is not an identifier.
     NotIdentifier,
-    InvalidComptimeType { expected: ExpectedType },
-    IndexOutOfBounds { index: usize, length: usize },
+    /// The expression cannot be indexed.
+    NotIndexable,
+    /// The expression can only be indexed with a specific type that can be evaluated at compile time.
+    InvalidComptimeType {
+        /// The expected type.
+        expected: ExpectedType,
+    },
+    /// The index is out of bounds.
+    IndexOutOfBounds {
+        /// The index that is out of bounds.
+        index: usize,
+        /// The length indexed object.
+        length: usize,
+    },
 }
 
 impl Display for IllegalIndexingReason {
@@ -345,6 +403,9 @@ impl Display for IllegalIndexingReason {
         match self {
             Self::NotIdentifier => {
                 write!(f, "The expression is not an identifier.")
+            }
+            Self::NotIndexable => {
+                write!(f, "The expression cannot be indexed.")
             }
             Self::InvalidComptimeType { expected } => {
                 write!(
@@ -361,3 +422,28 @@ impl Display for IllegalIndexingReason {
         }
     }
 }
+
+/// An error that occurs when an indexing operation is not permitted.
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
+pub struct InvalidArgument {
+    /// The span of the argument.
+    #[get = "pub"]
+    pub span: Span,
+    /// The reason why the argument is invalid.
+    #[get = "pub"]
+    pub reason: String,
+}
+
+impl Display for InvalidArgument {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", Message::new(Severity::Error, &self.reason))?;
+
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(&self.span, Option::<u8>::None)
+        )
+    }
+}
+
+impl std::error::Error for InvalidArgument {}

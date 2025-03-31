@@ -5,6 +5,7 @@ use std::{
     sync::Arc,
 };
 
+use cfg_if::cfg_if;
 use shulkerbox::prelude::{Command, Execute};
 
 use serde_json::{json, Value as JsonValue};
@@ -15,8 +16,8 @@ use crate::{
     semantic::error::{InvalidFunctionArguments, UnexpectedExpression},
     syntax::syntax_tree::expression::{Expression, FunctionCall, Primary},
     transpile::{
-        error::{IllegalIndexing, IllegalIndexingReason, LuaRuntimeError, UnknownIdentifier},
-        expression::{ComptimeValue, DataLocation, StorageType},
+        error::{IllegalIndexing, IllegalIndexingReason, UnknownIdentifier},
+        expression::{ComptimeValue, DataLocation, ExpectedType, StorageType},
         util::MacroString,
         TranspileError,
     },
@@ -210,17 +211,24 @@ fn print_function(
                 Vec::new(),
                 vec![JsonValue::String(string.str_content().to_string())],
             )),
+            #[cfg_attr(not(feature = "lua"), expect(unused_variables))]
             Primary::Lua(lua) => {
-                let (ret, _lua) = lua.eval(scope, &VoidHandler)?;
-                Ok((
-                    Vec::new(),
-                    vec![JsonValue::String(ret.to_string().map_err(|err| {
-                        TranspileError::LuaRuntimeError(LuaRuntimeError::from_lua_err(
-                            &err,
-                            lua.span(),
+                cfg_if! {
+                    if #[cfg(feature = "lua")] {
+                        let (ret, _lua) = lua.eval(scope, &VoidHandler)?;
+                        Ok((
+                            Vec::new(),
+                            vec![JsonValue::String(ret.to_string().map_err(|err| {
+                                TranspileError::LuaRuntimeError(super::error::LuaRuntimeError::from_lua_err(
+                                    &err,
+                                    lua.span(),
+                                ))
+                            })?)],
                         ))
-                    })?)],
-                ))
+                    } else {
+                        Err(TranspileError::LuaDisabled)
+                    }
+                }
             }
             Primary::Identifier(ident) => {
                 let (cur_contains_macro, cmd, part) =
@@ -244,7 +252,13 @@ fn print_function(
                                 );
                                 Ok((cmd.into_iter().collect(), vec![value]))
                             } else {
-                                todo!("allow macro string, but throw error when index is not constant string")
+                                // TODO: allow macro string, but throw error when index is not constant string
+                                Err(TranspileError::IllegalIndexing(IllegalIndexing {
+                                    reason: IllegalIndexingReason::InvalidComptimeType {
+                                        expected: ExpectedType::String,
+                                    },
+                                    expression: indexed.index().span(),
+                                }))
                             }
                         }
                         Some(VariableData::ScoreboardArray { objective, targets }) => {
@@ -274,7 +288,12 @@ fn print_function(
                                     }))
                                 }
                             } else {
-                                todo!("throw error when index is not constant integer")
+                                Err(TranspileError::IllegalIndexing(IllegalIndexing {
+                                    reason: IllegalIndexingReason::InvalidComptimeType {
+                                        expected: ExpectedType::Integer,
+                                    },
+                                    expression: indexed.index().span(),
+                                }))
                             }
                         }
                         Some(VariableData::BooleanStorageArray {
@@ -308,10 +327,18 @@ fn print_function(
                                     }))
                                 }
                             } else {
-                                todo!("throw error when index is not constant integer")
+                                Err(TranspileError::IllegalIndexing(IllegalIndexing {
+                                    reason: IllegalIndexingReason::InvalidComptimeType {
+                                        expected: ExpectedType::Integer,
+                                    },
+                                    expression: indexed.index().span(),
+                                }))
                             }
                         }
-                        _ => todo!("catch illegal indexing"),
+                        _ => Err(TranspileError::IllegalIndexing(IllegalIndexing {
+                            reason: IllegalIndexingReason::NotIndexable,
+                            expression: indexed.object().span(),
+                        })),
                     }
                 }
                 _ => Err(TranspileError::IllegalIndexing(IllegalIndexing {
@@ -339,9 +366,43 @@ fn print_function(
                 Ok((cmds, parts))
             }
 
-            _ => todo!("print_function Primary"),
+            primary => {
+                let (storage_name, mut storage_paths) = transpiler.get_temp_storage_locations(1);
+                let location = DataLocation::Storage {
+                    storage_name,
+                    path: std::mem::take(&mut storage_paths[0]),
+                    r#type: StorageType::Int,
+                };
+                let cmds = transpiler.transpile_primary_expression(
+                    primary,
+                    &location,
+                    scope,
+                    &VoidHandler,
+                )?;
+                let (cmd, part) = get_data_location(&location, transpiler);
+
+                Ok((
+                    cmds.into_iter().chain(cmd.into_iter()).collect(),
+                    vec![part],
+                ))
+            }
         },
-        Expression::Binary(_) => todo!("print_function Binary"),
+        Expression::Binary(binary) => {
+            let (storage_name, mut storage_paths) = transpiler.get_temp_storage_locations(1);
+            let location = DataLocation::Storage {
+                storage_name,
+                path: std::mem::take(&mut storage_paths[0]),
+                r#type: StorageType::Int,
+            };
+            let cmds =
+                transpiler.transpile_binary_expression(binary, &location, scope, &VoidHandler)?;
+            let (cmd, part) = get_data_location(&location, transpiler);
+
+            Ok((
+                cmds.into_iter().chain(cmd.into_iter()).collect(),
+                vec![part],
+            ))
+        }
     }?;
 
     // TODO: prepend prefix with datapack name to parts and remove following

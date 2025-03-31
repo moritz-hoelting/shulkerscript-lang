@@ -16,7 +16,7 @@ use crate::{
 #[doc(hidden)]
 #[cfg(feature = "shulkerbox")]
 pub mod conversions;
-mod error;
+pub mod error;
 
 pub mod expression;
 
@@ -58,7 +58,7 @@ pub struct FunctionData {
 
 /// Possible values for an annotation.
 #[expect(clippy::module_name_repetitions)]
-#[derive(Debug, Clone, PartialEq, Eq, EnumIs)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, EnumIs)]
 pub enum TranspileAnnotationValue {
     /// No value.
     None,

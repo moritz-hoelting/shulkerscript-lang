@@ -1,7 +1,5 @@
 //! Execute block statement syntax tree.
 
-use std::collections::HashSet;
-
 use derive_more::From;
 use enum_as_inner::EnumAsInner;
 use getset::Getters;
@@ -998,10 +996,10 @@ pub trait ExecuteBlockHeadItem {
     #[expect(clippy::missing_errors_doc)]
     fn analyze_semantics(
         &self,
-        macro_names: &HashSet<String>,
+        scope: &crate::semantic::SemanticScope,
         handler: &impl Handler<base::Error>,
     ) -> Result<(), crate::semantic::error::Error> {
-        self.selector().analyze_semantics(macro_names, handler)
+        self.selector().analyze_semantics(scope, handler)
     }
 }
 

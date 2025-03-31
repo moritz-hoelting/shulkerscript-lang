@@ -85,7 +85,7 @@ impl Display for ValueType {
 }
 
 #[allow(missing_docs)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExpectedType {
     Boolean,
     Integer,
@@ -915,7 +915,7 @@ impl Transpiler {
         }
     }
 
-    fn transpile_binary_expression(
+    pub(super) fn transpile_binary_expression(
         &mut self,
         binary: &Binary,
         target: &DataLocation,

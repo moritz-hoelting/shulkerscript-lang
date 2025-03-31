@@ -247,6 +247,14 @@ impl SourceElement for Parenthesized {
     }
 }
 
+impl std::ops::Deref for Parenthesized {
+    type Target = Expression;
+
+    fn deref(&self) -> &Self::Target {
+        &self.expression
+    }
+}
+
 /// Represents a indexed expression in the syntax tree.
 ///
 /// Syntax Synopsis:    

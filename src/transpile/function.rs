@@ -361,7 +361,18 @@ impl Transpiler {
                                         path: std::mem::take(&mut temp_path[0]),
                                     })
                                 }
-                                _ => todo!("other variable types"),
+                                _ => {
+                                    let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                                        expression: expression.span(),
+                                        expected_type: ExpectedType::AnyOf(vec![
+                                            ExpectedType::Integer,
+                                            ExpectedType::Boolean,
+                                            ExpectedType::String,
+                                        ]),
+                                    });
+                                    handler.receive(err.clone());
+                                    Err(err)
+                                }
                             }
                         }
                         Expression::Primary(

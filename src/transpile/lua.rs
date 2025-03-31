@@ -12,7 +12,7 @@ mod enabled {
         syntax::syntax_tree::expression::LuaCode,
         transpile::{
             error::{
-                LuaRuntimeError, MismatchedTypes, TranspileError, TranspileResult,
+                InvalidArgument, LuaRuntimeError, MismatchedTypes, TranspileError, TranspileResult,
                 UnknownIdentifier,
             },
             expression::{ComptimeValue, ExpectedType},
@@ -263,7 +263,11 @@ mod enabled {
                     Value::Table(table)
                 }
                 Some(VariableData::Function { .. } | VariableData::InternalFunction { .. }) => {
-                    todo!("(internal) functions are not supported yet");
+                    // TODO: add support for functions
+                    return Err(TranspileError::InvalidArgument(InvalidArgument {
+                        reason: "functions cannot be passed to Lua".to_string(),
+                        span: identifier.span(),
+                    }));
                 }
                 None => {
                     return Err(TranspileError::UnknownIdentifier(UnknownIdentifier {
@@ -397,7 +401,7 @@ mod disabled {
             &self,
             scope: &Arc<Scope>,
             handler: &impl Handler<base::Error>,
-        ) -> TranspileResult<()> {
+        ) -> TranspileResult<((), ())> {
             let _ = scope;
             handler.receive(TranspileError::LuaDisabled);
             tracing::error!("Lua code evaluation is disabled");

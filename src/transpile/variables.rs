@@ -489,7 +489,15 @@ impl Transpiler {
                         target: s,
                     }),
                     Some(ComptimeValue::MacroString(s)) => {
-                        todo!("indexing scoreboard with macro string: {s:?}")
+                        // TODO: allow indexing with macro string
+                        let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                            reason: IllegalIndexingReason::InvalidComptimeType {
+                                expected: ExpectedType::String,
+                            },
+                            expression: expression.span(),
+                        });
+                        handler.receive(err.clone());
+                        return Err(err);
                     }
                     Some(_) => {
                         let err = TranspileError::IllegalIndexing(IllegalIndexing {
@@ -621,7 +629,15 @@ impl Transpiler {
                         entity: s,
                     }),
                     Some(ComptimeValue::MacroString(s)) => {
-                        todo!("indexing tag with macro string: {s:?}")
+                        // TODO: allow indexing tag with macro string
+                        let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                            expression: expression.span(),
+                            reason: IllegalIndexingReason::InvalidComptimeType {
+                                expected: ExpectedType::String,
+                            },
+                        });
+                        handler.receive(err.clone());
+                        return Err(err);
                     }
                     Some(_) => {
                         let err = TranspileError::IllegalIndexing(IllegalIndexing {
@@ -931,7 +947,15 @@ impl Transpiler {
                     Ok((name, targets))
                 }
                 TranspileAnnotationValue::Map(map) => {
-                    todo!("allow map deobfuscate annotation for array variables")
+                    // TODO: implement when map deobfuscate annotation is implemented
+                    let error =
+                        TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                            annotation: deobfuscate_annotation.span(),
+                            message: "Deobfuscate annotation value must be a string or none."
+                                .to_string(),
+                        });
+                    handler.receive(error.clone());
+                    Err(error)
                 }
                 TranspileAnnotationValue::Expression(_) => {
                     let error =

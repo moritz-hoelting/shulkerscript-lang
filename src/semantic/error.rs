@@ -2,10 +2,7 @@
 
 #![allow(missing_docs)]
 
-use std::{collections::HashSet, fmt::Display};
-
-use getset::Getters;
-use itertools::Itertools as _;
+use std::fmt::Display;
 
 use crate::{
     base::{
@@ -14,6 +11,10 @@ use crate::{
     },
     lexical::token::StringLiteral,
     syntax::syntax_tree::expression::Expression,
+    transpile::error::{
+        AssignmentError, IllegalIndexing, MismatchedTypes, MissingFunctionDeclaration,
+        UnknownIdentifier,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
@@ -31,76 +32,19 @@ pub enum Error {
     UnresolvedMacroUsage(#[from] UnresolvedMacroUsage),
     #[error(transparent)]
     IncompatibleFunctionAnnotation(#[from] IncompatibleFunctionAnnotation),
+    #[error(transparent)]
+    IllegalIndexing(#[from] IllegalIndexing),
+    #[error(transparent)]
+    MismatchedTypes(#[from] MismatchedTypes),
+    #[error(transparent)]
+    UnknownIdentifier(#[from] UnknownIdentifier),
+    #[error(transparent)]
+    AssignmentError(#[from] AssignmentError),
+    #[error("Lua is disabled, but a Lua function was used.")]
+    LuaDisabled,
+    #[error("Other: {0}")]
+    Other(String),
 }
-
-// TODO: remove duplicate error (also in transpile)
-/// An error that occurs when a function declaration is missing.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Getters)]
-pub struct MissingFunctionDeclaration {
-    #[get = "pub"]
-    span: Span,
-    #[get = "pub"]
-    alternatives: Vec<String>,
-}
-
-impl MissingFunctionDeclaration {
-    #[expect(dead_code)]
-    pub(super) fn from_context(identifier_span: Span, functions: &HashSet<String>) -> Self {
-        let own_name = identifier_span.str();
-        let alternatives = functions
-            .iter()
-            .filter_map(|function_name| {
-                let normalized_distance =
-                    strsim::normalized_damerau_levenshtein(own_name, function_name);
-                (normalized_distance > 0.8
-                    || strsim::damerau_levenshtein(own_name, function_name) < 3)
-                    .then_some((normalized_distance, function_name))
-            })
-            .sorted_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
-            .map(|(_, data)| data)
-            .take(8)
-            .cloned()
-            .collect::<Vec<_>>();
-
-        Self {
-            alternatives,
-            span: identifier_span,
-        }
-    }
-}
-
-impl Display for MissingFunctionDeclaration {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use std::fmt::Write;
-
-        let message = format!(
-            "no matching function declaration found for invocation of function `{}`",
-            self.span.str()
-        );
-        write!(f, "{}", Message::new(Severity::Error, message))?;
-
-        let help_message = if self.alternatives.is_empty() {
-            None
-        } else {
-            let mut message = String::from("did you mean ");
-            for (i, alternative) in self.alternatives.iter().enumerate() {
-                if i > 0 {
-                    message.push_str(", ");
-                }
-                write!(message, "`{alternative}`")?;
-            }
-            Some(message + "?")
-        };
-
-        write!(
-            f,
-            "\n{}",
-            SourceCodeDisplay::new(&self.span, help_message.as_ref())
-        )
-    }
-}
-
-impl std::error::Error for MissingFunctionDeclaration {}
 
 /// An error that occurs when a function declaration is missing.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
