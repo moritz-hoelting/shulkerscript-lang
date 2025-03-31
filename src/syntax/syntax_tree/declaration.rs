@@ -253,7 +253,7 @@ impl SourceElement for Import {
 ///
 /// ``` ebnf
 /// TagDeclaration:
-///     'tag' StringLiteral ('of' StringLiteral)? 'replace'? '[' (StringLiteral (',' StringLiteral)*)? ']'
+///     'tag' ('<' StringLiteral '>')? StringLiteral 'replace'? '[' (StringLiteral (',' StringLiteral)*)? ']'
 ///     ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -262,9 +262,9 @@ pub struct Tag {
     #[get = "pub"]
     tag_keyword: Keyword,
     #[get = "pub"]
-    name: StringLiteral,
+    of_type: Option<(Punctuation, StringLiteral, Punctuation)>,
     #[get = "pub"]
-    of_type: Option<(Keyword, StringLiteral)>,
+    name: StringLiteral,
     #[get = "pub"]
     replace: Option<Keyword>,
     #[get = "pub"]
@@ -278,15 +278,15 @@ impl Tag {
         self,
     ) -> (
         Keyword,
+        Option<(Punctuation, StringLiteral, Punctuation)>,
         StringLiteral,
-        Option<(Keyword, StringLiteral)>,
         Option<Keyword>,
         DelimitedList<StringLiteral>,
     ) {
         (
             self.tag_keyword,
-            self.name,
             self.of_type,
+            self.name,
             self.replace,
             self.entries,
         )
@@ -299,7 +299,7 @@ impl Tag {
 
         self.of_type
             .as_ref()
-            .map_or(TagType::Function, |(_, tag_type)| {
+            .map_or(TagType::Function, |(_, tag_type, _)| {
                 match tag_type.str_content().as_ref() {
                     "function" => TagType::Function,
                     "block" => TagType::Block,
@@ -419,17 +419,23 @@ impl Parser<'_> {
                 // eat the tag keyword
                 self.forward();
 
+                let of_type = match self.stop_at_significant() {
+                    Reading::Atomic(Token::Punctuation(punc)) if punc.punctuation == '<' => {
+                        // eat the open bracket
+                        self.forward();
+
+                        let of_type = self.parse_string_literal(handler)?;
+
+                        // eat the close bracket
+                        let closing = self.parse_punctuation('>', true, handler)?;
+
+                        Some((punc, of_type, closing))
+                    }
+                    _ => None,
+                };
+
                 // parse the name
                 let name = self.parse_string_literal(handler)?;
-
-                let of_type = self
-                    .try_parse(|parser| {
-                        let of_keyword = parser.parse_keyword(KeywordKind::Of, &VoidHandler)?;
-                        let of_type = parser.parse_string_literal(handler)?;
-
-                        Ok((of_keyword, of_type))
-                    })
-                    .ok();
 
                 let replace = self
                     .try_parse(|parser| parser.parse_keyword(KeywordKind::Replace, &VoidHandler))
@@ -444,8 +450,8 @@ impl Parser<'_> {
 
                 Ok(Declaration::Tag(Tag {
                     tag_keyword,
-                    name,
                     of_type,
+                    name,
                     replace,
                     entries,
                 }))

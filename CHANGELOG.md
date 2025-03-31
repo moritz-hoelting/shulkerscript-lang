@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Change the syntax to set the type of a tag from `tag "[name]" of "[type]"` to `tag<"[type]"> "[name]"`
+    - Remove the keyword `of`
 - Option to deduplicate source files during serialization when using `SerdeWrapper`
 
 ### Removed
