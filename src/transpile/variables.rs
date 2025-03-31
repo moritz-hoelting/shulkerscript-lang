@@ -33,14 +33,14 @@ use super::{
         MismatchedTypes,
     },
     expression::{ComptimeValue, DataLocation, ExpectedType, StorageType},
-    internal_functions::InternalFunction,
     FunctionData, TranspileAnnotationValue, TranspileError, TranspileResult,
 };
 
 #[cfg(feature = "shulkerbox")]
-use super::Transpiler;
+use super::{internal_functions::InternalFunction, Transpiler};
 
 /// Stores the data required to access a variable.
+#[cfg(feature = "shulkerbox")]
 #[derive(Debug, Clone, EnumAsInner)]
 pub enum VariableData {
     /// A function.
@@ -122,6 +122,7 @@ impl<'a> From<&'a AssignmentDestination> for TranspileAssignmentTarget<'a> {
 }
 
 /// A scope that stores variables.
+#[cfg(feature = "shulkerbox")]
 #[derive(Default)]
 pub struct Scope<'a> {
     /// Parent scope where variables are inherited from.
@@ -132,6 +133,7 @@ pub struct Scope<'a> {
     shadowed: RwLock<HashMap<String, usize>>,
 }
 
+#[cfg(feature = "shulkerbox")]
 impl<'a> Scope<'a> {
     /// Creates a new scope.
     #[must_use]
@@ -226,6 +228,7 @@ impl<'a> Scope<'a> {
     }
 }
 
+#[cfg(feature = "shulkerbox")]
 impl Debug for Scope<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         struct VariableWrapper<'a>(&'a RwLock<HashMap<String, Arc<VariableData>>>);

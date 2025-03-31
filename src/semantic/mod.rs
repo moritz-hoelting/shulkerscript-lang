@@ -20,7 +20,10 @@ use crate::{
         AnyStringLiteral,
     },
     transpile::{
-        error::{AssignmentError, IllegalIndexing, MismatchedTypes, UnknownIdentifier},
+        error::{
+            AssignmentError, IllegalIndexing, IllegalIndexingReason, MismatchedTypes,
+            UnknownIdentifier,
+        },
         expression::{ExpectedType, ValueType},
     },
 };
@@ -380,10 +383,7 @@ impl Assignment {
                 if let Some(expected) = valid_index {
                     let err = error::Error::IllegalIndexing(IllegalIndexing {
                         expression: index.span(),
-                        reason:
-                            crate::transpile::error::IllegalIndexingReason::InvalidComptimeType {
-                                expected,
-                            },
+                        reason: IllegalIndexingReason::InvalidComptimeType { expected },
                     });
                     handler.receive(err.clone());
                     return Err(err);
@@ -513,6 +513,7 @@ impl Expression {
 }
 
 impl Primary {
+    #[expect(clippy::too_many_lines)]
     fn analyze_semantics(
         &self,
         scope: &SemanticScope,
@@ -545,9 +546,58 @@ impl Primary {
                 }
             }
             Self::Indexed(indexed) => {
-                // TODO: check if target is indexable and can be indexed with given type
-                indexed.object().analyze_semantics(scope, handler)?;
-                indexed.index().analyze_semantics(scope, handler)
+                if let Self::Identifier(ident) = indexed.object().as_ref() {
+                    let variable_type = scope.get_variable(ident.span.str());
+                    match variable_type {
+                        Some(VariableType::BooleanStorageArray | VariableType::ScoreboardArray) => {
+                            if !indexed
+                                .index()
+                                .can_yield_type_semantics(ValueType::Integer, scope)
+                            {
+                                let err = error::Error::IllegalIndexing(IllegalIndexing {
+                                    reason: IllegalIndexingReason::InvalidComptimeType {
+                                        expected: ExpectedType::Integer,
+                                    },
+                                    expression: indexed.index().span(),
+                                });
+                                handler.receive(err.clone());
+                                return Err(err);
+                            }
+                        }
+                        Some(VariableType::Tag | VariableType::Scoreboard) => {
+                            if !indexed
+                                .index()
+                                .can_yield_type_semantics(ValueType::String, scope)
+                            {
+                                let err = error::Error::IllegalIndexing(IllegalIndexing {
+                                    reason: IllegalIndexingReason::InvalidComptimeType {
+                                        expected: ExpectedType::String,
+                                    },
+                                    expression: indexed.index().span(),
+                                });
+                                handler.receive(err.clone());
+                                return Err(err);
+                            }
+                        }
+                        _ => {
+                            let err = error::Error::IllegalIndexing(IllegalIndexing {
+                                reason: IllegalIndexingReason::NotIndexable,
+                                expression: indexed.object().span(),
+                            });
+                            handler.receive(err.clone());
+                            return Err(err);
+                        }
+                    }
+                    indexed.object().analyze_semantics(scope, handler)?;
+                    indexed.index().analyze_semantics(scope, handler)
+                } else {
+                    let err = error::Error::IllegalIndexing(IllegalIndexing {
+                        reason: IllegalIndexingReason::NotIdentifier,
+                        expression: indexed.object().span(),
+                    });
+                    handler.receive(err.clone());
+                    Err(err)
+                }
             }
             Self::Parenthesized(expr) => expr.analyze_semantics(scope, handler),
             Self::Prefix(prefixed) => match prefixed.operator() {
@@ -730,10 +780,11 @@ impl Binary {
 
 impl LuaCode {
     #[expect(clippy::unused_self, clippy::unnecessary_wraps)]
+    #[cfg_attr(feature = "lua", expect(unused_variables))]
     fn analyze_semantics(
         &self,
         _scope: &SemanticScope,
-        _handler: &impl Handler<base::Error>,
+        handler: &impl Handler<base::Error>,
     ) -> Result<(), error::Error> {
         cfg_if::cfg_if! {
             if #[cfg(feature = "lua")] {

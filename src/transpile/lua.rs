@@ -1,6 +1,6 @@
 //! Executes the Lua code and returns the resulting command.
 
-#[cfg(feature = "lua")]
+#[cfg(all(feature = "lua", feature = "shulkerbox"))]
 mod enabled {
     use std::sync::Arc;
 
@@ -378,7 +378,7 @@ mod enabled {
     }
 }
 
-#[cfg(not(feature = "lua"))]
+#[cfg(all(not(feature = "lua"), feature = "shulkerbox"))]
 mod disabled {
     use std::sync::Arc;
 

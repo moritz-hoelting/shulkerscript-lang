@@ -1,15 +1,8 @@
 //! The expression transpiler.
 
-use std::{fmt::Display, string::ToString, sync::Arc};
+use std::{fmt::Display, string::ToString};
 
-use super::{util::MacroString, Scope, VariableData};
-use crate::{
-    base::{self, Handler, VoidHandler},
-    lexical::token::MacroStringLiteralPart,
-    syntax::syntax_tree::expression::{
-        Binary, BinaryOperator, Expression, PrefixOperator, Primary,
-    },
-};
+use super::util::MacroString;
 
 #[cfg(feature = "shulkerbox")]
 use enum_as_inner::EnumAsInner;
@@ -20,16 +13,22 @@ use shulkerbox::prelude::{Command, Condition, Execute};
 #[cfg(feature = "shulkerbox")]
 use super::{
     error::{IllegalIndexing, IllegalIndexingReason, MismatchedTypes, UnknownIdentifier},
-    TranspileResult, Transpiler,
+    Scope, TranspileResult, Transpiler, VariableData,
 };
 #[cfg(feature = "shulkerbox")]
 use crate::{
-    base::source_file::SourceElement,
+    base::{self, source_file::SourceElement, Handler, VoidHandler},
+    lexical::token::MacroStringLiteralPart,
+    syntax::syntax_tree::expression::{
+        Binary, BinaryOperator, Expression, PrefixOperator, Primary,
+    },
     transpile::{
         error::{FunctionArgumentsNotAllowed, MissingValue},
         TranspileError,
     },
 };
+#[cfg(feature = "shulkerbox")]
+use std::sync::Arc;
 
 /// Compile-time evaluated value
 #[allow(missing_docs)]
@@ -227,6 +226,7 @@ pub enum ExtendedCondition {
     Comptime(bool),
 }
 
+#[cfg(feature = "shulkerbox")]
 impl Expression {
     /// Returns whether the expression can yield a certain type.
     #[must_use]
@@ -251,6 +251,7 @@ impl Expression {
     }
 }
 
+#[cfg(feature = "shulkerbox")]
 impl Primary {
     /// Returns whether the primary can yield a certain type.
     #[must_use]
@@ -386,6 +387,7 @@ impl Primary {
     }
 }
 
+#[cfg(feature = "shulkerbox")]
 impl Binary {
     /// Returns whether the binary can yield a certain type.
     #[must_use]

@@ -38,9 +38,12 @@ pub mod internal_functions;
 #[doc(hidden)]
 #[cfg(feature = "shulkerbox")]
 pub mod function;
+#[doc(inline)]
+#[cfg(feature = "shulkerbox")]
 pub use function::TranspiledFunctionArguments;
 
 mod variables;
+#[cfg(feature = "shulkerbox")]
 pub use variables::{Scope, VariableData};
 
 pub mod util;

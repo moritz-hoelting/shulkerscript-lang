@@ -107,7 +107,7 @@ pub fn identifier_to_scoreboard_target(ident: &str) -> std::borrow::Cow<str> {
         let new_ident = ident
             .chars()
             .map(|c| {
-                if *c != '_' && !c.is_ascii_alphanumeric() {
+                if c != '_' && !c.is_ascii_alphanumeric() {
                     '_'
                 } else {
                     c
