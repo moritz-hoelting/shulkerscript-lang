@@ -104,6 +104,8 @@ pub enum VariableData {
     ComptimeValue {
         /// The value.
         value: Arc<RwLock<Option<ComptimeValue>>>,
+        /// Whether the value is read-only.
+        read_only: bool,
     },
 }
 
@@ -258,6 +260,7 @@ impl Transpiler {
     pub(super) fn transpile_variable_declaration(
         &mut self,
         declaration: &VariableDeclaration,
+        is_global: bool,
         program_identifier: &str,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
@@ -265,6 +268,7 @@ impl Transpiler {
         match declaration {
             VariableDeclaration::Single(declaration) => self.transpile_single_variable_declaration(
                 declaration,
+                is_global,
                 program_identifier,
                 scope,
                 handler,
@@ -277,6 +281,7 @@ impl Transpiler {
             ),
             VariableDeclaration::Array(declaration) => self.transpile_array_variable_declaration(
                 declaration,
+                is_global,
                 program_identifier,
                 scope,
                 handler,
@@ -307,6 +312,7 @@ impl Transpiler {
                     declaration.identifier().span.str(),
                     VariableData::ComptimeValue {
                         value: Arc::new(RwLock::new(value)),
+                        read_only: is_global,
                     },
                 );
 
@@ -318,6 +324,7 @@ impl Transpiler {
     fn transpile_single_variable_declaration(
         &mut self,
         declaration: &SingleVariableDeclaration,
+        is_global: bool,
         program_identifier: &str,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
@@ -342,7 +349,7 @@ impl Transpiler {
                     declaration.identifier().span.str(),
                     VariableData::ScoreboardValue {
                         objective: name.clone(),
-                        target,
+                        target: target.clone(),
                     },
                 );
             }
@@ -350,25 +357,49 @@ impl Transpiler {
                 scope.set_variable(
                     declaration.identifier().span.str(),
                     VariableData::BooleanStorage {
-                        storage_name: name,
-                        path: target,
+                        storage_name: name.clone(),
+                        path: target.clone(),
                     },
                 );
             }
             _ => unreachable!("no other variable types"),
         }
 
-        declaration.assignment().as_ref().map_or_else(
-            || Ok(Vec::new()),
-            |assignment| {
-                self.transpile_assignment(
-                    TranspileAssignmentTarget::Identifier(declaration.identifier()),
-                    assignment.expression(),
-                    scope,
-                    handler,
-                )
-            },
-        )
+        if let Some(assignment) = declaration.assignment().as_ref() {
+            let cmds = self.transpile_assignment(
+                TranspileAssignmentTarget::Identifier(declaration.identifier()),
+                assignment.expression(),
+                scope,
+                handler,
+            )?;
+            if is_global {
+                let (temp_objective, temp_targets) = self.get_temp_scoreboard_locations(1);
+                let temp_target = &temp_targets[0];
+                let test_cmd = match declaration.variable_type().keyword {
+                    KeywordKind::Int => {
+                        Command::Raw(format!("scoreboard players get {name} {target}"))
+                    }
+                    KeywordKind::Bool => Command::Raw(format!("data get storage {name} {target}")),
+                    _ => unreachable!("no other variable types"),
+                };
+                let test_exists_cmd = Command::Execute(Execute::Store(
+                    format!("success score {temp_target} {temp_objective}").into(),
+                    Box::new(Execute::Run(Box::new(test_cmd))),
+                ));
+                let cond_cmd = Command::Execute(Execute::If(
+                    Condition::Atom(
+                        format!("score {temp_target} {temp_objective} matches 0").into(),
+                    ),
+                    Box::new(Execute::Run(Box::new(Command::Group(cmds)))),
+                    None,
+                ));
+                Ok(vec![test_exists_cmd, cond_cmd])
+            } else {
+                Ok(cmds)
+            }
+        } else {
+            Ok(Vec::new())
+        }
     }
 
     fn transpile_score_variable_declaration(
@@ -411,6 +442,7 @@ impl Transpiler {
     fn transpile_array_variable_declaration(
         &mut self,
         declaration: &ArrayVariableDeclaration,
+        _is_global: bool,
         program_identifier: &str,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
@@ -450,6 +482,7 @@ impl Transpiler {
         declaration.assignment().as_ref().map_or_else(
             || Ok(Vec::new()),
             |assignment| {
+                // TODO: implement global already exists check when array assignments are implemented
                 self.transpile_assignment(
                     TranspileAssignmentTarget::Identifier(declaration.identifier()),
                     assignment.expression(),
@@ -692,7 +725,15 @@ impl Transpiler {
                         return Err(err);
                     }
                 },
-                VariableData::ComptimeValue { value } => {
+                VariableData::ComptimeValue { value, read_only } => {
+                    if *read_only {
+                        let err = TranspileError::AssignmentError(AssignmentError {
+                            identifier: identifier.span(),
+                            message: "Cannot assign to a read-only value.".to_string(),
+                        });
+                        handler.receive(err.clone());
+                        return Err(err);
+                    }
                     let comptime_value =
                         expression.comptime_eval(scope, handler).map_err(|err| {
                             let err = TranspileError::NotComptime(err);
@@ -1097,9 +1138,14 @@ impl Transpiler {
                     DataLocation::Storage {
                         storage_name: target_storage_name,
                         path: target_path,
-                        r#type,
+                        r#type: target_type,
                     } => {
-                        if matches!(r#type, StorageType::Boolean) {
+                        if storage_name == target_storage_name
+                            && path == target_path
+                            && r#type == target_type
+                        {
+                            Ok(Vec::new())
+                        } else if matches!(target_type, StorageType::Boolean) {
                             let cmd = Command::Raw(format!(
                                         "data modify storage {target_storage_name} {target_path} set from storage {storage_name} {path}"
                                     ));
@@ -1123,10 +1169,14 @@ impl Transpiler {
                     objective: target_objective,
                     target: target_target,
                 } => {
-                    let cmd = Command::Raw(format!(
-                        "scoreboard players operation {target_target} {target_objective} = {score_target} {objective}"
-                    ));
-                    Ok(vec![cmd])
+                    if objective == target_objective && score_target == target_target {
+                        Ok(Vec::new())
+                    } else {
+                        let cmd = Command::Raw(format!(
+                            "scoreboard players operation {target_target} {target_objective} = {score_target} {objective}"
+                        ));
+                        Ok(vec![cmd])
+                    }
                 }
                 DataLocation::Storage {
                     storage_name,

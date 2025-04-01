@@ -23,7 +23,10 @@ use crate::{
     },
 };
 
-use super::{statement::Block, Annotation, ConnectedList, DelimitedList};
+use super::{
+    statement::{Block, VariableDeclaration},
+    Annotation, ConnectedList, DelimitedList,
+};
 
 /// Represents a declaration in the syntax tree.
 ///
@@ -31,8 +34,10 @@ use super::{statement::Block, Annotation, ConnectedList, DelimitedList};
 ///
 /// ``` ebnf
 /// Declaration:
-///    Function
-///    | Import
+///     Function
+///     | Import
+///     | Tag
+///     | (VariableDeclaration ';')
 ///   ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -41,6 +46,7 @@ pub enum Declaration {
     Function(Function),
     Import(Import),
     Tag(Tag),
+    GlobalVariable((VariableDeclaration, Punctuation)),
 }
 
 impl SourceElement for Declaration {
@@ -49,6 +55,10 @@ impl SourceElement for Declaration {
             Self::Function(function) => function.span(),
             Self::Import(import) => import.span(),
             Self::Tag(tag) => tag.span(),
+            Self::GlobalVariable((variable, semicolon)) => variable
+                .span()
+                .join(&semicolon.span)
+                .expect("invalid declaration span"),
         }
     }
 }
@@ -59,12 +69,16 @@ impl Declaration {
     /// # Errors
     /// - if the annotation is invalid for the target declaration.
     pub fn with_annotation(self, annotation: Annotation) -> ParseResult<Self> {
-        #[expect(clippy::single_match_else)]
         match self {
             Self::Function(mut function) => {
                 function.annotations.push_front(annotation);
 
                 Ok(Self::Function(function))
+            }
+            Self::GlobalVariable((var, semi)) => {
+                let var_with_annotation = var.with_annotation(annotation)?;
+
+                Ok(Self::GlobalVariable((var_with_annotation, semi)))
             }
             _ => {
                 let err = Error::InvalidAnnotation(InvalidAnnotation {
@@ -455,6 +469,18 @@ impl Parser<'_> {
                     replace,
                     entries,
                 }))
+            }
+
+            Reading::Atomic(Token::Keyword(keyword))
+                if matches!(
+                    keyword.keyword,
+                    KeywordKind::Int | KeywordKind::Bool | KeywordKind::Val
+                ) =>
+            {
+                let var = self.parse_variable_declaration(handler)?;
+                let semi = self.parse_punctuation(';', true, handler)?;
+
+                Ok(Declaration::GlobalVariable((var, semi)))
             }
 
             unexpected => {

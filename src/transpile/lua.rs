@@ -266,7 +266,10 @@ mod enabled {
                         .map_err(|err| LuaRuntimeError::from_lua_err(&err, self.span()))?;
                     Value::Table(table)
                 }
-                Some(VariableData::ComptimeValue { value }) => {
+                Some(VariableData::ComptimeValue {
+                    value,
+                    read_only: _,
+                }) => {
                     let value = value.read().unwrap();
                     match &*value {
                         Some(ComptimeValue::Boolean(b)) => Value::Boolean(*b),

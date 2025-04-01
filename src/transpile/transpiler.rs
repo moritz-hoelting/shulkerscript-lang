@@ -87,7 +87,7 @@ impl Transpiler {
                 .entry(program_identifier)
                 .or_insert_with(Scope::with_internal_functions)
                 .to_owned();
-            self.transpile_program_declarations(program, &scope, handler);
+            self.transpile_program_declarations(program, &scope, handler)?;
         }
 
         let mut always_transpile_functions = Vec::new();
@@ -143,12 +143,14 @@ impl Transpiler {
         program: &ProgramFile,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
-    ) {
+    ) -> TranspileResult<()> {
         let namespace = program.namespace();
 
         for declaration in program.declarations() {
-            self.transpile_declaration(declaration, namespace, scope, handler);
+            self.transpile_declaration(declaration, namespace, scope, handler)?;
         }
+
+        Ok(())
     }
 
     /// Transpiles the given declaration.
@@ -159,7 +161,7 @@ impl Transpiler {
         namespace: &Namespace,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
-    ) {
+    ) -> TranspileResult<()> {
         let program_identifier = declaration.span().source_file().identifier().clone();
         match declaration {
             Declaration::Function(function) => {
@@ -241,9 +243,21 @@ impl Transpiler {
                 if tag.replace().is_some() {
                     sb_tag.set_replace(true);
                 }
-                // TODO: handle global variables
+            }
+            Declaration::GlobalVariable((declaration, _)) => {
+                let setup_variable_cmds = self.transpile_variable_declaration(
+                    declaration,
+                    true,
+                    &program_identifier,
+                    scope,
+                    handler,
+                )?;
+
+                self.setup_cmds.extend(setup_variable_cmds);
             }
         };
+
+        Ok(())
     }
 
     pub(super) fn transpile_statement(
@@ -317,9 +331,14 @@ impl Transpiler {
                         Err(error)
                     }
                 },
-                SemicolonStatement::VariableDeclaration(decl) => {
-                    self.transpile_variable_declaration(decl, program_identifier, scope, handler)
-                }
+                SemicolonStatement::VariableDeclaration(decl) => self
+                    .transpile_variable_declaration(
+                        decl,
+                        false,
+                        program_identifier,
+                        scope,
+                        handler,
+                    ),
                 SemicolonStatement::Assignment(assignment) => self.transpile_assignment(
                     TranspileAssignmentTarget::from(assignment.destination()),
                     assignment.expression(),
@@ -344,24 +363,25 @@ impl Transpiler {
             }
             Expression::Primary(Primary::Identifier(ident)) => {
                 match scope.get_variable(ident.span.str()).as_deref() {
-                    Some(VariableData::ComptimeValue { value }) => {
-                        value.read().unwrap().as_ref().map_or_else(
-                            || {
-                                let error = TranspileError::MissingValue(MissingValue {
-                                    expression: ident.span.clone(),
-                                });
-                                handler.receive(error.clone());
-                                Err(error)
-                            },
-                            |val| {
-                                let cmd = val.to_string_no_macro().map_or_else(
-                                    || Command::UsesMacro(val.to_macro_string().into()),
-                                    Command::Raw,
-                                );
-                                Ok(vec![cmd])
-                            },
-                        )
-                    }
+                    Some(VariableData::ComptimeValue {
+                        value,
+                        read_only: _,
+                    }) => value.read().unwrap().as_ref().map_or_else(
+                        || {
+                            let error = TranspileError::MissingValue(MissingValue {
+                                expression: ident.span.clone(),
+                            });
+                            handler.receive(error.clone());
+                            Err(error)
+                        },
+                        |val| {
+                            let cmd = val.to_string_no_macro().map_or_else(
+                                || Command::UsesMacro(val.to_macro_string().into()),
+                                Command::Raw,
+                            );
+                            Ok(vec![cmd])
+                        },
+                    ),
                     Some(_) => {
                         let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
                             expression.clone(),

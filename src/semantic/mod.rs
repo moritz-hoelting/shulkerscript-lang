@@ -99,6 +99,25 @@ impl Declaration {
                     }
                 }
             },
+            Self::GlobalVariable((var, _)) => {
+                let name = var.identifier();
+                let var_type = match var {
+                    VariableDeclaration::Array(arr) => match arr.variable_type().keyword {
+                        KeywordKind::Bool => VariableType::BooleanStorageArray,
+                        KeywordKind::Int => VariableType::ScoreboardArray,
+                        _ => unreachable!("variable type is not a valid type"),
+                    },
+                    VariableDeclaration::Score(_) => VariableType::Scoreboard,
+                    VariableDeclaration::Tag(_) => VariableType::Tag,
+                    VariableDeclaration::Single(single) => match single.variable_type().keyword {
+                        KeywordKind::Bool => VariableType::BooleanStorage,
+                        KeywordKind::Int => VariableType::ScoreboardValue,
+                        _ => unreachable!("variable type is not a valid type"),
+                    },
+                    VariableDeclaration::ComptimeValue(_) => VariableType::ComptimeValue,
+                };
+                scope.set_variable(name.span.str(), var_type);
+            }
             Self::Tag(_) => {}
         }
     }
@@ -136,6 +155,8 @@ impl Declaration {
                     Ok(())
                 }
             },
+
+            Self::GlobalVariable((var, _)) => var.analyze_semantics(scope, handler),
 
             Self::Tag(_) => Ok(()),
         }
@@ -549,16 +570,26 @@ impl Primary {
             Self::Boolean(_) | Self::Integer(_) | Self::StringLiteral(_) => Ok(()),
             Self::MacroStringLiteral(lit) => lit.analyze_semantics(scope, handler),
             Self::FunctionCall(call) => {
-                if scope.get_variable(call.identifier().span.str()) == Some(VariableType::Function)
-                {
-                    Ok(())
-                } else {
-                    let err = error::Error::UnknownIdentifier(UnknownIdentifier {
-                        identifier: call.identifier().span.clone(),
-                    });
-                    handler.receive(err.clone());
-                    Err(err)
-                }
+                let var = scope.get_variable(call.identifier().span.str());
+                var.map_or_else(
+                    || {
+                        let err = error::Error::UnknownIdentifier(UnknownIdentifier {
+                            identifier: call.identifier().span.clone(),
+                        });
+                        handler.receive(err.clone());
+                        Err(err)
+                    },
+                    |var| match var {
+                        VariableType::Function | VariableType::InternalFunction => Ok(()),
+                        _ => {
+                            let err = error::Error::UnexpectedExpression(UnexpectedExpression(
+                                Expression::Primary(self.clone()),
+                            ));
+                            handler.receive(err.clone());
+                            Err(err)
+                        }
+                    },
+                )
             }
             Self::Indexed(indexed) => {
                 if let Self::Identifier(ident) = indexed.object().as_ref() {

@@ -358,11 +358,12 @@ impl Primary {
                     })
                 },
                 |var| match var.as_ref() {
-                    VariableData::ComptimeValue { value } => {
-                        value.read().unwrap().clone().ok_or_else(|| NotComptime {
-                            expression: ident.span.clone(),
-                        })
-                    }
+                    VariableData::ComptimeValue {
+                        value,
+                        read_only: _,
+                    } => value.read().unwrap().clone().ok_or_else(|| NotComptime {
+                        expression: ident.span.clone(),
+                    }),
                     _ => Err(NotComptime {
                         expression: self.span(),
                     }),
@@ -1276,6 +1277,7 @@ impl Transpiler {
         }
     }
 
+    #[expect(clippy::too_many_lines)]
     fn transpile_scoreboard_operation(
         &mut self,
         binary: &Binary,
@@ -1303,20 +1305,38 @@ impl Transpiler {
             scope,
             handler,
         )?;
-        let right_cmds = self.transpile_expression(
-            right,
-            &DataLocation::ScoreboardValue {
-                objective: temp_objective.clone(),
-                target: temp_locations[1].clone(),
-            },
-            scope,
-            handler,
-        )?;
+
+        let (right_cmds, rhs_score) =
+            if let Ok(ComptimeValue::Integer(int)) = right.comptime_eval(scope, handler) {
+                self.initialize_constant_score(int);
+                (
+                    Vec::new(),
+                    ("shu_constants", std::borrow::Cow::Owned(int.to_string())),
+                )
+            } else {
+                let right_cmds = self.transpile_expression(
+                    right,
+                    &DataLocation::ScoreboardValue {
+                        objective: temp_objective.clone(),
+                        target: temp_locations[1].clone(),
+                    },
+                    scope,
+                    handler,
+                )?;
+
+                (
+                    right_cmds,
+                    (
+                        temp_objective.as_str(),
+                        std::borrow::Cow::Borrowed(&temp_locations[1]),
+                    ),
+                )
+            };
 
         let calc_cmds = {
             let (target_objective, target) = score_target_location;
-            let source = &temp_locations[1];
-            let source_objective = &temp_objective;
+            let source = rhs_score.1.as_ref();
+            let source_objective = rhs_score.0;
 
             let operation = match operator {
                 BinaryOperator::Add(_) => "+=",
