@@ -37,7 +37,7 @@ use super::{
 ///     Function
 ///     | Import
 ///     | Tag
-///     | (VariableDeclaration ';')
+///     | ('pub'? VariableDeclaration ';')
 ///   ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -46,7 +46,7 @@ pub enum Declaration {
     Function(Function),
     Import(Import),
     Tag(Tag),
-    GlobalVariable((VariableDeclaration, Punctuation)),
+    GlobalVariable((Option<Keyword>, VariableDeclaration, Punctuation)),
 }
 
 impl SourceElement for Declaration {
@@ -55,8 +55,9 @@ impl SourceElement for Declaration {
             Self::Function(function) => function.span(),
             Self::Import(import) => import.span(),
             Self::Tag(tag) => tag.span(),
-            Self::GlobalVariable((variable, semicolon)) => variable
-                .span()
+            Self::GlobalVariable((pub_kw, variable, semicolon)) => pub_kw
+                .as_ref()
+                .map_or_else(|| variable.span(), SourceElement::span)
                 .join(&semicolon.span)
                 .expect("invalid declaration span"),
         }
@@ -75,10 +76,10 @@ impl Declaration {
 
                 Ok(Self::Function(function))
             }
-            Self::GlobalVariable((var, semi)) => {
+            Self::GlobalVariable((pub_kw, var, semi)) => {
                 let var_with_annotation = var.with_annotation(annotation)?;
 
-                Ok(Self::GlobalVariable((var_with_annotation, semi)))
+                Ok(Self::GlobalVariable((pub_kw, var_with_annotation, semi)))
             }
             _ => {
                 let err = Error::InvalidAnnotation(InvalidAnnotation {
@@ -356,11 +357,19 @@ impl Parser<'_> {
             Reading::Atomic(Token::Keyword(pub_keyword))
                 if pub_keyword.keyword == KeywordKind::Pub =>
             {
-                let function = self.parse_function(handler)?;
+                if let Ok(function) = self.try_parse(|parser| parser.parse_function(&VoidHandler)) {
+                    tracing::trace!("Parsed function '{:?}'", function.identifier.span.str());
 
-                tracing::trace!("Parsed function '{:?}'", function.identifier.span.str());
+                    Ok(Declaration::Function(function))
+                } else {
+                    // eat the pub keyword
+                    self.forward();
 
-                Ok(Declaration::Function(function))
+                    let var = self.parse_variable_declaration(handler)?;
+                    let semi = self.parse_punctuation(';', true, handler)?;
+
+                    Ok(Declaration::GlobalVariable((Some(pub_keyword), var, semi)))
+                }
             }
 
             // parse annotations
@@ -480,7 +489,7 @@ impl Parser<'_> {
                 let var = self.parse_variable_declaration(handler)?;
                 let semi = self.parse_punctuation(';', true, handler)?;
 
-                Ok(Declaration::GlobalVariable((var, semi)))
+                Ok(Declaration::GlobalVariable((None, var, semi)))
             }
 
             unexpected => {

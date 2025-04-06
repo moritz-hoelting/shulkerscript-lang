@@ -115,9 +115,6 @@ pub fn parse(
 
 /// Transpiles the given source code into a shulkerbox [`Datapack`].
 ///
-/// # Parameters:
-/// - `script_paths`: A list of tuples containing the identifier and the path of each script file.
-///
 /// # Errors
 /// - If an error occurs during [`parse()`]
 /// - If an error occurs while transpiling the source code.
@@ -164,15 +161,7 @@ where
 
             Ok(program)
         })
-        .collect::<Vec<_>>();
-
-    if programs.iter().any(Result::is_err) {
-        return Err(programs.into_iter().find_map(Result::err).unwrap());
-    }
-    let programs = programs
-        .into_iter()
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>>>()?;
 
     tracing::info!("Transpiling the source code.");
 

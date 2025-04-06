@@ -1,6 +1,6 @@
 use chksum_md5 as md5;
 use enum_as_inner::EnumAsInner;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{borrow::ToOwned, collections::BTreeMap, sync::Arc};
 
 use shulkerbox::datapack::{Command, Execute};
 
@@ -48,41 +48,27 @@ impl Transpiler {
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<(String, TranspiledFunctionArguments)> {
         let program_identifier = identifier_span.source_file().identifier();
-        let program_query = (
-            program_identifier.to_string(),
-            identifier_span.str().to_string(),
-        );
-        let alias_query = self.aliases.get(&program_query).cloned();
-        let already_transpiled = scope
-            .get_variable(identifier_span.str())
+        let function = scope.get_variable(identifier_span.str());
+        let already_transpiled = function
+            .as_ref()
             .expect("called function should be in scope")
             .as_ref()
             .as_function()
-            .map(|(_, path)| path.get().is_some())
+            .map(|(_, path, _)| path.get().is_some())
             .expect("called variable should be of type function");
 
-        let function_data = scope
-            .get_variable(identifier_span.str())
-            .or_else(|| {
-                alias_query
-                    .clone()
-                    .and_then(|(alias_program_identifier, alias_function_name)| {
-                        self.scopes
-                            .get(&alias_program_identifier)
-                            .and_then(|s| s.get_variable(&alias_function_name))
-                    })
-            })
-            .ok_or_else(|| {
-                let error = TranspileError::MissingFunctionDeclaration(
-                    MissingFunctionDeclaration::from_scope(identifier_span.clone(), scope),
-                );
-                handler.receive(error.clone());
-                error
-            })?;
+        let function_data = function.ok_or_else(|| {
+            let error = TranspileError::MissingFunctionDeclaration(
+                MissingFunctionDeclaration::from_scope(identifier_span.clone(), scope),
+            );
+            handler.receive(error.clone());
+            error
+        })?;
 
         let VariableData::Function {
             function_data,
             path: function_path,
+            function_scope,
         } = function_data.as_ref()
         else {
             unreachable!("must be of correct type, otherwise errored out before");
@@ -134,8 +120,6 @@ impl Transpiler {
 
             function_path.set(function_location.clone()).unwrap();
 
-            let function_scope = Scope::with_parent(scope);
-
             for (i, param) in function_data.parameters.iter().enumerate() {
                 let param_str = param.identifier().span.str();
                 match param.variable_type() {
@@ -181,7 +165,7 @@ impl Transpiler {
             }
 
             let commands =
-                self.transpile_function(&statements, program_identifier, &function_scope, handler)?;
+                self.transpile_function(&statements, program_identifier, function_scope, handler)?;
 
             let namespace = self.datapack.namespace_mut(&function_data.namespace);
 

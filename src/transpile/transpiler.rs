@@ -1,7 +1,7 @@
 //! Transpiler for `Shulkerscript`
 
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     ops::Deref,
     sync::{Arc, OnceLock},
 };
@@ -40,11 +40,7 @@ pub struct Transpiler {
     pub(super) initialized_constant_scores: HashSet<i64>,
     pub(super) temp_counter: usize,
     /// Top-level [`Scope`] for each program identifier
-    pub(super) scopes: BTreeMap<String, Arc<Scope<'static>>>,
-    /// Key: (program identifier, function name)
-    pub(super) functions: BTreeMap<(String, String), FunctionData>,
-    /// Key: alias, Value: target
-    pub(super) aliases: HashMap<(String, String), (String, String)>,
+    pub(super) scopes: BTreeMap<String, Arc<Scope>>,
 }
 
 impl Transpiler {
@@ -59,8 +55,6 @@ impl Transpiler {
             initialized_constant_scores: HashSet::new(),
             temp_counter: 0,
             scopes: BTreeMap::new(),
-            functions: BTreeMap::new(),
-            aliases: HashMap::new(),
         }
     }
 
@@ -75,7 +69,11 @@ impl Transpiler {
         handler: &impl Handler<base::Error>,
     ) -> Result<Datapack, TranspileError> {
         tracing::trace!("Transpiling program declarations");
+
+        let mut aliases = Vec::new();
+
         for program in programs {
+            let mut program_aliases = BTreeMap::new();
             let program_identifier = program
                 .namespace()
                 .span()
@@ -84,17 +82,48 @@ impl Transpiler {
                 .clone();
             let scope = self
                 .scopes
-                .entry(program_identifier)
+                .entry(program_identifier.clone())
                 .or_insert_with(Scope::with_internal_functions)
                 .to_owned();
-            self.transpile_program_declarations(program, &scope, handler)?;
+            self.transpile_program_declarations(program, &mut program_aliases, &scope, handler)?;
+            aliases.push((scope.clone(), program_aliases));
+        }
+
+        for (scope, program_aliases) in aliases {
+            for (alias_name, (alias_program_identifier, actual_name)) in program_aliases {
+                if let Some(alias_scope) = self.scopes.get(&alias_program_identifier) {
+                    if let Some(var_data) = alias_scope.get_variable(&actual_name) {
+                        scope.set_arc_variable(&alias_name, var_data);
+                    } else {
+                        tracing::error!(
+                            "Importing a non-existent variable: {} from {}",
+                            actual_name,
+                            alias_program_identifier
+                        );
+                    }
+                } else {
+                    tracing::error!(
+                        "Importing from a non-existent program: {}",
+                        alias_program_identifier
+                    );
+                }
+            }
         }
 
         let mut always_transpile_functions = Vec::new();
 
         {
-            let functions = &mut self.functions;
-            for (_, data) in functions.iter() {
+            let functions = self.scopes.iter().flat_map(|(_, scope)| {
+                scope
+                    .get_local_variables()
+                    .read()
+                    .unwrap()
+                    .values()
+                    .filter_map(|data| data.as_function().map(|(data, _, _)| data))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            });
+            for data in functions {
                 let always_transpile_function = data.annotations.contains_key("tick")
                     || data.annotations.contains_key("load")
                     || data.annotations.contains_key("deobfuscate");
@@ -141,24 +170,25 @@ impl Transpiler {
     fn transpile_program_declarations(
         &mut self,
         program: &ProgramFile,
+        program_aliases: &mut BTreeMap<String, (String, String)>,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<()> {
         let namespace = program.namespace();
 
         for declaration in program.declarations() {
-            self.transpile_declaration(declaration, namespace, scope, handler)?;
+            self.transpile_declaration(declaration, namespace, program_aliases, scope, handler)?;
         }
 
         Ok(())
     }
 
     /// Transpiles the given declaration.
-    #[allow(clippy::needless_pass_by_ref_mut)]
     fn transpile_declaration(
         &mut self,
         declaration: &Declaration,
         namespace: &Namespace,
+        program_aliases: &mut BTreeMap<String, (String, String)>,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<()> {
@@ -197,19 +227,18 @@ impl Transpiler {
                 scope.set_variable(
                     &name,
                     VariableData::Function {
-                        function_data: function_data.clone(),
+                        function_data,
                         path: OnceLock::new(),
+                        function_scope: scope.clone(),
                     },
                 );
-                self.functions
-                    .insert((program_identifier, name), function_data);
             }
             Declaration::Import(import) => {
                 let path = import.module().str_content();
                 let import_identifier =
                     super::util::calculate_import_identifier(&program_identifier, path);
 
-                let aliases = &mut self.aliases;
+                // let aliases = &mut self.aliases;
 
                 match import.items() {
                     ImportItems::All(_) => {
@@ -220,8 +249,8 @@ impl Transpiler {
                     ImportItems::Named(list) => {
                         for item in list.elements() {
                             let name = item.span.str();
-                            aliases.insert(
-                                (program_identifier.clone(), name.to_string()),
+                            program_aliases.insert(
+                                name.to_string(),
                                 (import_identifier.clone(), name.to_string()),
                             );
                         }
@@ -244,7 +273,7 @@ impl Transpiler {
                     sb_tag.set_replace(true);
                 }
             }
-            Declaration::GlobalVariable((declaration, _)) => {
+            Declaration::GlobalVariable((_, declaration, _)) => {
                 let setup_variable_cmds = self.transpile_variable_declaration(
                     declaration,
                     true,
@@ -278,7 +307,7 @@ impl Transpiler {
                 unreachable!("Only literal commands are allowed in functions at this time.")
             }
             Statement::ExecuteBlock(execute) => {
-                let child_scope = Scope::with_parent(scope);
+                let child_scope = Scope::with_parent(scope.clone());
                 Ok(self.transpile_execute_block(
                     execute,
                     program_identifier,
@@ -291,7 +320,7 @@ impl Transpiler {
                 Ok(vec![Command::Comment(content.to_string())])
             }
             Statement::Grouping(group) => {
-                let child_scope = Scope::with_parent(scope);
+                let child_scope = Scope::with_parent(scope.clone());
                 let statements = group.block().statements();
                 let mut errors = Vec::new();
                 let commands = statements

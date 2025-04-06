@@ -49,6 +49,8 @@ pub enum VariableData {
         function_data: FunctionData,
         /// The path to the function once it is generated.
         path: OnceLock<String>,
+        /// The scope of the function.
+        function_scope: Arc<Scope>,
     },
     /// A macro function parameter.
     MacroParameter {
@@ -131,9 +133,9 @@ impl<'a> From<&'a AssignmentDestination> for TranspileAssignmentTarget<'a> {
 /// A scope that stores variables.
 #[cfg(feature = "shulkerbox")]
 #[derive(Default)]
-pub struct Scope<'a> {
+pub struct Scope {
     /// Parent scope where variables are inherited from.
-    parent: Option<&'a Arc<Self>>,
+    parent: Option<Arc<Self>>,
     /// Variables stored in the scope.
     variables: RwLock<HashMap<String, Arc<VariableData>>>,
     /// How many times the variable has been shadowed in the current scope.
@@ -141,7 +143,7 @@ pub struct Scope<'a> {
 }
 
 #[cfg(feature = "shulkerbox")]
-impl<'a> Scope<'a> {
+impl Scope {
     /// Creates a new scope.
     #[must_use]
     pub fn new() -> Arc<Self> {
@@ -163,7 +165,7 @@ impl<'a> Scope<'a> {
 
     /// Creates a new scope with a parent.
     #[must_use]
-    pub fn with_parent(parent: &'a Arc<Self>) -> Arc<Self> {
+    pub fn with_parent(parent: Arc<Self>) -> Arc<Self> {
         Arc::new(Self {
             parent: Some(parent),
             ..Default::default()
@@ -200,11 +202,17 @@ impl<'a> Scope<'a> {
 
     /// Sets a variable in the scope.
     pub fn set_variable(&self, name: &str, var: VariableData) {
+        self.set_arc_variable(name, Arc::new(var));
+    }
+
+    /// Sets a variable in the scope.
+    /// This function is used to set a variable that is already wrapped in an `Arc`.
+    pub fn set_arc_variable(&self, name: &str, var: Arc<VariableData>) {
         let prev = self
             .variables
             .write()
             .unwrap()
-            .insert(name.to_string(), Arc::new(var));
+            .insert(name.to_string(), var);
         *self
             .shadowed
             .write()
@@ -231,12 +239,12 @@ impl<'a> Scope<'a> {
 
     /// Gets the parent scope.
     pub fn get_parent(&self) -> Option<Arc<Self>> {
-        self.parent.cloned()
+        self.parent.clone()
     }
 }
 
 #[cfg(feature = "shulkerbox")]
-impl Debug for Scope<'_> {
+impl Debug for Scope {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         struct VariableWrapper<'a>(&'a RwLock<HashMap<String, Arc<VariableData>>>);
         impl Debug for VariableWrapper<'_> {
@@ -1263,7 +1271,7 @@ mod tests {
                 objective: "test".to_string(),
             },
         );
-        let child = Scope::with_parent(&scope);
+        let child = Scope::with_parent(scope);
         if let Some(var) = child.get_variable("test") {
             match var.as_ref() {
                 VariableData::Scoreboard { objective } => assert_eq!(objective, "test"),
@@ -1283,7 +1291,7 @@ mod tests {
                 objective: "test1".to_string(),
             },
         );
-        let child = Scope::with_parent(&scope);
+        let child = Scope::with_parent(scope);
         child.set_variable(
             "test",
             VariableData::Scoreboard {

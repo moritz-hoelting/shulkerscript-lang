@@ -61,7 +61,7 @@ fn get_global_scope(declarations: &[Declaration]) -> SemanticScope<'static> {
     let scope = SemanticScope::new();
 
     for declaration in declarations {
-        declaration.add_to_scope(&scope);
+        declaration.add_to_semantic_scope(&scope);
     }
 
     scope
@@ -83,23 +83,13 @@ impl Namespace {
 }
 
 impl Declaration {
-    fn add_to_scope(&self, scope: &SemanticScope) {
+    fn add_to_semantic_scope(&self, scope: &SemanticScope) {
         match self {
             Self::Function(func) => {
                 let name = func.identifier();
                 scope.set_variable(name.span.str(), VariableType::Function);
             }
-            Self::Import(imp) => match imp.items() {
-                ImportItems::All(_) => {}
-                ImportItems::Named(items) => {
-                    for item in items.elements() {
-                        if scope.get_variable(item.span.str()) != Some(VariableType::Function) {
-                            scope.set_variable(item.span.str(), VariableType::Function);
-                        }
-                    }
-                }
-            },
-            Self::GlobalVariable((var, _)) => {
+            Self::GlobalVariable((_, var, _)) => {
                 let name = var.identifier();
                 let var_type = match var {
                     VariableDeclaration::Array(arr) => match arr.variable_type().keyword {
@@ -118,7 +108,7 @@ impl Declaration {
                 };
                 scope.set_variable(name.span.str(), var_type);
             }
-            Self::Tag(_) => {}
+            Self::Import(_) | Self::Tag(_) => {}
         }
     }
 
@@ -156,7 +146,7 @@ impl Declaration {
                 }
             },
 
-            Self::GlobalVariable((var, _)) => var.analyze_semantics(scope, handler),
+            Self::GlobalVariable((_, var, _)) => var.analyze_semantics(scope, handler),
 
             Self::Tag(_) => Ok(()),
         }
