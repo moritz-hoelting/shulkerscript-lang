@@ -1,11 +1,12 @@
 //! Transpiler for `Shulkerscript`
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     ops::Deref,
     sync::{Arc, OnceLock},
 };
 
+use itertools::Itertools;
 use shulkerbox::datapack::{self, Command, Datapack, Execute};
 
 use crate::{
@@ -21,7 +22,10 @@ use crate::{
         },
         AnnotationAssignment,
     },
-    transpile::util::{MacroString, MacroStringPart},
+    transpile::{
+        error::IllegalAnnotationContent,
+        util::{MacroString, MacroStringPart},
+    },
 };
 
 use super::{
@@ -38,6 +42,7 @@ pub struct Transpiler {
     pub(super) datapack: shulkerbox::datapack::Datapack,
     pub(super) setup_cmds: Vec<Command>,
     pub(super) initialized_constant_scores: HashSet<i64>,
+    pub(super) temp_data_storage_locations: BTreeSet<(String, String)>,
     pub(super) temp_counter: usize,
     /// Top-level [`Scope`] for each program identifier
     pub(super) scopes: BTreeMap<String, Arc<Scope>>,
@@ -53,6 +58,7 @@ impl Transpiler {
             datapack: shulkerbox::datapack::Datapack::new(main_namespace_name, pack_format),
             setup_cmds: Vec::new(),
             initialized_constant_scores: HashSet::new(),
+            temp_data_storage_locations: BTreeSet::new(),
             temp_counter: 0,
             scopes: BTreeMap::new(),
         }
@@ -110,10 +116,10 @@ impl Transpiler {
             }
         }
 
-        let mut always_transpile_functions = Vec::new();
-
-        {
-            let functions = self.scopes.iter().flat_map(|(_, scope)| {
+        let functions = self
+            .scopes
+            .iter()
+            .flat_map(|(_, scope)| {
                 scope
                     .get_local_variables()
                     .read()
@@ -122,16 +128,24 @@ impl Transpiler {
                     .filter_map(|data| data.as_function().map(|(data, _, _)| data))
                     .cloned()
                     .collect::<Vec<_>>()
-            });
-            for data in functions {
+            })
+            .unique_by(|data| (data.namespace.clone(), data.identifier_span.clone()))
+            .collect::<Vec<_>>();
+
+        let always_transpile_functions = functions
+            .iter()
+            .filter_map(|data| {
                 let always_transpile_function = data.annotations.contains_key("tick")
                     || data.annotations.contains_key("load")
-                    || data.annotations.contains_key("deobfuscate");
+                    || data.annotations.contains_key("deobfuscate")
+                    || data.annotations.contains_key("uninstall");
                 if always_transpile_function {
-                    always_transpile_functions.push(data.identifier_span.clone());
-                };
-            }
-        }
+                    Some(data.identifier_span.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
 
         tracing::trace!(
             "Transpiling functions requested by user: {:?}",
@@ -162,6 +176,48 @@ impl Transpiler {
                 datapack::tag::TagValue::Simple(format!("{}:shu/setup", self.main_namespace_name)),
             );
         }
+
+        let uninstall_function_cmds = functions
+            .iter()
+            .filter_map(|data| data.annotations.get("uninstall").map(|val| (data, val)))
+            .map(|(function, val)| match val {
+                TranspileAnnotationValue::None(_) => {
+                    let identifier_span = &function.identifier_span;
+                    let scope = self
+                        .scopes
+                        .entry(identifier_span.source_file().identifier().to_owned())
+                        .or_insert_with(Scope::with_internal_functions)
+                        .to_owned();
+                    let (function_path, _) =
+                        self.get_or_transpile_function(identifier_span, None, &scope, handler)?;
+                    let uninstall_cmd = Command::Raw(format!("function {function_path}"));
+                    Ok(uninstall_cmd)
+                }
+                TranspileAnnotationValue::Expression(_, span)
+                | TranspileAnnotationValue::Map(_, span) => {
+                    let error =
+                        TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                            annotation: span.clone(),
+                            message: "uninstall annotation must not have a value".to_string(),
+                        });
+                    handler.receive(error.clone());
+                    Err(error)
+                }
+            })
+            .collect::<TranspileResult<Vec<_>>>()?;
+
+        self.datapack
+            .add_uninstall_commands(uninstall_function_cmds);
+
+        let temp_data_uninstall_cmds = self
+            .temp_data_storage_locations
+            .iter()
+            .map(|(storage_name, path)| {
+                Command::Raw(format!("data remove storage {storage_name} {path}"))
+            })
+            .collect();
+        self.datapack
+            .add_uninstall_commands(temp_data_uninstall_cmds);
 
         Ok(self.datapack)
     }
@@ -208,7 +264,10 @@ impl Transpiler {
                         } = annotation.assignment();
                         (
                             key.span().str().to_string(),
-                            TranspileAnnotationValue::from(value.clone()),
+                            TranspileAnnotationValue::from_annotation_value(
+                                value.clone(),
+                                &key.span,
+                            ),
                         )
                     })
                     .collect();
@@ -229,7 +288,7 @@ impl Transpiler {
                     VariableData::Function {
                         function_data,
                         path: OnceLock::new(),
-                        function_scope: scope.clone(),
+                        function_scope: Scope::with_parent(scope.clone()),
                     },
                 );
             }

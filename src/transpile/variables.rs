@@ -805,11 +805,13 @@ impl Transpiler {
             return Err(error);
         }
         if let Some(deobfuscate_annotation) = deobfuscate_annotation {
-            let deobfuscate_annotation_value =
-                TranspileAnnotationValue::from(deobfuscate_annotation.assignment().value.clone());
+            let deobfuscate_annotation_value = TranspileAnnotationValue::from_annotation_value(
+                deobfuscate_annotation.assignment().value.clone(),
+                &deobfuscate_annotation.assignment().identifier.span,
+            );
 
             match deobfuscate_annotation_value {
-                TranspileAnnotationValue::Expression(expr) => {
+                TranspileAnnotationValue::Expression(expr, _) => {
                     if let Some(name_eval) = expr
                         .comptime_eval(scope, handler)
                         .ok()
@@ -834,8 +836,8 @@ impl Transpiler {
                         Err(error)
                     }
                 }
-                TranspileAnnotationValue::None => Ok(identifier.span.str().to_string()),
-                TranspileAnnotationValue::Map(_) => {
+                TranspileAnnotationValue::None(_) => Ok(identifier.span.str().to_string()),
+                TranspileAnnotationValue::Map(_, _) => {
                     let error =
                         TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
                             annotation: deobfuscate_annotation.span(),
@@ -888,10 +890,12 @@ impl Transpiler {
             return Err(error);
         }
         if let Some(deobfuscate_annotation) = deobfuscate_annotation {
-            let deobfuscate_annotation_value =
-                TranspileAnnotationValue::from(deobfuscate_annotation.assignment().value.clone());
+            let deobfuscate_annotation_value = TranspileAnnotationValue::from_annotation_value(
+                deobfuscate_annotation.assignment().value.clone(),
+                &deobfuscate_annotation.assignment().identifier.span,
+            );
 
-            if let TranspileAnnotationValue::Map(map) = deobfuscate_annotation_value {
+            if let TranspileAnnotationValue::Map(map, _) = deobfuscate_annotation_value {
                 if map.len() > 2 {
                     let error =
                         TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
@@ -904,8 +908,8 @@ impl Transpiler {
                 }
                 if let (Some(name), Some(target)) = (map.get("name"), map.get("target")) {
                     if let (
-                        TranspileAnnotationValue::Expression(objective),
-                        TranspileAnnotationValue::Expression(target),
+                        TranspileAnnotationValue::Expression(objective, _),
+                        TranspileAnnotationValue::Expression(target, _),
                     ) = (name, target)
                     {
                         if let (Some(name_eval), Some(target_eval)) = (
@@ -1022,11 +1026,13 @@ impl Transpiler {
             return Err(error);
         }
         if let Some(deobfuscate_annotation) = deobfuscate_annotation {
-            let deobfuscate_annotation_value =
-                TranspileAnnotationValue::from(deobfuscate_annotation.assignment().value.clone());
+            let deobfuscate_annotation_value = TranspileAnnotationValue::from_annotation_value(
+                deobfuscate_annotation.assignment().value.clone(),
+                &deobfuscate_annotation.assignment().identifier.span,
+            );
 
             match deobfuscate_annotation_value {
-                TranspileAnnotationValue::None => {
+                TranspileAnnotationValue::None(_) => {
                     let ident_str = declaration.identifier().span.str();
                     let name = if matches!(variable_type, KeywordKind::Int) {
                         ident_str.to_string()
@@ -1041,7 +1047,7 @@ impl Transpiler {
                     let targets = (0..len).map(|i| i.to_string()).collect();
                     Ok((name, targets))
                 }
-                TranspileAnnotationValue::Map(map) => {
+                TranspileAnnotationValue::Map(map, _) => {
                     // TODO: implement when map deobfuscate annotation is implemented
                     let error =
                         TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
@@ -1052,7 +1058,7 @@ impl Transpiler {
                     handler.receive(error.clone());
                     Err(error)
                 }
-                TranspileAnnotationValue::Expression(_) => {
+                TranspileAnnotationValue::Expression(_, _) => {
                     let error =
                         TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
                             annotation: deobfuscate_annotation.span(),

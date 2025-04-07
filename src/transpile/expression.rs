@@ -1722,9 +1722,15 @@ impl Transpiler {
                 .to_hex_lowercase()
                 .split_off(16)
             })
-            .collect();
+            .collect::<Vec<_>>();
 
         self.temp_counter = self.temp_counter.wrapping_add(amount);
+
+        self.temp_data_storage_locations.extend(
+            paths
+                .iter()
+                .map(|path| (storage_name.clone(), path.clone())),
+        );
 
         (storage_name, paths)
     }

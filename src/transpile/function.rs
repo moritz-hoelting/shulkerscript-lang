@@ -85,8 +85,8 @@ impl Transpiler {
                     Ok("shu/".to_string() + &md5::hash(hash_data).to_hex_lowercase())
                 },
                 |val| match val {
-                    TranspileAnnotationValue::None => Ok(identifier_span.str().to_string()),
-                    TranspileAnnotationValue::Expression(expr) => expr
+                    TranspileAnnotationValue::None(_) => Ok(identifier_span.str().to_string()),
+                    TranspileAnnotationValue::Expression(expr, _) => expr
                         .comptime_eval(scope, handler)
                         .ok()
                         .and_then(|val| val.to_string_no_macro())
@@ -101,10 +101,10 @@ impl Transpiler {
                             handler.receive(err.clone());
                             err
                         }),
-                    TranspileAnnotationValue::Map(_) => {
+                    TranspileAnnotationValue::Map(_, span) => {
                         let err =
                             TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                                annotation: identifier_span.clone(),
+                                annotation: span.clone(),
                                 message: "Deobfuscate annotation cannot be a map.".to_string(),
                             });
                         handler.receive(err.clone());

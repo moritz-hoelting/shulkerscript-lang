@@ -162,16 +162,14 @@ impl Function {
         let child_scope = SemanticScope::with_parent(scope);
 
         if let Some(parameters) = self.parameters().as_ref().map(ConnectedList::elements) {
-            if let Some(incompatible) = self
-                .annotations()
-                .iter()
-                .find(|a| ["tick", "load"].contains(&a.assignment().identifier.span.str()))
-            {
+            if let Some(incompatible) = self.annotations().iter().find(|a| {
+                ["tick", "load", "uninstall"].contains(&a.assignment().identifier.span.str())
+            }) {
                 let err =
                     error::Error::IncompatibleFunctionAnnotation(IncompatibleFunctionAnnotation {
                         span: incompatible.assignment().identifier.span.clone(),
                         reason:
-                            "functions with the `tick` or `load` annotation cannot have parameters"
+                            "functions with the `tick`, `load` or `uninstall` annotation cannot have parameters"
                                 .to_string(),
                     });
                 handler.receive(err.clone());
