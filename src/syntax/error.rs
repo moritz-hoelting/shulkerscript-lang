@@ -56,7 +56,7 @@ impl SyntaxKind {
                 } else if variants.len() == 1 {
                     variants[0].expected_binding_str()
                 } else {
-                    let comma_range = ..variants.len() - 2;
+                    let comma_range = ..variants.len() - 1;
                     let comma_elements = variants[comma_range]
                         .iter()
                         .map(Self::expected_binding_str)

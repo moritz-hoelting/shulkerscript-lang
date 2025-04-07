@@ -357,18 +357,24 @@ impl Parser<'_> {
             Reading::Atomic(Token::Keyword(pub_keyword))
                 if pub_keyword.keyword == KeywordKind::Pub =>
             {
-                if let Ok(function) = self.try_parse(|parser| parser.parse_function(&VoidHandler)) {
-                    tracing::trace!("Parsed function '{:?}'", function.identifier.span.str());
+                match self.peek_offset(2) {
+                    Some(Reading::Atomic(Token::Keyword(function_keyword)))
+                        if function_keyword.keyword == KeywordKind::Function =>
+                    {
+                        let function = self.parse_function(handler)?;
+                        tracing::trace!("Parsed function '{:?}'", function.identifier.span.str());
 
-                    Ok(Declaration::Function(function))
-                } else {
-                    // eat the pub keyword
-                    self.forward();
+                        Ok(Declaration::Function(function))
+                    }
+                    _ => {
+                        // eat the pub keyword
+                        self.forward();
 
-                    let var = self.parse_variable_declaration(handler)?;
-                    let semi = self.parse_punctuation(';', true, handler)?;
+                        let var = self.parse_variable_declaration(handler)?;
+                        let semi = self.parse_punctuation(';', true, handler)?;
 
-                    Ok(Declaration::GlobalVariable((Some(pub_keyword), var, semi)))
+                        Ok(Declaration::GlobalVariable((Some(pub_keyword), var, semi)))
+                    }
                 }
             }
 

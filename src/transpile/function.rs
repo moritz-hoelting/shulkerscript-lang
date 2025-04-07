@@ -316,13 +316,13 @@ impl Transpiler {
 
                                 VariableData::BooleanStorage { .. }
                                 | VariableData::ScoreboardValue { .. } => {
-                                    let (temp_storage, mut temp_path) =
-                                        self.get_temp_storage_locations(1);
+                                    let (temp_storage, [temp_path]) =
+                                        self.get_temp_storage_locations_array();
                                     let prepare_cmds = self.transpile_primary_expression(
                                         primary,
                                         &super::expression::DataLocation::Storage {
                                             storage_name: temp_storage.clone(),
-                                            path: temp_path[0].clone(),
+                                            path: temp_path.clone(),
                                             r#type: match var.as_ref() {
                                                 VariableData::BooleanStorage { .. } => {
                                                     StorageType::Boolean
@@ -340,7 +340,7 @@ impl Transpiler {
                                     Ok(Parameter::Storage {
                                         prepare_cmds,
                                         storage_name: temp_storage,
-                                        path: std::mem::take(&mut temp_path[0]),
+                                        path: temp_path,
                                     })
                                 }
                                 _ => {
@@ -364,12 +364,13 @@ impl Transpiler {
                             | Primary::FunctionCall(_),
                         )
                         | Expression::Binary(_) => {
-                            let (temp_storage, mut temp_path) = self.get_temp_storage_locations(1);
+                            let (temp_storage, [temp_path]) =
+                                self.get_temp_storage_locations_array();
                             let prepare_cmds = self.transpile_expression(
                                 expression,
                                 &super::expression::DataLocation::Storage {
                                     storage_name: temp_storage.clone(),
-                                    path: temp_path[0].clone(),
+                                    path: temp_path.clone(),
                                     r#type: StorageType::Int,
                                 },
                                 scope,
@@ -379,7 +380,7 @@ impl Transpiler {
                             Ok(Parameter::Storage {
                                 prepare_cmds,
                                 storage_name: temp_storage,
-                                path: std::mem::take(&mut temp_path[0]),
+                                path: temp_path,
                             })
                         }
                     };

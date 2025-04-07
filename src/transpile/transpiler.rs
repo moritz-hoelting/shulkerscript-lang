@@ -14,11 +14,11 @@ use crate::{
     semantic::error::UnexpectedExpression,
     syntax::syntax_tree::{
         declaration::{Declaration, ImportItems},
-        expression::{Expression, FunctionCall, Primary},
+        expression::{Expression, FunctionCall, PrefixOperator, Primary},
         program::{Namespace, ProgramFile},
         statement::{
             execute_block::{Conditional, Else, ExecuteBlock, ExecuteBlockHead, ExecuteBlockTail},
-            SemicolonStatement, Statement,
+            ReturnStatement, SemicolonStatement, Statement,
         },
         AnnotationAssignment,
     },
@@ -359,9 +359,6 @@ impl Transpiler {
             Statement::LiteralCommand(literal_command) => {
                 Ok(vec![literal_command.clean_command().into()])
             }
-            Statement::Run(run) => {
-                self.transpile_run_expression(run.expression(), program_identifier, scope, handler)
-            }
             Statement::Block(_) => {
                 unreachable!("Only literal commands are allowed in functions at this time.")
             }
@@ -411,6 +408,11 @@ impl Transpiler {
                     Expression::Primary(Primary::FunctionCall(func)) => {
                         self.transpile_function_call(func, scope, handler)
                     }
+                    Expression::Primary(Primary::Prefix(prefix))
+                        if matches!(prefix.operator(), PrefixOperator::Run(_)) =>
+                    {
+                        self.transpile_run_expression(prefix.operand(), scope, handler)
+                    }
                     unexpected => {
                         let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
                             unexpected.clone(),
@@ -433,77 +435,205 @@ impl Transpiler {
                     scope,
                     handler,
                 ),
+                SemicolonStatement::Return(ret) => {
+                    self.transpile_return_statement(ret, program_identifier, scope, handler)
+                }
             },
         }
     }
 
-    #[expect(clippy::only_used_in_recursion)]
-    fn transpile_run_expression(
+    #[expect(clippy::too_many_lines)]
+    fn transpile_return_statement(
         &mut self,
-        expression: &Expression,
-        program_identifier: &str,
+        ret: &ReturnStatement,
+        _program_identifier: &str,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<Vec<Command>> {
-        match expression {
-            Expression::Primary(Primary::FunctionCall(func)) => {
-                self.transpile_function_call(func, scope, handler)
-            }
-            Expression::Primary(Primary::Identifier(ident)) => {
-                match scope.get_variable(ident.span.str()).as_deref() {
-                    Some(VariableData::ComptimeValue {
-                        value,
-                        read_only: _,
-                    }) => value.read().unwrap().as_ref().map_or_else(
-                        || {
-                            let error = TranspileError::MissingValue(MissingValue {
-                                expression: ident.span.clone(),
-                            });
-                            handler.receive(error.clone());
-                            Err(error)
-                        },
-                        |val| {
-                            let cmd = val.to_string_no_macro().map_or_else(
-                                || Command::UsesMacro(val.to_macro_string().into()),
-                                Command::Raw,
-                            );
-                            Ok(vec![cmd])
-                        },
-                    ),
-                    Some(_) => {
-                        let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
-                            expression.clone(),
-                        ));
-                        handler.receive(error.clone());
-                        Err(error)
-                    }
-                    None => {
+        let comptime_val = ret
+            .expression()
+            .comptime_eval(scope, handler)
+            .map(|val| val.to_macro_string());
+
+        let (prepare_cmds, ret_cmd) = if let Ok(val) = comptime_val {
+            (Vec::new(), datapack::ReturnCommand::Value(val.into()))
+        } else {
+            match ret.expression() {
+                Expression::Primary(Primary::Prefix(prefix))
+                    if matches!(prefix.operator(), PrefixOperator::Run(_)) =>
+                {
+                    let ret_cmds =
+                        self.transpile_run_expression(prefix.operand(), scope, handler)?;
+                    let cmd = if ret_cmds.len() == 1 {
+                        ret_cmds.into_iter().next().unwrap()
+                    } else {
+                        Command::Group(ret_cmds)
+                    };
+                    (Vec::new(), datapack::ReturnCommand::Command(Box::new(cmd)))
+                }
+                Expression::Primary(Primary::FunctionCall(func)) => {
+                    let ret_cmds = self.transpile_function_call(func, scope, handler)?;
+                    let cmd = if ret_cmds.len() == 1 {
+                        ret_cmds.into_iter().next().unwrap()
+                    } else {
+                        Command::Group(ret_cmds)
+                    };
+                    (Vec::new(), datapack::ReturnCommand::Command(Box::new(cmd)))
+                }
+                Expression::Primary(Primary::Identifier(ident)) => {
+                    if let Some(var) = scope.get_variable(ident.span.str()) {
+                        match var.as_ref() {
+                            VariableData::BooleanStorage { storage_name, path } => (
+                                Vec::new(),
+                                datapack::ReturnCommand::Command(Box::new(Command::Raw(format!(
+                                    "data get storage {storage_name} {path}"
+                                )))),
+                            ),
+                            VariableData::ComptimeValue {
+                                value,
+                                read_only: _,
+                            } => value.read().unwrap().as_ref().map_or_else(
+                                || {
+                                    let error = TranspileError::MissingValue(MissingValue {
+                                        expression: ident.span.clone(),
+                                    });
+                                    handler.receive(error.clone());
+                                    Err(error)
+                                },
+                                |val| {
+                                    let cmd = val.to_string_no_macro().map_or_else(
+                                        || Command::UsesMacro(val.to_macro_string().into()),
+                                        Command::Raw,
+                                    );
+                                    Ok((
+                                        Vec::new(),
+                                        datapack::ReturnCommand::Command(Box::new(cmd)),
+                                    ))
+                                },
+                            )?,
+                            VariableData::MacroParameter {
+                                index: _,
+                                macro_name,
+                            } => (
+                                Vec::new(),
+                                datapack::ReturnCommand::Command(Box::new(Command::UsesMacro(
+                                    shulkerbox::util::MacroString::MacroString(vec![
+                                        shulkerbox::util::MacroStringPart::MacroUsage(
+                                            macro_name.clone(),
+                                        ),
+                                    ]),
+                                ))),
+                            ),
+                            VariableData::ScoreboardValue { objective, target } => (
+                                Vec::new(),
+                                datapack::ReturnCommand::Command(Box::new(Command::Raw(format!(
+                                    "scoreboard players get {target} {objective}"
+                                )))),
+                            ),
+                            _ => {
+                                let error =
+                                    TranspileError::UnexpectedExpression(UnexpectedExpression(
+                                        Expression::Primary(Primary::Identifier(ident.clone())),
+                                    ));
+                                handler.receive(error.clone());
+                                return Err(error);
+                            }
+                        }
+                    } else {
                         let error = TranspileError::UnknownIdentifier(UnknownIdentifier {
                             identifier: ident.span.clone(),
                         });
                         handler.receive(error.clone());
-                        Err(error)
+                        return Err(error);
                     }
                 }
+                _ => {
+                    let (temp_objective, [temp_target]) =
+                        self.get_temp_scoreboard_locations_array();
+                    let ret_cmd = datapack::ReturnCommand::Command(Box::new(Command::Raw(
+                        format!("scoreboard players get {temp_target} {temp_objective}"),
+                    )));
+                    let cmds = self.transpile_expression(
+                        ret.expression(),
+                        &super::expression::DataLocation::ScoreboardValue {
+                            objective: temp_objective,
+                            target: temp_target,
+                        },
+                        scope,
+                        handler,
+                    )?;
+                    (cmds, ret_cmd)
+                }
             }
-            expression @ Expression::Primary(
-                Primary::Integer(_)
-                | Primary::Boolean(_)
-                | Primary::Prefix(_)
-                | Primary::Indexed(_),
-            ) => {
-                let error =
-                    TranspileError::UnexpectedExpression(UnexpectedExpression(expression.clone()));
+        };
+
+        let cmds = prepare_cmds
+            .into_iter()
+            .chain(std::iter::once(Command::Return(ret_cmd)))
+            .collect();
+
+        Ok(cmds)
+    }
+
+    pub(super) fn transpile_run_expression(
+        &mut self,
+        expression: &Primary,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> TranspileResult<Vec<Command>> {
+        match expression {
+            Primary::FunctionCall(func) => self.transpile_function_call(func, scope, handler),
+            Primary::Identifier(ident) => match scope.get_variable(ident.span.str()).as_deref() {
+                Some(VariableData::ComptimeValue {
+                    value,
+                    read_only: _,
+                }) => value.read().unwrap().as_ref().map_or_else(
+                    || {
+                        let error = TranspileError::MissingValue(MissingValue {
+                            expression: ident.span.clone(),
+                        });
+                        handler.receive(error.clone());
+                        Err(error)
+                    },
+                    |val| {
+                        let cmd = val.to_string_no_macro().map_or_else(
+                            || Command::UsesMacro(val.to_macro_string().into()),
+                            Command::Raw,
+                        );
+                        Ok(vec![cmd])
+                    },
+                ),
+                Some(_) => {
+                    let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
+                        Expression::Primary(expression.clone()),
+                    ));
+                    handler.receive(error.clone());
+                    Err(error)
+                }
+                None => {
+                    let error = TranspileError::UnknownIdentifier(UnknownIdentifier {
+                        identifier: ident.span.clone(),
+                    });
+                    handler.receive(error.clone());
+                    Err(error)
+                }
+            },
+
+            Primary::Integer(_)
+            | Primary::Boolean(_)
+            | Primary::Prefix(_)
+            | Primary::Indexed(_) => {
+                let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
+                    Expression::Primary(expression.clone()),
+                ));
                 handler.receive(error.clone());
                 Err(error)
             }
-            Expression::Primary(Primary::StringLiteral(string)) => {
+            Primary::StringLiteral(string) => {
                 Ok(vec![Command::Raw(string.str_content().to_string())])
             }
-            Expression::Primary(Primary::MacroStringLiteral(string)) => {
-                Ok(vec![Command::UsesMacro(string.into())])
-            }
-            Expression::Primary(Primary::Lua(code)) => match code.eval_comptime(scope, handler)? {
+            Primary::MacroStringLiteral(string) => Ok(vec![Command::UsesMacro(string.into())]),
+            Primary::Lua(code) => match code.eval_comptime(scope, handler)? {
                 Ok(ComptimeValue::String(cmd)) => Ok(vec![Command::Raw(cmd)]),
                 Ok(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd.into())]),
                 Ok(ComptimeValue::Boolean(_) | ComptimeValue::Integer(_)) => {
@@ -523,24 +653,22 @@ impl Transpiler {
                 }
             },
 
-            Expression::Primary(Primary::Parenthesized(parenthesized)) => self
-                .transpile_run_expression(
-                    parenthesized.expression(),
-                    program_identifier,
-                    scope,
-                    handler,
-                ),
-            Expression::Binary(bin) => match bin.comptime_eval(scope, handler) {
-                Ok(ComptimeValue::String(cmd)) => Ok(vec![Command::Raw(cmd)]),
-                Ok(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd.into())]),
-                _ => {
-                    let err = TranspileError::MismatchedTypes(MismatchedTypes {
-                        expression: bin.span(),
-                        expected_type: ExpectedType::String,
-                    });
-                    handler.receive(err.clone());
-                    Err(err)
+            Primary::Parenthesized(parenthesized) => match parenthesized.expression().as_ref() {
+                Expression::Primary(expression) => {
+                    self.transpile_run_expression(expression, scope, handler)
                 }
+                Expression::Binary(bin) => match bin.comptime_eval(scope, handler) {
+                    Ok(ComptimeValue::String(cmd)) => Ok(vec![Command::Raw(cmd)]),
+                    Ok(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd.into())]),
+                    _ => {
+                        let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                            expression: bin.span(),
+                            expected_type: ExpectedType::String,
+                        });
+                        handler.receive(err.clone());
+                        Err(err)
+                    }
+                },
             },
         }
     }

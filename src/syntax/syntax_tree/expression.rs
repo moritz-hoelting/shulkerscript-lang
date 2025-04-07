@@ -314,12 +314,15 @@ pub enum PrefixOperator {
     LogicalNot(Punctuation),
     /// The negate operator '-'.
     Negate(Punctuation),
+    /// The run keyword 'run'.
+    Run(Keyword),
 }
 
 impl SourceElement for PrefixOperator {
     fn span(&self) -> Span {
         match self {
             Self::LogicalNot(token) | Self::Negate(token) => token.span.clone(),
+            Self::Run(token) => token.span.clone(),
         }
     }
 }
@@ -507,7 +510,7 @@ impl Parser<'_> {
     #[expect(clippy::too_many_lines)]
     pub fn parse_primary(&mut self, handler: &impl Handler<base::Error>) -> ParseResult<Primary> {
         match self.stop_at_significant() {
-            // prefixed expression
+            // prefixed expression with '!' or '-'
             Reading::Atomic(Token::Punctuation(punc)) if matches!(punc.punctuation, '!' | '-') => {
                 // eat the prefix
                 self.forward();
@@ -523,6 +526,23 @@ impl Parser<'_> {
                 Ok(Primary::Prefix(Prefix {
                     operator: prefix_operator,
                     operand,
+                }))
+            }
+
+            // prefixed expression with 'run'
+            Reading::Atomic(Token::Keyword(run_keyword))
+                if run_keyword.keyword == KeywordKind::Run =>
+            {
+                // eat the run keyword
+                self.forward();
+
+                let expression = self.parse_primary(handler)?;
+
+                tracing::trace!("Parsed run expression: {:?}", expression);
+
+                Ok(Primary::Prefix(Prefix {
+                    operator: PrefixOperator::Run(run_keyword),
+                    operand: Box::new(expression),
                 }))
             }
 

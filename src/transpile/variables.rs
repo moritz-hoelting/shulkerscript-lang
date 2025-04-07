@@ -381,8 +381,7 @@ impl Transpiler {
                 handler,
             )?;
             if is_global {
-                let (temp_objective, temp_targets) = self.get_temp_scoreboard_locations(1);
-                let temp_target = &temp_targets[0];
+                let (temp_objective, [temp_target]) = self.get_temp_scoreboard_locations_array();
                 let test_cmd = match declaration.variable_type().keyword {
                     KeywordKind::Int => {
                         Command::Raw(format!("scoreboard players get {name} {target}"))

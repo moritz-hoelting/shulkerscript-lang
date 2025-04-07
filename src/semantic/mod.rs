@@ -14,7 +14,7 @@ use crate::{
                 Conditional, Else, ExecuteBlock, ExecuteBlockHead, ExecuteBlockHeadItem as _,
                 ExecuteBlockTail,
             },
-            Assignment, AssignmentDestination, Block, Grouping, Run, Semicolon, SemicolonStatement,
+            Assignment, AssignmentDestination, Block, Grouping, Semicolon, SemicolonStatement,
             Statement, VariableDeclaration,
         },
         AnyStringLiteral,
@@ -228,7 +228,6 @@ impl Statement {
                 let child_scope = SemanticScope::with_parent(scope);
                 group.analyze_semantics(&child_scope, handler)
             }
-            Self::Run(run) => run.analyze_semantics(scope, handler),
             Self::Semicolon(sem) => sem.analyze_semantics(scope, handler),
         }
     }
@@ -342,16 +341,6 @@ impl Grouping {
     }
 }
 
-impl Run {
-    fn analyze_semantics(
-        &self,
-        scope: &SemanticScope,
-        handler: &impl Handler<base::Error>,
-    ) -> Result<(), error::Error> {
-        self.expression().analyze_semantics(scope, handler)
-    }
-}
-
 impl Semicolon {
     fn analyze_semantics(
         &self,
@@ -364,6 +353,7 @@ impl Semicolon {
             }
             SemicolonStatement::Expression(expr) => expr.analyze_semantics(scope, handler),
             SemicolonStatement::VariableDeclaration(decl) => decl.analyze_semantics(scope, handler),
+            SemicolonStatement::Return(ret) => ret.expression().analyze_semantics(scope, handler),
         }
     }
 }
@@ -665,6 +655,21 @@ impl Primary {
                         Err(err)
                     }
                 }
+                PrefixOperator::Run(_) => {
+                    if prefixed
+                        .operand()
+                        .can_yield_type_semantics(ValueType::String, scope)
+                    {
+                        prefixed.operand().analyze_semantics(scope, handler)
+                    } else {
+                        let err = error::Error::MismatchedTypes(MismatchedTypes {
+                            expected_type: ExpectedType::String,
+                            expression: prefixed.operand().span(),
+                        });
+                        handler.receive(err.clone());
+                        Err(err)
+                    }
+                }
             },
             Self::Lua(lua) => lua.analyze_semantics(scope, handler),
         }
@@ -701,12 +706,24 @@ impl Primary {
                 _ => false,
             },
             Self::Prefix(prefixed) => match prefixed.operator() {
-                PrefixOperator::LogicalNot(_) => prefixed
-                    .operand()
-                    .can_yield_type_semantics(ValueType::Boolean, scope),
-                PrefixOperator::Negate(_) => prefixed
-                    .operand()
-                    .can_yield_type_semantics(ValueType::Integer, scope),
+                PrefixOperator::LogicalNot(_) => {
+                    expected == ValueType::Boolean
+                        && prefixed
+                            .operand()
+                            .can_yield_type_semantics(ValueType::Boolean, scope)
+                }
+                PrefixOperator::Negate(_) => {
+                    expected == ValueType::Integer
+                        && prefixed
+                            .operand()
+                            .can_yield_type_semantics(ValueType::Integer, scope)
+                }
+                PrefixOperator::Run(_) => {
+                    expected == ValueType::String
+                        && prefixed
+                            .operand()
+                            .can_yield_type_semantics(ValueType::String, scope)
+                }
             },
             Self::Parenthesized(parenthesized) => {
                 parenthesized.can_yield_type_semantics(expected, scope)
@@ -807,8 +824,18 @@ impl Binary {
     #[must_use]
     fn can_yield_type_semantics(&self, expected: ValueType, scope: &SemanticScope) -> bool {
         match self.operator() {
-            BinaryOperator::Add(_)
-            | BinaryOperator::Subtract(_)
+            BinaryOperator::Add(_) => {
+                if expected == ValueType::Integer {
+                    self.left_operand()
+                        .can_yield_type_semantics(ValueType::Integer, scope)
+                        && self
+                            .right_operand()
+                            .can_yield_type_semantics(ValueType::Integer, scope)
+                } else {
+                    expected == ValueType::String
+                }
+            }
+            BinaryOperator::Subtract(_)
             | BinaryOperator::Multiply(_)
             | BinaryOperator::Divide(_)
             | BinaryOperator::Modulo(_) => {

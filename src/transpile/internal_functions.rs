@@ -158,16 +158,13 @@ fn print_function(
                 json!({"nbt": path, "storage": storage_name, "color": PARAM_COLOR}),
             ),
             DataLocation::Tag { tag_name, entity } => {
-                let (temp_storage_name, temp_storage_paths) =
-                    transpiler.get_temp_storage_locations(1);
+                let (temp_storage_name, [temp_storage_path]) =
+                    transpiler.get_temp_storage_locations_array();
                 let selector =
                     super::util::add_to_entity_selector(entity, &format!("tag={tag_name}"));
                 let cmd = Command::Execute(Execute::Store(
-                    format!(
-                        "success storage {temp_storage_name} {path} byte 1.0",
-                        path = temp_storage_paths[0]
-                    )
-                    .into(),
+                    format!("success storage {temp_storage_name} {temp_storage_path} byte 1.0")
+                        .into(),
                     Box::new(Execute::Run(Box::new(Command::Raw(format!(
                         "execute if entity {selector}"
                     ))))),
@@ -175,7 +172,7 @@ fn print_function(
 
                 (
                     Some(cmd),
-                    json!({"nbt": temp_storage_paths[0], "storage": temp_storage_name, "color": PARAM_COLOR}),
+                    json!({"nbt": temp_storage_path, "storage": temp_storage_name, "color": PARAM_COLOR}),
                 )
             }
         }
@@ -367,10 +364,10 @@ fn print_function(
             }
 
             primary => {
-                let (storage_name, mut storage_paths) = transpiler.get_temp_storage_locations(1);
+                let (storage_name, [storage_path]) = transpiler.get_temp_storage_locations_array();
                 let location = DataLocation::Storage {
                     storage_name,
-                    path: std::mem::take(&mut storage_paths[0]),
+                    path: storage_path,
                     r#type: StorageType::Int,
                 };
                 let cmds = transpiler.transpile_primary_expression(
@@ -388,10 +385,10 @@ fn print_function(
             }
         },
         Expression::Binary(binary) => {
-            let (storage_name, mut storage_paths) = transpiler.get_temp_storage_locations(1);
+            let (storage_name, [storage_path]) = transpiler.get_temp_storage_locations_array();
             let location = DataLocation::Storage {
                 storage_name,
-                path: std::mem::take(&mut storage_paths[0]),
+                path: storage_path,
                 r#type: StorageType::Int,
             };
             let cmds =

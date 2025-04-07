@@ -43,7 +43,6 @@ use super::{expression::Expression, Annotation, AnyStringLiteral};
 ///     | Grouping
 ///     | DocComment
 ///     | Semicolon
-///     | Run
 ///     ;
 /// ```
 #[allow(missing_docs)]
@@ -56,7 +55,6 @@ pub enum Statement {
     Grouping(Grouping),
     DocComment(DocComment),
     Semicolon(Semicolon),
-    Run(Run),
 }
 
 impl SourceElement for Statement {
@@ -68,7 +66,6 @@ impl SourceElement for Statement {
             Self::Grouping(grouping) => grouping.span(),
             Self::DocComment(doc_comment) => doc_comment.span(),
             Self::Semicolon(semi) => semi.span(),
-            Self::Run(run) => run.span(),
         }
     }
 }
@@ -105,6 +102,14 @@ impl Statement {
                     let err = Error::InvalidAnnotation(InvalidAnnotation {
                         annotation: annotation.assignment.identifier.span,
                         target: "expressions".to_string(),
+                    });
+
+                    Err(err)
+                }
+                SemicolonStatement::Return(_) => {
+                    let err = Error::InvalidAnnotation(InvalidAnnotation {
+                        annotation: annotation.assignment.identifier.span,
+                        target: "return statements".to_string(),
                     });
 
                     Err(err)
@@ -159,46 +164,6 @@ impl SourceElement for Block {
             .span()
             .join(&self.close_brace.span())
             .unwrap()
-    }
-}
-
-/// Represents a run statement in the syntax tree.
-///
-/// Syntax Synopsis:
-///
-/// ``` ebnf
-/// Run:
-/// 'run' Expression ';'
-/// ;
-/// ```
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
-pub struct Run {
-    /// The `run` keyword.
-    #[get = "pub"]
-    run_keyword: Keyword,
-    /// The expression of the run statement.
-    #[get = "pub"]
-    expression: Expression,
-    /// The semicolon of the run statement.
-    #[get = "pub"]
-    semicolon: Punctuation,
-}
-
-impl SourceElement for Run {
-    fn span(&self) -> Span {
-        self.run_keyword
-            .span()
-            .join(&self.semicolon.span())
-            .expect("The span of the run statement is invalid.")
-    }
-}
-
-impl Run {
-    /// Dissolves the [`Run`] into its components.
-    #[must_use]
-    pub fn dissolve(self) -> (Keyword, Expression, Punctuation) {
-        (self.run_keyword, self.expression, self.semicolon)
     }
 }
 
@@ -293,6 +258,8 @@ pub enum SemicolonStatement {
     VariableDeclaration(VariableDeclaration),
     /// An assignment.
     Assignment(Assignment),
+    /// A return statement.
+    Return(ReturnStatement),
 }
 
 impl SourceElement for SemicolonStatement {
@@ -301,7 +268,43 @@ impl SourceElement for SemicolonStatement {
             Self::Expression(expression) => expression.span(),
             Self::VariableDeclaration(declaration) => declaration.span(),
             Self::Assignment(assignment) => assignment.span(),
+            Self::Return(ret) => ret.span(),
         }
+    }
+}
+
+/// Represents a return statement in the syntax tree.
+///
+/// Syntax Synopsis:
+/// ```ebnf
+/// ReturnStatement:
+///     `return` Expression ;
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct ReturnStatement {
+    /// The `return` keyword.
+    #[get = "pub"]
+    return_keyword: Keyword,
+    /// The expression of the return statement.
+    #[get = "pub"]
+    expression: Expression,
+}
+
+impl SourceElement for ReturnStatement {
+    fn span(&self) -> Span {
+        self.return_keyword
+            .span()
+            .join(&self.expression.span())
+            .expect("The span of the return statement is invalid.")
+    }
+}
+
+impl ReturnStatement {
+    /// Dissolves the [`ReturnStatement`] into its components.
+    #[must_use]
+    pub fn dissolve(self) -> (Keyword, Expression) {
+        (self.return_keyword, self.expression)
     }
 }
 
@@ -910,25 +913,6 @@ impl Parser<'_> {
                 }))
             }
 
-            // run statement
-            Reading::Atomic(Token::Keyword(run_keyword))
-                if run_keyword.keyword == KeywordKind::Run =>
-            {
-                // eat the run keyword
-                self.forward();
-
-                let expression = self.parse_expression(handler)?;
-                let semicolon = self.parse_punctuation(';', true, handler)?;
-
-                tracing::trace!("Parsed run statement: {:?}", expression);
-
-                Ok(Statement::Run(Run {
-                    run_keyword,
-                    expression,
-                    semicolon,
-                }))
-            }
-
             // semicolon statement
             _ => self.parse_semicolon(handler).map(Statement::Semicolon),
         }
@@ -941,6 +925,17 @@ impl Parser<'_> {
         handler: &impl Handler<base::Error>,
     ) -> ParseResult<Semicolon> {
         let statement = match self.stop_at_significant() {
+            Reading::Atomic(Token::Keyword(keyword)) if keyword.keyword == KeywordKind::Return => {
+                // eat the return keyword
+                self.forward();
+
+                let expression = self.parse_expression(handler)?;
+
+                Ok(SemicolonStatement::Return(ReturnStatement {
+                    return_keyword: keyword,
+                    expression,
+                }))
+            }
             Reading::Atomic(Token::Keyword(keyword))
                 if matches!(
                     keyword.keyword,
@@ -1025,6 +1020,7 @@ impl Parser<'_> {
                     expected: SyntaxKind::Either(&[
                         SyntaxKind::Keyword(KeywordKind::Int),
                         SyntaxKind::Keyword(KeywordKind::Bool),
+                        SyntaxKind::Keyword(KeywordKind::Val),
                     ]),
                     found: unexpected.into_token(),
                 });

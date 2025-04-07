@@ -289,6 +289,10 @@ impl Primary {
                     matches!(r#type, ValueType::Integer)
                         && prefix.operand().can_yield_type(r#type, scope)
                 }
+                PrefixOperator::Run(_) => {
+                    matches!(r#type, ValueType::Integer | ValueType::Boolean)
+                        && prefix.operand().can_yield_type(ValueType::String, scope)
+                }
             },
             Self::Indexed(indexed) => {
                 if let Self::Identifier(ident) = indexed.object().as_ref() {
@@ -601,7 +605,7 @@ impl Transpiler {
         }
     }
 
-    #[expect(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines, clippy::cognitive_complexity)]
     pub(super) fn transpile_primary_expression(
         &mut self,
         primary: &Primary,
@@ -760,8 +764,8 @@ impl Transpiler {
                         StorageType::Byte | StorageType::Int | StorageType::Long
                     ) =>
                     {
-                        let (target_objective, mut targets) = self.get_temp_scoreboard_locations(1);
-                        let target_ident = targets.pop().expect("at least size 1");
+                        let (target_objective, [target_ident]) =
+                            self.get_temp_scoreboard_locations_array();
 
                         let score_to_storage_cmd = Command::Execute(Execute::Store(
                             format!(
@@ -806,6 +810,65 @@ impl Transpiler {
                     cmds.extend(store_cmds);
 
                     Ok(cmds)
+                }
+                PrefixOperator::Run(_) => {
+                    let run_cmds =
+                        self.transpile_run_expression(prefix.operand(), scope, handler)?;
+                    let run_cmd = if run_cmds.len() == 1 {
+                        run_cmds.into_iter().next().expect("length is 1")
+                    } else {
+                        Command::Group(run_cmds)
+                    };
+                    match target {
+                        DataLocation::ScoreboardValue { objective, target } => {
+                            let store = format!("result score {target} {objective}");
+                            let exec = Command::Execute(Execute::Store(
+                                store.into(),
+                                Box::new(Execute::Run(Box::new(run_cmd))),
+                            ));
+                            Ok(vec![exec])
+                        }
+                        DataLocation::Storage {
+                            storage_name,
+                            path,
+                            r#type,
+                        } => {
+                            let store = format!(
+                                "{result_success} storage {storage_name} {path} {t} 1.0",
+                                t = r#type.as_str(),
+                                result_success = if matches!(r#type, StorageType::Boolean) {
+                                    "success"
+                                } else {
+                                    "result"
+                                }
+                            );
+                            let exec = Command::Execute(Execute::Store(
+                                store.into(),
+                                Box::new(Execute::Run(Box::new(run_cmd))),
+                            ));
+                            Ok(vec![exec])
+                        }
+                        DataLocation::Tag { tag_name, entity } => {
+                            let prepare_cmd =
+                                Command::Raw(format!("tag {entity} remove {tag_name}"));
+                            let success_cmd = Command::Raw(format!("tag {entity} add {tag_name}"));
+                            let (temp_storage_name, [temp_storage_path]) =
+                                self.get_temp_storage_locations_array();
+
+                            let store_cmd = Command::Execute(Execute::Store(
+                                format!("success storage {temp_storage_name} {temp_storage_path} boolean 1.0").into(), 
+                                Box::new(Execute::Run(Box::new(run_cmd)))
+                            ));
+
+                            let if_cmd = Command::Execute(Execute::If(
+                                Condition::Atom(format!("data storage {temp_storage_name} {{{temp_storage_name}:1b}}").into()),
+                                Box::new(Execute::Run(Box::new(success_cmd))),
+                                None,
+                            ));
+
+                            Ok(vec![store_cmd, prepare_cmd, if_cmd])
+                        }
+                    }
                 }
             },
             Primary::Identifier(ident) => {
@@ -1215,6 +1278,25 @@ impl Transpiler {
                         },
                     ))
                 }
+                PrefixOperator::Run(_) => {
+                    let (temp_storage_name, [temp_storage_path]) =
+                        self.get_temp_storage_locations_array();
+                    let cond = ExtendedCondition::Runtime(Condition::Atom(
+                        format!("data storage {temp_storage_name} {{{temp_storage_path}:1b}}")
+                            .into(),
+                    ));
+                    let store_cmds = self.transpile_primary_expression(
+                        primary,
+                        &DataLocation::Storage {
+                            storage_name: temp_storage_name,
+                            path: temp_storage_path,
+                            r#type: StorageType::Boolean,
+                        },
+                        scope,
+                        handler,
+                    )?;
+                    Ok((store_cmds, cond))
+                }
                 PrefixOperator::Negate(_) => {
                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
                         expected_type: ExpectedType::Boolean,
@@ -1289,11 +1371,12 @@ impl Transpiler {
         let right = binary.right_operand();
         let operator = binary.operator();
 
-        let (temp_objective, temp_locations) = self.get_temp_scoreboard_locations(2);
+        let (temp_objective, [temp_location_a, temp_location_b]) =
+            self.get_temp_scoreboard_locations_array();
 
         let score_target_location = match target {
             DataLocation::ScoreboardValue { objective, target } => (objective, target),
-            _ => (&temp_objective, &temp_locations[0]),
+            _ => (&temp_objective, &temp_location_a),
         };
 
         let left_cmds = self.transpile_expression(
@@ -1318,7 +1401,7 @@ impl Transpiler {
                     right,
                     &DataLocation::ScoreboardValue {
                         objective: temp_objective.clone(),
-                        target: temp_locations[1].clone(),
+                        target: temp_location_b.clone(),
                     },
                     scope,
                     handler,
@@ -1328,7 +1411,7 @@ impl Transpiler {
                     right_cmds,
                     (
                         temp_objective.as_str(),
-                        std::borrow::Cow::Borrowed(&temp_locations[1]),
+                        std::borrow::Cow::Borrowed(&temp_location_b),
                     ),
                 )
             };
@@ -1419,13 +1502,12 @@ impl Transpiler {
             _ => unreachable!("This function should only be called for comparison operators."),
         };
 
-        let (temp_objective, mut temp_locations) = self.get_temp_scoreboard_locations(2);
+        let (temp_objective, [temp_location_a, temp_location_b]) =
+            self.get_temp_scoreboard_locations_array();
 
         let condition = Condition::Atom(
             format!(
-                "score {target} {temp_objective} {operator} {source} {temp_objective}",
-                target = temp_locations[0],
-                source = temp_locations[1]
+                "score {temp_location_a} {temp_objective} {operator} {temp_location_b} {temp_objective}"
             )
             .into(),
         );
@@ -1434,7 +1516,7 @@ impl Transpiler {
             binary.left_operand(),
             &DataLocation::ScoreboardValue {
                 objective: temp_objective.clone(),
-                target: std::mem::take(&mut temp_locations[0]),
+                target: temp_location_a,
             },
             scope,
             handler,
@@ -1443,7 +1525,7 @@ impl Transpiler {
             binary.right_operand(),
             &DataLocation::ScoreboardValue {
                 objective: temp_objective,
-                target: std::mem::take(&mut temp_locations[1]),
+                target: temp_location_b,
             },
             scope,
             handler,
@@ -1707,6 +1789,17 @@ impl Transpiler {
         (objective, targets)
     }
 
+    /// Get temporary scoreboard locations.
+    pub(super) fn get_temp_scoreboard_locations_array<const N: usize>(
+        &mut self,
+    ) -> (String, [String; N]) {
+        let (objective, targets) = self.get_temp_scoreboard_locations(N);
+
+        let targets = targets.try_into().expect("build from range of type");
+
+        (objective, targets)
+    }
+
     /// Get temporary storage locations.
     pub(super) fn get_temp_storage_locations(&mut self, amount: usize) -> (String, Vec<String>) {
         let storage_name = "shulkerscript:temp_".to_string()
@@ -1731,6 +1824,17 @@ impl Transpiler {
                 .iter()
                 .map(|path| (storage_name.clone(), path.clone())),
         );
+
+        (storage_name, paths)
+    }
+
+    /// Get temporary storage locations.
+    pub(super) fn get_temp_storage_locations_array<const N: usize>(
+        &mut self,
+    ) -> (String, [String; N]) {
+        let (storage_name, paths) = self.get_temp_storage_locations(N);
+
+        let paths = paths.try_into().expect("build from range of type");
 
         (storage_name, paths)
     }
