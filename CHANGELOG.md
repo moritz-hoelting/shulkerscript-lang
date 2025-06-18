@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Integer and boolean arrays (scoreboard and data storage)
     - Integer map (scoreboard)
     - Boolean map (tag)
+    - Member access (e.g. `.objective` to get objective name where int is stored)
+- Return statement
 - Example: barebones compiler
 
 ### Changed

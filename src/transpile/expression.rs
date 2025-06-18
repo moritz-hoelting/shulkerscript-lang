@@ -17,12 +17,13 @@ use super::{
     },
     Scope, TranspileResult, Transpiler, VariableData,
 };
+use crate::lexical::token::{Identifier, StringLiteral};
 #[cfg(feature = "shulkerbox")]
 use crate::{
     base::{self, source_file::SourceElement, Handler, VoidHandler},
     lexical::token::MacroStringLiteralPart,
     syntax::syntax_tree::expression::{
-        Binary, BinaryOperator, Expression, PrefixOperator, Primary,
+        Binary, BinaryOperator, Expression, MemberAccess, PrefixOperator, Primary,
     },
     transpile::{
         error::{FunctionArgumentsNotAllowed, MissingValue},
@@ -319,6 +320,9 @@ impl Primary {
                     false
                 }
             }
+            Self::MemberAccess(_) => {
+                todo!()
+            }
             #[cfg_attr(not(feature = "lua"), expect(unused_variables))]
             Self::Lua(lua) => {
                 cfg_if::cfg_if! {
@@ -379,6 +383,11 @@ impl Primary {
             Self::Parenthesized(parenthesized) => {
                 parenthesized.expression().comptime_eval(scope, handler)
             }
+            Self::MemberAccess(member_access) => {
+                member_access
+                    .parent()
+                    .comptime_member_access(member_access, scope, handler)
+            }
             Self::Prefix(prefix) => {
                 prefix
                     .operand()
@@ -418,6 +427,176 @@ impl Primary {
                 }
             }
         }
+    }
+
+    fn comptime_member_access(
+        &self,
+        member_access: &MemberAccess,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> Result<ComptimeValue, NotComptime> {
+        match self {
+            Self::StringLiteral(s) => s.comptime_member_access(member_access, scope, handler),
+            Self::Identifier(ident) => ident.comptime_member_access(member_access, scope, handler),
+
+            _ => todo!(),
+        }
+    }
+}
+
+impl StringLiteral {
+    fn comptime_member_access(
+        &self,
+        member_access: &MemberAccess,
+        _scope: &Arc<Scope>,
+        _handler: &impl Handler<base::Error>,
+    ) -> Result<ComptimeValue, NotComptime> {
+        match member_access.member().span.str() {
+            "length" => Ok(ComptimeValue::Integer(
+                i64::try_from(self.str_content().len())
+                    .expect("string literal length should fit in i64"),
+            )),
+            _ => Err(NotComptime {
+                expression: member_access.member().span(),
+            }),
+        }
+    }
+}
+
+impl Identifier {
+    #[expect(clippy::too_many_lines)]
+    fn comptime_member_access(
+        &self,
+        member_access: &MemberAccess,
+        scope: &Arc<Scope>,
+        _handler: &impl Handler<base::Error>,
+    ) -> Result<ComptimeValue, NotComptime> {
+        scope.get_variable(self.span.str()).map_or_else(
+            || {
+                Err(NotComptime {
+                    expression: self.span(),
+                })
+            },
+            |data| match data.as_ref() {
+                VariableData::ComptimeValue { value, .. } => {
+                    let value = value.read().unwrap();
+                    value.as_ref().map_or_else(
+                        || {
+                            Err(NotComptime {
+                                expression: self.span(),
+                            })
+                        },
+                        |value| match value {
+                            ComptimeValue::String(s) => match member_access.member().span.str() {
+                                "length" => Ok(ComptimeValue::Integer(
+                                    i64::try_from(s.len())
+                                        .expect("comptime string length should fit in i64"),
+                                )),
+                                _ => Err(NotComptime {
+                                    expression: member_access.member().span(),
+                                }),
+                            },
+                            _ => Err(NotComptime {
+                                expression: self.span(),
+                            }),
+                        },
+                    )
+                }
+                VariableData::BooleanStorage { storage_name, path } => {
+                    match member_access.member().span.str() {
+                        "storage" => Ok(ComptimeValue::String(storage_name.to_owned())),
+                        "path" => Ok(ComptimeValue::String(path.to_owned())),
+                        _ => Err(NotComptime {
+                            expression: member_access.member().span(),
+                        }),
+                    }
+                }
+                VariableData::BooleanStorageArray {
+                    storage_name,
+                    paths: _,
+                } => {
+                    match member_access.member().span.str() {
+                        "storage" => Ok(ComptimeValue::String(storage_name.to_owned())),
+                        "paths" => {
+                            // TODO: implement when comptime arrays are implemented
+                            Err(NotComptime {
+                                expression: member_access.member().span(),
+                            })
+                        }
+                        _ => Err(NotComptime {
+                            expression: member_access.member().span(),
+                        }),
+                    }
+                }
+                VariableData::Function { path, .. } => {
+                    match member_access.member().span.str() {
+                        "path" => {
+                            #[expect(clippy::option_if_let_else)]
+                            if let Some(path) = path.get() {
+                                Ok(ComptimeValue::String(path.to_owned()))
+                            } else {
+                                // TODO: add support for non already compiled functions
+                                Err(NotComptime {
+                                    expression: member_access.member().span(),
+                                })
+                            }
+                        }
+                        _ => Err(NotComptime {
+                            expression: member_access.member().span(),
+                        }),
+                    }
+                }
+                VariableData::InternalFunction { .. } => Err(NotComptime {
+                    expression: member_access.member().span(),
+                }),
+                VariableData::MacroParameter { macro_name, .. } => {
+                    match member_access.member().span.str() {
+                        "name" => Ok(ComptimeValue::String(macro_name.to_owned())),
+                        _ => Err(NotComptime {
+                            expression: member_access.member().span(),
+                        }),
+                    }
+                }
+                VariableData::Scoreboard { objective } => match member_access.member().span.str() {
+                    "objective" => Ok(ComptimeValue::String(objective.to_owned())),
+                    _ => Err(NotComptime {
+                        expression: member_access.member().span(),
+                    }),
+                },
+                VariableData::ScoreboardArray {
+                    objective,
+                    targets: _,
+                } => {
+                    match member_access.member().span.str() {
+                        "objective" => Ok(ComptimeValue::String(objective.to_owned())),
+                        "targets" => {
+                            // TODO: implement when comptime arrays are implemented
+                            Err(NotComptime {
+                                expression: member_access.member().span(),
+                            })
+                        }
+                        _ => Err(NotComptime {
+                            expression: member_access.member().span(),
+                        }),
+                    }
+                }
+                VariableData::ScoreboardValue { objective, target } => {
+                    match member_access.member().span.str() {
+                        "objective" => Ok(ComptimeValue::String(objective.to_owned())),
+                        "target" => Ok(ComptimeValue::String(target.to_owned())),
+                        _ => Err(NotComptime {
+                            expression: member_access.member().span(),
+                        }),
+                    }
+                }
+                VariableData::Tag { tag_name } => match member_access.member().span.str() {
+                    "name" => Ok(ComptimeValue::String(tag_name.to_owned())),
+                    _ => Err(NotComptime {
+                        expression: member_access.member().span(),
+                    }),
+                },
+            },
+        )
     }
 }
 
@@ -699,6 +878,7 @@ impl Transpiler {
             Primary::Parenthesized(parenthesized) => {
                 self.transpile_expression(parenthesized.expression(), target, scope, handler)
             }
+            Primary::MemberAccess(_) => todo!(),
             Primary::Lua(lua) =>
             {
                 #[expect(clippy::option_if_let_else)]
@@ -1261,6 +1441,7 @@ impl Transpiler {
                     Err(err)
                 }
             }
+            Primary::MemberAccess(_) => todo!(),
             Primary::Prefix(prefix) => match prefix.operator() {
                 PrefixOperator::LogicalNot(_) => {
                     let (cmds, cond) = self.transpile_primary_expression_as_condition(

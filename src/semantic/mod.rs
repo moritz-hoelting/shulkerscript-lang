@@ -623,6 +623,10 @@ impl Primary {
                     Err(err)
                 }
             }
+            Self::MemberAccess(_) => {
+                // TODO:
+                Ok(())
+            }
             Self::Parenthesized(expr) => expr.analyze_semantics(scope, handler),
             Self::Prefix(prefixed) => match prefixed.operator() {
                 PrefixOperator::LogicalNot(_) => {
@@ -680,7 +684,9 @@ impl Primary {
         match self {
             Self::Boolean(_) => expected == ValueType::Boolean,
             Self::Integer(_) => expected == ValueType::Integer,
-            Self::StringLiteral(_) | Self::MacroStringLiteral(_) => expected == ValueType::String,
+            Self::StringLiteral(_) | Self::MacroStringLiteral(_) => {
+                matches!(expected, ValueType::String | ValueType::Boolean)
+            }
             Self::FunctionCall(_) => matches!(expected, ValueType::Boolean | ValueType::Integer),
             Self::Indexed(indexed) => match indexed.object().as_ref() {
                 Self::Identifier(ident) => {
@@ -699,6 +705,10 @@ impl Primary {
                 }
                 _ => false,
             },
+            Self::MemberAccess(_) => {
+                // TODO:
+                true
+            }
             Self::Identifier(ident) => match scope.get_variable(ident.span.str()) {
                 Some(VariableType::BooleanStorage) => expected == ValueType::Boolean,
                 Some(VariableType::ScoreboardValue) => expected == ValueType::Integer,

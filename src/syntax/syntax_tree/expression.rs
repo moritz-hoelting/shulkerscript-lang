@@ -175,6 +175,7 @@ impl SourceElement for Expression {
 ///     | Boolean
 ///     | StringLiteral
 ///     | FunctionCall
+///     | MemberAccess
 ///     | MacroStringLiteral
 ///     | LuaCode
 /// ```
@@ -190,6 +191,7 @@ pub enum Primary {
     Boolean(Boolean),
     StringLiteral(StringLiteral),
     FunctionCall(FunctionCall),
+    MemberAccess(MemberAccess),
     MacroStringLiteral(MacroStringLiteral),
     Lua(Box<LuaCode>),
 }
@@ -205,6 +207,7 @@ impl SourceElement for Primary {
             Self::Boolean(bool) => bool.span(),
             Self::StringLiteral(string_literal) => string_literal.span(),
             Self::FunctionCall(function_call) => function_call.span(),
+            Self::MemberAccess(member_access) => member_access.span(),
             Self::MacroStringLiteral(macro_string_literal) => macro_string_literal.span(),
             Self::Lua(lua_code) => lua_code.span(),
         }
@@ -443,6 +446,45 @@ impl LuaCode {
     }
 }
 
+/// Represents a member access in the syntax tree.
+///
+/// Syntax Synopsis:
+///
+/// ```ebnf
+/// MemberAccess:
+///     Primary '.' Identifier
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct MemberAccess {
+    /// The parent expression
+    #[get = "pub"]
+    parent: Box<Primary>,
+    /// The dot in the middle
+    #[get = "pub"]
+    dot: Punctuation,
+    /// The member being accessed
+    #[get = "pub"]
+    member: Identifier,
+}
+
+impl SourceElement for MemberAccess {
+    fn span(&self) -> Span {
+        self.parent
+            .span()
+            .join(&self.member.span)
+            .expect("invalid span")
+    }
+}
+
+impl MemberAccess {
+    /// Dissolves the [`MemberAccess`] into its components.
+    #[must_use]
+    pub fn dissolve(self) -> (Box<Primary>, Punctuation, Identifier) {
+        (self.parent, self.dot, self.member)
+    }
+}
+
 impl Parser<'_> {
     /// Parses an [`Expression`]
     ///
@@ -509,7 +551,7 @@ impl Parser<'_> {
     /// - If the parser is not at a valid primary expression.
     #[expect(clippy::too_many_lines)]
     pub fn parse_primary(&mut self, handler: &impl Handler<base::Error>) -> ParseResult<Primary> {
-        match self.stop_at_significant() {
+        let prim = match self.stop_at_significant() {
             // prefixed expression with '!' or '-'
             Reading::Atomic(Token::Punctuation(punc)) if matches!(punc.punctuation, '!' | '-') => {
                 // eat the prefix
@@ -702,6 +744,21 @@ impl Parser<'_> {
 
                 Err(err)
             }
+        }?;
+
+        match self.stop_at_significant() {
+            Reading::Atomic(Token::Punctuation(punc)) if punc.punctuation == '.' => {
+                self.forward();
+
+                let member = self.parse_identifier(handler)?;
+
+                Ok(Primary::MemberAccess(MemberAccess {
+                    parent: Box::new(prim),
+                    dot: punc,
+                    member,
+                }))
+            }
+            _ => Ok(prim),
         }
     }
 

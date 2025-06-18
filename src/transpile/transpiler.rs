@@ -653,6 +653,8 @@ impl Transpiler {
                 }
             },
 
+            Primary::MemberAccess(_) => todo!(),
+
             Primary::Parenthesized(parenthesized) => match parenthesized.expression().as_ref() {
                 Expression::Primary(expression) => {
                     self.transpile_run_expression(expression, scope, handler)
@@ -660,11 +662,16 @@ impl Transpiler {
                 Expression::Binary(bin) => match bin.comptime_eval(scope, handler) {
                     Ok(ComptimeValue::String(cmd)) => Ok(vec![Command::Raw(cmd)]),
                     Ok(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd.into())]),
-                    _ => {
+                    Ok(_) => {
                         let err = TranspileError::MismatchedTypes(MismatchedTypes {
                             expression: bin.span(),
                             expected_type: ExpectedType::String,
                         });
+                        handler.receive(err.clone());
+                        Err(err)
+                    }
+                    Err(not_comptime) => {
+                        let err = TranspileError::NotComptime(not_comptime);
                         handler.receive(err.clone());
                         Err(err)
                     }

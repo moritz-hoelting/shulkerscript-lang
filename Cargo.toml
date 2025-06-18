@@ -26,7 +26,7 @@ zip = ["shulkerbox?/zip"]
 cfg-if = "1.0.0"
 chksum-md5 = { version = "0.1.0", optional = true }
 colored = "3.0.0"
-derive_more = { version = "2.0.1", default-features = false, features = ["deref", "deref_mut", "from"] }
+derive_more = { version = "2.0.1", default-features = false, features = [ "deref", "deref_mut", "from"] }
 enum-as-inner = "0.6.0"
 getset = "0.1.2"
 itertools = "0.14.0"
@@ -35,7 +35,7 @@ pathdiff = "0.2.3"
 serde = { version = "1.0.217", features = ["derive"], optional = true }
 serde_json = { version = "1.0.138", optional = true }
 # shulkerbox = { version = "0.1.0", default-features = false, optional = true }
-shulkerbox = { git = "https://github.com/moritz-hoelting/shulkerbox", rev = "5c4d340162fc16065add448ed387a1ce481c27d6", default-features = false, optional = true }
+shulkerbox = { git = "https://github.com/moritz-hoelting/shulkerbox", rev = "6ff544131b2518b8c92bc4d2de7682efd7141ec4", default-features = false, optional = true }
 strsim = "0.11.1"
 strum = { version = "0.27.0", features = ["derive"] }
 thiserror = "2.0.11"

@@ -357,6 +357,7 @@ impl Transpiler {
                                 }
                             }
                         }
+                        Expression::Primary(Primary::MemberAccess(_)) => todo!(),
                         Expression::Primary(
                             Primary::Parenthesized(_)
                             | Primary::Prefix(_)
