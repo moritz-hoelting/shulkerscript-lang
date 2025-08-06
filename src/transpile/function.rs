@@ -39,6 +39,7 @@ pub enum TranspiledFunctionArguments {
 impl Transpiler {
     /// Gets the function at the given path, or transpiles it if it hasn't been transpiled yet.
     /// Returns the location of the function or None if the function does not exist.
+    #[expect(clippy::too_many_lines)]
     #[tracing::instrument(level = "trace", skip(self, handler))]
     pub(super) fn get_or_transpile_function(
         &mut self,
@@ -357,7 +358,34 @@ impl Transpiler {
                                 }
                             }
                         }
-                        Expression::Primary(Primary::MemberAccess(_)) => todo!(),
+                        Expression::Primary(Primary::MemberAccess(member_access)) => {
+                            if let Ok(value) = member_access.parent().comptime_member_access(
+                                member_access,
+                                scope,
+                                handler,
+                            ) {
+                                Ok(Parameter::Static(value.to_macro_string()))
+                            } else {
+                                let (storage_name, [path]) =
+                                    self.get_temp_storage_locations_array();
+                                let prepare_cmds = self.transpile_expression(
+                                    expression,
+                                    &super::expression::DataLocation::Storage {
+                                        storage_name: storage_name.clone(),
+                                        path: path.clone(),
+                                        r#type: StorageType::Int,
+                                    },
+                                    scope,
+                                    handler,
+                                )?;
+
+                                Ok(Parameter::Storage {
+                                    prepare_cmds,
+                                    storage_name,
+                                    path,
+                                })
+                            }
+                        }
                         Expression::Primary(
                             Primary::Parenthesized(_)
                             | Primary::Prefix(_)

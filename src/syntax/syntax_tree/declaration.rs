@@ -338,6 +338,11 @@ impl SourceElement for Tag {
 }
 
 impl Parser<'_> {
+    /// Parses a declaration
+    ///
+    /// # Errors
+    /// - cannot parse declaration from current position
+    #[expect(clippy::too_many_lines)]
     #[tracing::instrument(level = "trace", skip_all)]
     pub fn parse_declaration(
         &mut self,

@@ -854,6 +854,9 @@ impl Parser<'_> {
     }
 
     /// Parses a [`Statement`].
+    ///
+    /// # Errors
+    /// - cannot parse a [`Statement`] from current position
     #[tracing::instrument(level = "trace", skip_all)]
     pub fn parse_statement(
         &mut self,
@@ -919,6 +922,9 @@ impl Parser<'_> {
     }
 
     /// Parses a [`Semicolon`].
+    ///
+    /// # Errors
+    /// - cannot parse [`Semicolon`] from current position
     #[tracing::instrument(level = "trace", skip_all)]
     pub fn parse_semicolon(
         &mut self,
@@ -994,6 +1000,10 @@ impl Parser<'_> {
     }
 
     /// Parses a [`VariableDeclaration`].
+    ///
+    /// # Errors
+    /// - cannot parse variable declaration from current position
+    #[expect(clippy::too_many_lines)]
     #[tracing::instrument(level = "trace", skip_all)]
     pub fn parse_variable_declaration(
         &mut self,

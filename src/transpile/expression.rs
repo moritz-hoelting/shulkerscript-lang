@@ -17,11 +17,11 @@ use super::{
     },
     Scope, TranspileResult, Transpiler, VariableData,
 };
-use crate::lexical::token::{Identifier, StringLiteral};
+use crate::syntax::syntax_tree::expression::{Indexed, Parenthesized};
 #[cfg(feature = "shulkerbox")]
 use crate::{
     base::{self, source_file::SourceElement, Handler, VoidHandler},
-    lexical::token::MacroStringLiteralPart,
+    lexical::token::{Identifier, MacroStringLiteralPart, StringLiteral},
     syntax::syntax_tree::expression::{
         Binary, BinaryOperator, Expression, MemberAccess, PrefixOperator, Primary,
     },
@@ -320,9 +320,7 @@ impl Primary {
                     false
                 }
             }
-            Self::MemberAccess(_) => {
-                todo!()
-            }
+            Self::MemberAccess(member_access) => member_access.can_yield_type(r#type, scope),
             #[cfg_attr(not(feature = "lua"), expect(unused_variables))]
             Self::Lua(lua) => {
                 cfg_if::cfg_if! {
@@ -429,7 +427,7 @@ impl Primary {
         }
     }
 
-    fn comptime_member_access(
+    pub(super) fn comptime_member_access(
         &self,
         member_access: &MemberAccess,
         scope: &Arc<Scope>,
@@ -438,12 +436,53 @@ impl Primary {
         match self {
             Self::StringLiteral(s) => s.comptime_member_access(member_access, scope, handler),
             Self::Identifier(ident) => ident.comptime_member_access(member_access, scope, handler),
+            Self::Indexed(idx) => idx.comptime_member_access(member_access, scope, handler),
+            Self::Parenthesized(paren) => {
+                paren.comptime_member_access(member_access, scope, handler)
+            }
 
-            _ => todo!(),
+            Self::Boolean(_)
+            | Self::FunctionCall(_)
+            | Self::Integer(_)
+            | Self::Lua(_)
+            | Self::MacroStringLiteral(_)
+            | Self::MemberAccess(_)
+            | Self::Prefix(_) => Err(NotComptime {
+                expression: self.span(),
+            }),
+        }
+    }
+
+    fn member_access_can_yield_type(
+        &self,
+        member_access: &MemberAccess,
+        r#type: ValueType,
+        scope: &Arc<Scope>,
+    ) -> bool {
+        match self {
+            Self::StringLiteral(_) => {
+                StringLiteral::member_access_can_yield_type(member_access, r#type, scope)
+            }
+            Self::Identifier(ident) => {
+                ident.member_access_can_yield_type(member_access, r#type, scope)
+            }
+            Self::Indexed(idx) => idx.member_access_can_yield_type(member_access, r#type, scope),
+            Self::Parenthesized(paren) => {
+                paren.member_access_can_yield_type(member_access, r#type, scope)
+            }
+
+            Self::Boolean(_)
+            | Self::FunctionCall(_)
+            | Self::Integer(_)
+            | Self::Lua(_)
+            | Self::MacroStringLiteral(_)
+            | Self::MemberAccess(_)
+            | Self::Prefix(_) => false,
         }
     }
 }
 
+#[cfg(feature = "shulkerbox")]
 impl StringLiteral {
     fn comptime_member_access(
         &self,
@@ -461,8 +500,20 @@ impl StringLiteral {
             }),
         }
     }
+
+    fn member_access_can_yield_type(
+        member_access: &MemberAccess,
+        r#type: ValueType,
+        _scope: &Arc<Scope>,
+    ) -> bool {
+        match member_access.member().span.str() {
+            "length" => r#type == ValueType::Integer,
+            _ => false,
+        }
+    }
 }
 
+#[cfg(feature = "shulkerbox")]
 impl Identifier {
     #[expect(clippy::too_many_lines)]
     fn comptime_member_access(
@@ -597,6 +648,248 @@ impl Identifier {
                 },
             },
         )
+    }
+
+    fn member_access_can_yield_type(
+        &self,
+        member_access: &MemberAccess,
+        r#type: ValueType,
+        scope: &Arc<Scope>,
+    ) -> bool {
+        scope
+            .get_variable(self.span.str())
+            .is_some_and(|data| match data.as_ref() {
+                VariableData::ComptimeValue { value, .. } => {
+                    let value = value.read().unwrap();
+                    value.as_ref().is_some_and(|value| match value {
+                        ComptimeValue::String(_) => match member_access.member().span.str() {
+                            "length" => r#type == ValueType::Integer,
+                            _ => false,
+                        },
+                        _ => false,
+                    })
+                }
+                VariableData::BooleanStorage { .. } => match member_access.member().span.str() {
+                    "path" | "storage" => r#type == ValueType::String,
+                    _ => false,
+                },
+                VariableData::BooleanStorageArray { .. } => {
+                    match member_access.member().span.str() {
+                        "storage" => r#type == ValueType::String,
+                        #[expect(clippy::match_same_arms)]
+                        "paths" => {
+                            // TODO: implement when comptime arrays are implemented
+                            false
+                        }
+                        _ => false,
+                    }
+                }
+                VariableData::Function { .. } => match member_access.member().span.str() {
+                    "path" => r#type == ValueType::String,
+                    _ => false,
+                },
+                VariableData::InternalFunction { .. } => false,
+                VariableData::MacroParameter { .. } | VariableData::Tag { .. } => {
+                    match member_access.member().span.str() {
+                        "name" => r#type == ValueType::String,
+                        _ => false,
+                    }
+                }
+                VariableData::Scoreboard { .. } => match member_access.member().span.str() {
+                    "objective" => r#type == ValueType::String,
+                    _ => false,
+                },
+                VariableData::ScoreboardArray { .. } => {
+                    match member_access.member().span.str() {
+                        "objective" => r#type == ValueType::String,
+                        #[expect(clippy::match_same_arms)]
+                        "targets" => {
+                            // TODO: implement when comptime arrays are implemented
+                            false
+                        }
+                        _ => false,
+                    }
+                }
+                VariableData::ScoreboardValue { .. } => match member_access.member().span.str() {
+                    "target" | "objective" => r#type == ValueType::String,
+                    _ => false,
+                },
+            })
+    }
+}
+
+#[cfg(feature = "shulkerbox")]
+impl Indexed {
+    fn comptime_member_access(
+        &self,
+        member_access: &MemberAccess,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> Result<ComptimeValue, NotComptime> {
+        match self.object().as_ref() {
+            Primary::Identifier(ident) => scope.get_variable(ident.span.str()).map_or_else(
+                || {
+                    Err(NotComptime {
+                        expression: self.span(),
+                    })
+                },
+                |data| match data.as_ref() {
+                    VariableData::BooleanStorageArray {
+                        storage_name,
+                        paths,
+                    } => {
+                        if let Ok(ComptimeValue::Integer(idx)) =
+                            self.index().comptime_eval(scope, handler)
+                        {
+                            usize::try_from(idx).map_or_else(
+                                |_| {
+                                    Err(NotComptime {
+                                        expression: self.index().span(),
+                                    })
+                                },
+                                |idx| {
+                                    paths.get(idx).map_or_else(
+                                        || {
+                                            Err(NotComptime {
+                                                expression: self.span(),
+                                            })
+                                        },
+                                        |path| match member_access.member().span.str() {
+                                            "storage" => {
+                                                Ok(ComptimeValue::String(storage_name.to_owned()))
+                                            }
+                                            "path" => Ok(ComptimeValue::String(path.to_owned())),
+                                            _ => Err(NotComptime {
+                                                expression: member_access.member().span(),
+                                            }),
+                                        },
+                                    )
+                                },
+                            )
+                        } else {
+                            Err(NotComptime {
+                                expression: self.index().span(),
+                            })
+                        }
+                    }
+                    VariableData::ScoreboardArray { objective, targets } => {
+                        if let Ok(ComptimeValue::Integer(idx)) =
+                            self.index().comptime_eval(scope, handler)
+                        {
+                            usize::try_from(idx).map_or_else(
+                                |_| {
+                                    Err(NotComptime {
+                                        expression: self.index().span(),
+                                    })
+                                },
+                                |idx| {
+                                    targets.get(idx).map_or_else(
+                                        || {
+                                            Err(NotComptime {
+                                                expression: self.span(),
+                                            })
+                                        },
+                                        |target| match member_access.member().span.str() {
+                                            "objective" => {
+                                                Ok(ComptimeValue::String(objective.to_owned()))
+                                            }
+                                            "target" => {
+                                                Ok(ComptimeValue::String(target.to_owned()))
+                                            }
+                                            _ => Err(NotComptime {
+                                                expression: member_access.member().span(),
+                                            }),
+                                        },
+                                    )
+                                },
+                            )
+                        } else {
+                            Err(NotComptime {
+                                expression: self.index().span(),
+                            })
+                        }
+                    }
+                    _ => Err(NotComptime {
+                        expression: self.span(),
+                    }),
+                },
+            ),
+            _ => Err(NotComptime {
+                expression: self.span(),
+            }),
+        }
+    }
+
+    fn member_access_can_yield_type(
+        &self,
+        member_access: &MemberAccess,
+        r#type: ValueType,
+        scope: &Arc<Scope>,
+    ) -> bool {
+        match self.object().as_ref() {
+            Primary::Identifier(ident) => {
+                scope
+                    .get_variable(ident.span.str())
+                    .is_some_and(|data| match data.as_ref() {
+                        VariableData::BooleanStorageArray { .. } => {
+                            matches!(r#type, ValueType::String)
+                                && matches!(member_access.member().span.str(), "storage" | "path")
+                                && self.index().can_yield_type(ValueType::Integer, scope)
+                        }
+                        VariableData::ScoreboardArray { .. } => {
+                            matches!(r#type, ValueType::String)
+                                && matches!(
+                                    member_access.member().span.str(),
+                                    "objective" | "target"
+                                )
+                                && self.index().can_yield_type(ValueType::Integer, scope)
+                        }
+                        _ => false,
+                    })
+            }
+            _ => false,
+        }
+    }
+}
+
+#[cfg(feature = "shulkerbox")]
+impl Parenthesized {
+    fn comptime_member_access(
+        &self,
+        member_access: &MemberAccess,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> Result<ComptimeValue, NotComptime> {
+        match self.expression().as_ref() {
+            Expression::Primary(prim) => prim.comptime_member_access(member_access, scope, handler),
+            Expression::Binary(bin) => bin.comptime_member_access(member_access, scope, handler),
+        }
+    }
+
+    fn member_access_can_yield_type(
+        &self,
+        member_access: &MemberAccess,
+        r#type: ValueType,
+        scope: &Arc<Scope>,
+    ) -> bool {
+        match self.expression().as_ref() {
+            Expression::Primary(prim) => {
+                prim.member_access_can_yield_type(member_access, r#type, scope)
+            }
+            Expression::Binary(bin) => {
+                bin.member_access_can_yield_type(member_access, r#type, scope)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "shulkerbox")]
+impl MemberAccess {
+    /// Returns whether the member access can yield a certain type.
+    #[must_use]
+    pub fn can_yield_type(&self, r#type: ValueType, scope: &Arc<Scope>) -> bool {
+        self.parent()
+            .member_access_can_yield_type(self, r#type, scope)
     }
 }
 
@@ -748,6 +1041,56 @@ impl Binary {
             }),
         }
     }
+
+    fn comptime_member_access(
+        &self,
+        member_access: &MemberAccess,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> Result<ComptimeValue, NotComptime> {
+        match self.operator() {
+            BinaryOperator::Add(_) => match self.comptime_eval(scope, handler)? {
+                ComptimeValue::String(s) => match member_access.member().span.str() {
+                    "length" => i64::try_from(s.len()).map_or_else(
+                        |_| {
+                            Err(NotComptime {
+                                expression: self.span(),
+                            })
+                        },
+                        |len| Ok(ComptimeValue::Integer(len)),
+                    ),
+                    _ => Err(NotComptime {
+                        expression: self.span(),
+                    }),
+                },
+                _ => Err(NotComptime {
+                    expression: self.span(),
+                }),
+            },
+            _ => Err(NotComptime {
+                expression: self.span(),
+            }),
+        }
+    }
+
+    fn member_access_can_yield_type(
+        &self,
+        member_access: &MemberAccess,
+        r#type: ValueType,
+        scope: &Arc<Scope>,
+    ) -> bool {
+        match self.operator() {
+            BinaryOperator::Add(_) => {
+                r#type == ValueType::Integer
+                    && member_access.member().span.str() == "length"
+                    && self.left_operand().can_yield_type(ValueType::String, scope)
+                    && self
+                        .right_operand()
+                        .can_yield_type(ValueType::String, scope)
+            }
+            _ => false,
+        }
+    }
 }
 
 #[cfg(feature = "shulkerbox")]
@@ -878,7 +1221,13 @@ impl Transpiler {
             Primary::Parenthesized(parenthesized) => {
                 self.transpile_expression(parenthesized.expression(), target, scope, handler)
             }
-            Primary::MemberAccess(_) => todo!(),
+            Primary::MemberAccess(member_access) => member_access
+                .parent()
+                .comptime_member_access(member_access, scope, handler)
+                .map_or_else(
+                    |_| todo!("implement non-comptime member access"),
+                    |value| self.store_comptime_value(&value, target, member_access, handler),
+                ),
             Primary::Lua(lua) =>
             {
                 #[expect(clippy::option_if_let_else)]
@@ -1441,7 +1790,35 @@ impl Transpiler {
                     Err(err)
                 }
             }
-            Primary::MemberAccess(_) => todo!(),
+            Primary::MemberAccess(member_access) => member_access
+                .parent()
+                .comptime_member_access(member_access, scope, handler)
+                .map_or_else(
+                    |_| todo!("implement non-comptime member access"),
+                    |value| match value {
+                        ComptimeValue::Boolean(b) => {
+                            Ok((Vec::new(), ExtendedCondition::Comptime(b)))
+                        }
+                        ComptimeValue::Integer(_) => {
+                            let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                                expected_type: ExpectedType::Boolean,
+                                expression: primary.span(),
+                            });
+                            handler.receive(err.clone());
+                            Err(err)
+                        }
+                        ComptimeValue::String(s) => Ok((
+                            Vec::new(),
+                            ExtendedCondition::Runtime(Condition::Atom(
+                                MacroString::String(s).into(),
+                            )),
+                        )),
+                        ComptimeValue::MacroString(s) => Ok((
+                            Vec::new(),
+                            ExtendedCondition::Runtime(Condition::Atom(s.into())),
+                        )),
+                    },
+                ),
             Primary::Prefix(prefix) => match prefix.operator() {
                 PrefixOperator::LogicalNot(_) => {
                     let (cmds, cond) = self.transpile_primary_expression_as_condition(

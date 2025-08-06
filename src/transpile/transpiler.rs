@@ -68,6 +68,7 @@ impl Transpiler {
     ///
     /// # Errors
     /// - [`TranspileError::MissingFunctionDeclaration`] If a called function is missing
+    #[expect(clippy::too_many_lines)]
     #[tracing::instrument(level = "trace", skip_all)]
     pub fn transpile(
         mut self,
@@ -622,7 +623,8 @@ impl Transpiler {
             Primary::Integer(_)
             | Primary::Boolean(_)
             | Primary::Prefix(_)
-            | Primary::Indexed(_) => {
+            | Primary::Indexed(_)
+            | Primary::MemberAccess(_) => {
                 let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
                     Expression::Primary(expression.clone()),
                 ));
@@ -652,8 +654,6 @@ impl Transpiler {
                     Err(err)
                 }
             },
-
-            Primary::MemberAccess(_) => todo!(),
 
             Primary::Parenthesized(parenthesized) => match parenthesized.expression().as_ref() {
                 Expression::Primary(expression) => {

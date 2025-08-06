@@ -94,6 +94,9 @@ impl Namespace {
 
 impl Parser<'_> {
     /// Parses a [`ProgramFile`].
+    ///
+    /// # Errors
+    /// - cannot parse a program file from current position
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn parse_program(
         &mut self,
