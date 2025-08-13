@@ -393,11 +393,21 @@ impl Assignment {
 
         if let Some(variable_type) = variable_type {
             let expected = match variable_type {
-                VariableType::BooleanStorage | VariableType::Tag => ValueType::Boolean,
+                VariableType::BooleanStorage => ValueType::Boolean,
                 VariableType::ScoreboardValue => ValueType::Integer,
                 VariableType::ComptimeValue => {
                     // TODO: check if the expression is a constant expression
                     return Ok(());
+                }
+                VariableType::BooleanStorageArray | VariableType::Tag
+                    if matches!(self.destination(), AssignmentDestination::Indexed(..)) =>
+                {
+                    ValueType::Boolean
+                }
+                VariableType::Scoreboard | VariableType::ScoreboardArray
+                    if matches!(self.destination(), AssignmentDestination::Indexed(..)) =>
+                {
+                    ValueType::Integer
                 }
                 _ => {
                     let err = error::Error::AssignmentError(AssignmentError {
