@@ -99,7 +99,7 @@ FunctionParameterList:
 
 ```ebnf
 ArrayVariableDeclaration:
-    ('int' | 'bool') identifier '[' integer ']' VariableDeclarationAssignment?
+    ('int' | 'bool') '[' integer ']' identifier VariableDeclarationAssignment?
 ```
 
 ## ComptimeValueDeclaration

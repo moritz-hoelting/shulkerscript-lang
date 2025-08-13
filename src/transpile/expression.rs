@@ -1225,7 +1225,18 @@ impl Transpiler {
                 .parent()
                 .comptime_member_access(member_access, scope, handler)
                 .map_or_else(
-                    |_| todo!("implement non-comptime member access"),
+                    |_| {
+                        // TODO: implement non-comptime access
+
+                        let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                            expression: member_access.member().span(),
+                            reason: IllegalIndexingReason::InvalidIndex {
+                                index: member_access.member().span(),
+                            },
+                        });
+                        handler.receive(err.clone());
+                        Err(err)
+                    },
                     |value| self.store_comptime_value(&value, target, member_access, handler),
                 ),
             Primary::Lua(lua) =>
@@ -1794,7 +1805,18 @@ impl Transpiler {
                 .parent()
                 .comptime_member_access(member_access, scope, handler)
                 .map_or_else(
-                    |_| todo!("implement non-comptime member access"),
+                    |_| {
+                        // TODO: implement non-comptime access
+
+                        let err = TranspileError::IllegalIndexing(IllegalIndexing {
+                            expression: member_access.member().span(),
+                            reason: IllegalIndexingReason::InvalidIndex {
+                                index: member_access.member().span(),
+                            },
+                        });
+                        handler.receive(err.clone());
+                        Err(err)
+                    },
                     |value| match value {
                         ComptimeValue::Boolean(b) => {
                             Ok((Vec::new(), ExtendedCondition::Comptime(b)))

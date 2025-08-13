@@ -398,6 +398,11 @@ pub enum IllegalIndexingReason {
         /// The length indexed object.
         length: usize,
     },
+    /// The index provided is invalid
+    InvalidIndex {
+        /// The invalid index
+        index: Span,
+    },
 }
 
 impl Display for IllegalIndexingReason {
@@ -420,6 +425,9 @@ impl Display for IllegalIndexingReason {
                     f,
                     "The index {index} is out of bounds for the expression with length {length}."
                 )
+            }
+            Self::InvalidIndex { index } => {
+                write!(f, "The index {index} is invalid.", index = index.str())
             }
         }
     }

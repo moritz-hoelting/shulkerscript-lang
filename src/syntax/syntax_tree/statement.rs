@@ -493,7 +493,7 @@ impl SingleVariableDeclaration {
 ///
 /// ```ebnf
 /// ArrayVariableDeclaration:
-///     ('int' | 'bool') identifier '[' integer ']' VariableDeclarationAssignment?
+///     ('int' | 'bool') '[' integer ']' identifier VariableDeclarationAssignment?
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
@@ -501,9 +501,6 @@ pub struct ArrayVariableDeclaration {
     /// The type of the variable.
     #[get = "pub"]
     variable_type: Keyword,
-    /// The identifier of the variable.
-    #[get = "pub"]
-    identifier: Identifier,
     /// The opening bracket of the array.
     #[get = "pub"]
     open_bracket: Punctuation,
@@ -513,6 +510,9 @@ pub struct ArrayVariableDeclaration {
     /// The closing bracket of the array.
     #[get = "pub"]
     close_bracket: Punctuation,
+    /// The identifier of the variable.
+    #[get = "pub"]
+    identifier: Identifier,
     /// The optional assignment of the variable.
     #[get = "pub"]
     assignment: Option<VariableDeclarationAssignment>,
@@ -1053,11 +1053,7 @@ impl Parser<'_> {
             None
         };
 
-        // read identifier
-        self.stop_at_significant();
-        let identifier = self.parse_identifier(handler)?;
-
-        match self.stop_at_significant() {
+        let index = match self.stop_at_significant() {
             Reading::IntoDelimited(punc)
                 if punc.punctuation == '['
                     && matches!(variable_type.keyword, KeywordKind::Int | KeywordKind::Bool) =>
@@ -1094,84 +1090,69 @@ impl Parser<'_> {
                 let close_bracket = tree.close;
                 let inner = tree.tree?;
 
-                match inner {
-                    IndexingType::IntegerSize(size) => {
-                        let assignment = self
-                            .try_parse(|p| {
-                                // read equals sign
-                                let equals = p.parse_punctuation('=', true, &VoidHandler)?;
-
-                                // read expression
-                                let expression = p.parse_expression(&VoidHandler)?;
-
-                                Ok(VariableDeclarationAssignment { equals, expression })
-                            })
-                            .ok();
-
-                        Ok(VariableDeclaration::Array(ArrayVariableDeclaration {
-                            variable_type,
-                            identifier,
-                            open_bracket,
-                            size,
-                            close_bracket,
-                            assignment,
-                            annotations: VecDeque::new(),
-                        }))
-                    }
-                    IndexingType::None => match variable_type.keyword {
-                        KeywordKind::Int => {
-                            Ok(VariableDeclaration::Score(ScoreVariableDeclaration {
-                                int_keyword: variable_type,
-                                criteria: criteria_selection,
-                                identifier,
-                                open_bracket,
-                                close_bracket,
-                                assignment: None,
-                                annotations: VecDeque::new(),
-                            }))
-                        }
-                        KeywordKind::Bool => Ok(VariableDeclaration::Tag(TagVariableDeclaration {
-                            bool_keyword: variable_type,
-                            identifier,
-                            open_bracket,
-                            close_bracket,
-                            target_assignment: None,
-                            annotations: VecDeque::new(),
-                        })),
-                        _ => unreachable!(),
-                    },
-                }
+                Some((open_bracket, inner, close_bracket))
             }
-            // SingleVariableDeclaration with Assignment
-            Reading::Atomic(Token::Punctuation(punc)) if punc.punctuation == '=' => {
-                self.forward();
-                let equals = punc;
-                let expression = self.parse_expression(handler)?;
-                let assignment = VariableDeclarationAssignment { equals, expression };
+            _ => None,
+        };
 
-                if variable_type.keyword == KeywordKind::Val {
-                    Ok(VariableDeclaration::ComptimeValue(
-                        ComptimeValueDeclaration {
-                            val_keyword: variable_type,
-                            identifier,
-                            assignment: Some(assignment),
-                            annotations: VecDeque::new(),
-                        },
-                    ))
-                } else {
-                    Ok(VariableDeclaration::Single(SingleVariableDeclaration {
-                        variable_type,
+        // read identifier
+        self.stop_at_significant();
+        let identifier = self.parse_identifier(handler)?;
+
+        // TODO: allow assignment when map and array literals have been implemented
+        let assignment = if index.is_none() {
+            self.try_parse(|p| {
+                // read equals sign
+                let equals = p.parse_punctuation('=', true, &VoidHandler)?;
+
+                // read expression
+                let expression = p.parse_expression(&VoidHandler)?;
+
+                Ok(VariableDeclarationAssignment { equals, expression })
+            })
+            .ok()
+        } else {
+            None
+        };
+
+        match index {
+            Some((open_bracket, IndexingType::IntegerSize(size), close_bracket)) => {
+                Ok(VariableDeclaration::Array(ArrayVariableDeclaration {
+                    variable_type,
+                    identifier,
+                    open_bracket,
+                    size,
+                    close_bracket,
+                    assignment,
+                    annotations: VecDeque::new(),
+                }))
+            }
+            Some((open_bracket, IndexingType::None, close_bracket)) => {
+                match variable_type.keyword {
+                    KeywordKind::Int => Ok(VariableDeclaration::Score(ScoreVariableDeclaration {
+                        int_keyword: variable_type,
+                        criteria: criteria_selection,
                         identifier,
-                        assignment: Some(assignment),
+                        open_bracket,
+                        close_bracket,
+                        assignment: None,
                         annotations: VecDeque::new(),
-                    }))
+                    })),
+                    KeywordKind::Bool => Ok(VariableDeclaration::Tag(TagVariableDeclaration {
+                        bool_keyword: variable_type,
+                        identifier,
+                        open_bracket,
+                        close_bracket,
+                        target_assignment: None,
+                        annotations: VecDeque::new(),
+                    })),
+                    _ => unreachable!(),
                 }
             }
-            // SingleVariableDeclaration without Assignment
-            _ => Ok(VariableDeclaration::Single(SingleVariableDeclaration {
+            None => Ok(VariableDeclaration::Single(SingleVariableDeclaration {
                 variable_type,
                 identifier,
-                assignment: None,
+                assignment,
                 annotations: VecDeque::new(),
             })),
         }
