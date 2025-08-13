@@ -1,5 +1,7 @@
 //! Execute block statement syntax tree.
 
+#![expect(clippy::struct_field_names)]
+
 use derive_more::From;
 use enum_as_inner::EnumAsInner;
 use getset::Getters;
@@ -824,7 +826,7 @@ impl Parser<'_> {
                             expected: SyntaxKind::Punctuation('('),
                             found: unexpected.into_token(),
                         });
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         Err(err)
                     }
                 }?;
@@ -842,7 +844,7 @@ impl Parser<'_> {
                     expected: SyntaxKind::ExecuteBlock,
                     found: unexpected.into_token(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 Err(err)
             }
         }
@@ -878,7 +880,7 @@ impl Parser<'_> {
                     expected: SyntaxKind::ExecuteBlockTail,
                     found: unexpected.into_token(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 Err(err)
             }
         }

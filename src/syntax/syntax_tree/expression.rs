@@ -666,7 +666,7 @@ impl Parser<'_> {
                 // eat the macro string literal
                 self.forward();
 
-                Ok(Primary::MacroStringLiteral(macro_string_literal))
+                Ok(Primary::MacroStringLiteral(*macro_string_literal))
             }
 
             // lua code expression
@@ -687,7 +687,7 @@ impl Parser<'_> {
                                 expected: syntax::error::SyntaxKind::Identifier,
                                 found: unexpected.into_token(),
                             });
-                            handler.receive(err.clone());
+                            handler.receive(Box::new(err.clone()));
                             Err(err)
                         }
                     },
@@ -741,7 +741,7 @@ impl Parser<'_> {
                     expected: syntax::error::SyntaxKind::Expression,
                     found: unexpected.into_token(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
 
                 Err(err)
             }
@@ -829,7 +829,7 @@ impl Parser<'_> {
                         expected: syntax::error::SyntaxKind::Operator,
                         found: Some(Token::Punctuation(punc)),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     Err(err)
                 }
             },
@@ -838,7 +838,7 @@ impl Parser<'_> {
                     expected: syntax::error::SyntaxKind::Operator,
                     found: unexpected.into_token(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 Err(err)
             }
         }

@@ -100,7 +100,7 @@ pub fn parse(
     tracing::info!("Parsing the source code at path: {}", path.display());
 
     let mut parser = Parser::new(&tokens);
-    let program = parser.parse_program(handler)?;
+    let program = parser.parse_program(handler).map_err(Box::new)?;
 
     if handler.has_received() {
         return Err(Error::other(
@@ -165,8 +165,9 @@ where
 
     tracing::info!("Transpiling the source code.");
 
-    let datapack =
-        Transpiler::new(main_namespace_name, pack_format).transpile(&programs, handler)?;
+    let datapack = Transpiler::new(main_namespace_name, pack_format)
+        .transpile(&programs, handler)
+        .map_err(Box::new)?;
 
     if handler.has_received() {
         return Err(Error::other(

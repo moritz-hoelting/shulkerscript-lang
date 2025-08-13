@@ -388,7 +388,7 @@ impl Parser<'_> {
                     expected: SyntaxKind::Punctuation('#'),
                     found: unexpected.into_token(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 Err(err)
             }
         }

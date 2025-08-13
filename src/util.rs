@@ -4,7 +4,7 @@ use std::borrow::Cow;
 
 /// Escapes `"` and `\` in a string.
 #[must_use]
-pub fn escape_str(s: &str) -> Cow<str> {
+pub fn escape_str(s: &str) -> Cow<'_, str> {
     if s.contains('"') || s.contains('\\') {
         let mut escaped = String::with_capacity(s.len());
         for c in s.chars() {
@@ -22,7 +22,7 @@ pub fn escape_str(s: &str) -> Cow<str> {
 
 /// Unescapes '\`', `\`, `\n`, `\r` and `\t` in a string.
 #[must_use]
-pub fn unescape_macro_string(s: &str) -> Cow<str> {
+pub fn unescape_macro_string(s: &str) -> Cow<'_, str> {
     if s.contains('\\') || s.contains('`') {
         Cow::Owned(
             s.replace("\\n", "\n")
@@ -39,7 +39,7 @@ pub fn unescape_macro_string(s: &str) -> Cow<str> {
 /// Transforms an identifier to a macro name that only contains `a-zA-Z0-9_`.
 #[cfg(feature = "shulkerbox")]
 #[must_use]
-pub fn identifier_to_macro(ident: &str) -> std::borrow::Cow<str> {
+pub fn identifier_to_macro(ident: &str) -> std::borrow::Cow<'_, str> {
     if ident.contains("__")
         || ident
             .chars()
@@ -82,7 +82,7 @@ pub fn identifier_to_macro(ident: &str) -> std::borrow::Cow<str> {
 /// Transforms an identifier to a macro name that only contains `a-zA-Z0-9_`.
 #[cfg(feature = "shulkerbox")]
 #[must_use]
-pub fn identifier_to_scoreboard_target(ident: &str) -> std::borrow::Cow<str> {
+pub fn identifier_to_scoreboard_target(ident: &str) -> std::borrow::Cow<'_, str> {
     if !(..=16).contains(&ident.len())
         || ident
             .chars()

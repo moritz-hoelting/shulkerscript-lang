@@ -60,7 +60,7 @@ impl MacroString {
     ///
     /// # Errors
     /// - If the macro string contains macros
-    pub fn as_str(&self) -> Result<std::borrow::Cow<str>, &[MacroStringPart]> {
+    pub fn as_str(&self) -> Result<std::borrow::Cow<'_, str>, &[MacroStringPart]> {
         match self {
             Self::String(s) => Ok(std::borrow::Cow::Borrowed(s)),
             Self::MacroString(parts) if self.contains_macros() => Err(parts),

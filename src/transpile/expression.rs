@@ -405,7 +405,7 @@ impl Primary {
             Self::Lua(lua) => lua
                 .eval_comptime(scope, &VoidHandler)
                 .inspect_err(|err| {
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                 })
                 .map_err(|_| NotComptime {
                     expression: lua.span(),
@@ -1191,7 +1191,7 @@ impl Transpiler {
                                     .into(),
                             },
                         );
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         Err(err)
                     } else {
                         let prepare_cmd = Command::Raw(format!("tag {entity} remove {tag_name}"));
@@ -1234,7 +1234,7 @@ impl Transpiler {
                                 index: member_access.member().span(),
                             },
                         });
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         Err(err)
                     },
                     |value| self.store_comptime_value(&value, target, member_access, handler),
@@ -1248,7 +1248,7 @@ impl Transpiler {
                     let err = TranspileError::MissingValue(MissingValue {
                         expression: lua.span(),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     Err(err)
                 }
             }
@@ -1273,7 +1273,7 @@ impl Transpiler {
                         expected_type: target.value_type().into(),
                         expression: primary.span(),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     Err(err)
                 }
             }
@@ -1337,7 +1337,7 @@ impl Transpiler {
                             expression: prefix.span(),
                             expected_type: target.value_type().into(),
                         });
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         Err(err)
                     }
                 },
@@ -1433,7 +1433,7 @@ impl Transpiler {
                                 expected_type: target.value_type().into(),
                                 expression: primary.span(),
                             });
-                            handler.receive(err.clone());
+                            handler.receive(Box::new(err.clone()));
                             Err(err)
                         }
                     }?;
@@ -1443,7 +1443,7 @@ impl Transpiler {
                     let err = TranspileError::UnknownIdentifier(UnknownIdentifier {
                         identifier: ident.span.clone(),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     Err(err)
                 }
             }
@@ -1455,7 +1455,7 @@ impl Transpiler {
                         reason: IllegalIndexingReason::NotIdentifier,
                         expression: indexed.object().span(),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     Err(err)
                 }?;
                 let variable = scope.get_variable(ident.span.str());
@@ -1477,7 +1477,7 @@ impl Transpiler {
                                     },
                                     expression: indexed.index().span(),
                                 });
-                                handler.receive(err.clone());
+                                handler.receive(Box::new(err.clone()));
                                 Err(err)
                             }
                         }
@@ -1502,7 +1502,7 @@ impl Transpiler {
                                         },
                                         expression: indexed.index().span(),
                                     });
-                                    handler.receive(err.clone());
+                                    handler.receive(Box::new(err.clone()));
                                     Err(err)
                                 }
                             } else {
@@ -1512,7 +1512,7 @@ impl Transpiler {
                                     },
                                     expression: indexed.index().span(),
                                 });
-                                handler.receive(err.clone());
+                                handler.receive(Box::new(err.clone()));
                                 Err(err)
                             }
                         }
@@ -1541,7 +1541,7 @@ impl Transpiler {
                                         },
                                         expression: indexed.index().span(),
                                     });
-                                    handler.receive(err.clone());
+                                    handler.receive(Box::new(err.clone()));
                                     Err(err)
                                 }
                             } else {
@@ -1551,7 +1551,7 @@ impl Transpiler {
                                     },
                                     expression: indexed.index().span(),
                                 });
-                                handler.receive(err.clone());
+                                handler.receive(Box::new(err.clone()));
                                 Err(err)
                             }
                         }
@@ -1560,7 +1560,7 @@ impl Transpiler {
                                 expected_type: target.value_type().into(),
                                 expression: primary.span(),
                             });
-                            handler.receive(err.clone());
+                            handler.receive(Box::new(err.clone()));
                             Err(err)
                         }
                     }?;
@@ -1570,7 +1570,7 @@ impl Transpiler {
                     let err = TranspileError::UnknownIdentifier(UnknownIdentifier {
                         identifier: ident.span.clone(),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     Err(err)
                 }
             }
@@ -1647,7 +1647,7 @@ impl Transpiler {
                     expected_type: ExpectedType::Boolean,
                     expression: primary.span(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 Err(err)
             }
             Primary::StringLiteral(s) => Ok((
@@ -1670,7 +1670,7 @@ impl Transpiler {
                             message: "Function calls as conditions do not support arguments."
                                 .into(),
                         });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     Err(err)
                 } else {
                     let (func_location, _) = self.get_or_transpile_function(
@@ -1713,7 +1713,7 @@ impl Transpiler {
                                 expected_type: ExpectedType::Boolean,
                                 expression: primary.span(),
                             });
-                            handler.receive(err.clone());
+                            handler.receive(Box::new(err.clone()));
                             Err(err)
                         }
                     }
@@ -1721,7 +1721,7 @@ impl Transpiler {
                     let err = TranspileError::UnknownIdentifier(UnknownIdentifier {
                         identifier: ident.span.clone(),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     Err(err)
                 }
             }
@@ -1736,7 +1736,7 @@ impl Transpiler {
                         reason: IllegalIndexingReason::NotIdentifier,
                         expression: indexed.object().span(),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     Err(err)
                 }?;
                 #[expect(clippy::option_if_let_else)]
@@ -1770,7 +1770,7 @@ impl Transpiler {
                                         },
                                         expression: indexed.index().span(),
                                     });
-                                    handler.receive(err.clone());
+                                    handler.receive(Box::new(err.clone()));
                                     Err(err)
                                 }
                             } else {
@@ -1780,7 +1780,7 @@ impl Transpiler {
                                     },
                                     expression: indexed.index().span(),
                                 });
-                                handler.receive(err.clone());
+                                handler.receive(Box::new(err.clone()));
                                 Err(err)
                             }
                         }
@@ -1789,7 +1789,7 @@ impl Transpiler {
                                 expected_type: ExpectedType::Boolean,
                                 expression: primary.span(),
                             });
-                            handler.receive(err.clone());
+                            handler.receive(Box::new(err.clone()));
                             Err(err)
                         }
                     }
@@ -1797,7 +1797,7 @@ impl Transpiler {
                     let err = TranspileError::UnknownIdentifier(UnknownIdentifier {
                         identifier: ident.span.clone(),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     Err(err)
                 }
             }
@@ -1814,7 +1814,7 @@ impl Transpiler {
                                 index: member_access.member().span(),
                             },
                         });
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         Err(err)
                     },
                     |value| match value {
@@ -1826,7 +1826,7 @@ impl Transpiler {
                                 expected_type: ExpectedType::Boolean,
                                 expression: primary.span(),
                             });
-                            handler.receive(err.clone());
+                            handler.receive(Box::new(err.clone()));
                             Err(err)
                         }
                         ComptimeValue::String(s) => Ok((
@@ -1882,7 +1882,7 @@ impl Transpiler {
                         expected_type: ExpectedType::Boolean,
                         expression: primary.span(),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     Err(err)
                 }
             },
@@ -1903,7 +1903,7 @@ impl Transpiler {
                         expected_type: ExpectedType::Boolean,
                         expression: primary.span(),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     Err(err)
                 }
             },
@@ -1933,7 +1933,7 @@ impl Transpiler {
                     expected_type: ExpectedType::Boolean,
                     expression: binary.span(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 Err(err)
             }
         }
@@ -2022,7 +2022,7 @@ impl Transpiler {
                     expected_type: ExpectedType::Boolean,
                     expression: binary.span(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 return Err(err);
             }
             DataLocation::Storage {
@@ -2049,7 +2049,7 @@ impl Transpiler {
                         expected_type: ExpectedType::Boolean,
                         expression: binary.span(),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     return Err(err);
                 }
             },
@@ -2195,7 +2195,7 @@ impl Transpiler {
                         expected_type: ExpectedType::Boolean,
                         expression: source.span(),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     Err(err)
                 }
                 DataLocation::Storage {
@@ -2219,7 +2219,7 @@ impl Transpiler {
                             expression: source.span(),
                             expected_type: target.value_type().into(),
                         });
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         Err(err)
                     }
                 }
@@ -2245,7 +2245,7 @@ impl Transpiler {
                             expression: source.span(),
                             expected_type: target.value_type().into(),
                         });
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         Err(err)
                     }
                 }
@@ -2280,7 +2280,7 @@ impl Transpiler {
                             expected_type: target.value_type().into(),
                             expression: source.span(),
                         });
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         Err(err)
                     }
                 }
@@ -2316,7 +2316,7 @@ impl Transpiler {
                         expected_type: ExpectedType::Boolean,
                         expression: source.span(),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     return Err(err);
                 }
             }

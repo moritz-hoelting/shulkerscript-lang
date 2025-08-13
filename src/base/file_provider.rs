@@ -12,7 +12,7 @@ pub trait FileProvider {
     /// # Errors
     /// - If an error occurs while reading the file.
     /// - If the file does not exist.
-    fn read_bytes<P: AsRef<Path>>(&self, path: P) -> Result<Cow<[u8]>, Error>;
+    fn read_bytes<P: AsRef<Path>>(&self, path: P) -> Result<Cow<'_, [u8]>, Error>;
 
     /// Reads the contents of the file at the given path.
     ///
@@ -20,7 +20,7 @@ pub trait FileProvider {
     /// - If an error occurs while reading the file.
     /// - If the file does not exist.
     /// - If the file is not valid UTF-8.
-    fn read_str<P: AsRef<Path>>(&self, path: P) -> Result<Cow<str>, Error> {
+    fn read_str<P: AsRef<Path>>(&self, path: P) -> Result<Cow<'_, str>, Error> {
         let bytes = self.read_bytes(path)?;
         let string = std::str::from_utf8(&bytes)
             .map_err(|err| {
@@ -57,14 +57,14 @@ where
 }
 
 impl FileProvider for FsProvider {
-    fn read_bytes<P: AsRef<Path>>(&self, path: P) -> Result<Cow<[u8]>, Error> {
+    fn read_bytes<P: AsRef<Path>>(&self, path: P) -> Result<Cow<'_, [u8]>, Error> {
         let full_path = self.root.join(path);
         std::fs::read(full_path)
             .map(Cow::Owned)
             .map_err(Error::from)
     }
 
-    fn read_str<P: AsRef<Path>>(&self, path: P) -> Result<Cow<str>, Error> {
+    fn read_str<P: AsRef<Path>>(&self, path: P) -> Result<Cow<'_, str>, Error> {
         let full_path = self.root.join(path);
         std::fs::read_to_string(full_path)
             .map(Cow::Owned)
@@ -178,7 +178,7 @@ mod vfs {
     use shulkerbox::virtual_fs::{VFile, VFolder};
 
     impl FileProvider for VFolder {
-        fn read_bytes<P: AsRef<Path>>(&self, path: P) -> Result<Cow<[u8]>, Error> {
+        fn read_bytes<P: AsRef<Path>>(&self, path: P) -> Result<Cow<'_, [u8]>, Error> {
             normalize_path_str(path).map_or_else(
                 || Err(Error::from(std::io::ErrorKind::InvalidData)),
                 |path| {
@@ -189,7 +189,7 @@ mod vfs {
             )
         }
 
-        fn read_str<P: AsRef<Path>>(&self, path: P) -> Result<Cow<str>, Error> {
+        fn read_str<P: AsRef<Path>>(&self, path: P) -> Result<Cow<'_, str>, Error> {
             normalize_path_str(path).map_or_else(
                 || Err(Error::from(std::io::ErrorKind::InvalidData)),
                 |path| {

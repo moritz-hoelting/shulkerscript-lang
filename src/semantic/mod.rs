@@ -70,7 +70,7 @@ fn get_global_scope(declarations: &[Declaration]) -> SemanticScope<'static> {
 impl Namespace {
     /// Analyzes the semantics of the namespace.
     fn analyze_semantics(&self, handler: &impl Handler<base::Error>) -> Result<(), error::Error> {
-        let name = self.namespace_name();
+        let name = self.name();
         Self::validate_str(name.str_content().as_ref()).map_err(|invalid_chars| {
             let err = error::Error::from(InvalidNamespaceName {
                 name: name.clone(),
@@ -561,7 +561,7 @@ impl Primary {
                         VariableType::Function | VariableType::InternalFunction => Ok(()),
                         _ => {
                             let err = error::Error::UnexpectedExpression(UnexpectedExpression(
-                                Expression::Primary(self.clone()),
+                                Box::new(Expression::Primary(self.clone())),
                             ));
                             handler.receive(err.clone());
                             Err(err)
@@ -930,9 +930,10 @@ impl MacroStringLiteral {
                 MacroStringLiteralPart::MacroUsage { identifier, .. } => {
                     if let Some(variable_type) = scope.get_variable(identifier.span.str()) {
                         if variable_type != VariableType::MacroParameter {
-                            let err = error::Error::UnexpectedExpression(UnexpectedExpression(
-                                Expression::Primary(Primary::Identifier(identifier.clone())),
-                            ));
+                            let err =
+                                error::Error::UnexpectedExpression(UnexpectedExpression(Box::new(
+                                    Expression::Primary(Primary::Identifier(identifier.clone())),
+                                )));
                             handler.receive(err.clone());
                             errs.push(err);
                         }

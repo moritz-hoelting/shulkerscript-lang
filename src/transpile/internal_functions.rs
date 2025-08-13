@@ -132,7 +132,7 @@ fn print_function(
                     Ok((false, cmd, value))
                 }
                 _ => Err(TranspileError::UnexpectedExpression(UnexpectedExpression(
-                    Expression::Primary(Primary::Identifier(ident.to_owned())),
+                    Box::new(Expression::Primary(Primary::Identifier(ident.to_owned()))),
                 ))),
             }
         } else {

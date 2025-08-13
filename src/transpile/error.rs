@@ -104,6 +104,8 @@ impl MissingFunctionDeclaration {
 
 impl Display for MissingFunctionDeclaration {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use std::fmt::Write as _;
+
         let message = format!(
             "no matching function declaration found for invocation of function `{}`",
             self.span.str()
@@ -118,7 +120,7 @@ impl Display for MissingFunctionDeclaration {
                 if i > 0 {
                     message.push_str(", ");
                 }
-                message.push_str(&format!("`{}`", alternative.identifier_span.str()));
+                let _ = write!(message, "`{}`", alternative.identifier_span.str());
             }
             Some(message + "?")
         };

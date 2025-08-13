@@ -1,6 +1,7 @@
 //! Syntax tree nodes for declarations.
 
-#![allow(missing_docs)]
+#![expect(missing_docs)]
+#![expect(clippy::struct_field_names)]
 
 use std::collections::VecDeque;
 
@@ -391,7 +392,7 @@ impl Parser<'_> {
 
                 declaration
                     .with_annotation(annotation)
-                    .inspect_err(|err| handler.receive(err.clone()))
+                    .inspect_err(|err| handler.receive(Box::new(err.clone())))
             }
 
             Reading::Atomic(Token::Keyword(from_keyword))
@@ -441,7 +442,7 @@ impl Parser<'_> {
                         expected: SyntaxKind::Punctuation('*'),
                         found: self.stop_at_significant().into_token(),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
 
                     Err(err)
                 }
@@ -511,7 +512,7 @@ impl Parser<'_> {
                     expected: SyntaxKind::Declaration,
                     found: unexpected.into_token(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
 
                 Err(err)
             }
@@ -562,7 +563,7 @@ impl Parser<'_> {
                     expected: SyntaxKind::Keyword(KeywordKind::Function),
                     found: unexpected.into_token(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 Err(err)
             }
         }
@@ -615,7 +616,7 @@ impl Parser<'_> {
                     ]),
                     found: unexpected.into_token(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 Err(err)
             }
         }

@@ -7,11 +7,11 @@ pub enum Error {
     #[error(transparent)]
     LexicalError(#[from] crate::lexical::Error),
     #[error(transparent)]
-    ParseError(#[from] crate::syntax::error::Error),
+    ParseError(#[from] Box<crate::syntax::error::Error>),
     #[error(transparent)]
     SemanticError(#[from] crate::semantic::error::Error),
     #[error(transparent)]
-    TranspileError(#[from] crate::transpile::TranspileError),
+    TranspileError(#[from] Box<crate::transpile::TranspileError>),
     #[error("An error occurred: {0}")]
     Other(String),
 }

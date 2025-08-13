@@ -196,13 +196,12 @@ impl Transpiler {
                 }
                 TranspileAnnotationValue::Expression(_, span)
                 | TranspileAnnotationValue::Map(_, span) => {
-                    let error =
-                        TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                            annotation: span.clone(),
-                            message: "uninstall annotation must not have a value".to_string(),
-                        });
-                    handler.receive(error.clone());
-                    Err(error)
+                    let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                        annotation: span.clone(),
+                        message: "uninstall annotation must not have a value".to_string(),
+                    });
+                    handler.receive(Box::new(err.clone()));
+                    Err(err)
                 }
             })
             .collect::<TranspileResult<Vec<_>>>()?;
@@ -273,7 +272,7 @@ impl Transpiler {
                     })
                     .collect();
                 let function_data = FunctionData {
-                    namespace: namespace.namespace_name().str_content().to_string(),
+                    namespace: namespace.name().str_content().to_string(),
                     identifier_span: identifier_span.clone(),
                     parameters: function
                         .parameters()
@@ -318,9 +317,7 @@ impl Transpiler {
                 }
             }
             Declaration::Tag(tag) => {
-                let namespace = self
-                    .datapack
-                    .namespace_mut(namespace.namespace_name().str_content());
+                let namespace = self.datapack.namespace_mut(namespace.name().str_content());
                 let sb_tag = namespace.tag_mut(tag.name().str_content(), tag.tag_type());
 
                 if let Some(list) = &tag.entries().list {
@@ -344,7 +341,7 @@ impl Transpiler {
 
                 self.setup_cmds.extend(setup_variable_cmds);
             }
-        };
+        }
 
         Ok(())
     }
@@ -415,11 +412,11 @@ impl Transpiler {
                         self.transpile_run_expression(prefix.operand(), scope, handler)
                     }
                     unexpected => {
-                        let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
-                            unexpected.clone(),
+                        let err = TranspileError::UnexpectedExpression(UnexpectedExpression(
+                            Box::new(unexpected.clone()),
                         ));
-                        handler.receive(error.clone());
-                        Err(error)
+                        handler.receive(Box::new(err.clone()));
+                        Err(err)
                     }
                 },
                 SemicolonStatement::VariableDeclaration(decl) => self
@@ -495,11 +492,11 @@ impl Transpiler {
                                 read_only: _,
                             } => value.read().unwrap().as_ref().map_or_else(
                                 || {
-                                    let error = TranspileError::MissingValue(MissingValue {
+                                    let err = TranspileError::MissingValue(MissingValue {
                                         expression: ident.span.clone(),
                                     });
-                                    handler.receive(error.clone());
-                                    Err(error)
+                                    handler.receive(Box::new(err.clone()));
+                                    Err(err)
                                 },
                                 |val| {
                                     let cmd = val.to_string_no_macro().map_or_else(
@@ -532,20 +529,21 @@ impl Transpiler {
                                 )))),
                             ),
                             _ => {
-                                let error =
-                                    TranspileError::UnexpectedExpression(UnexpectedExpression(
-                                        Expression::Primary(Primary::Identifier(ident.clone())),
-                                    ));
-                                handler.receive(error.clone());
-                                return Err(error);
+                                let err = TranspileError::UnexpectedExpression(
+                                    UnexpectedExpression(Box::new(Expression::Primary(
+                                        Primary::Identifier(ident.clone()),
+                                    ))),
+                                );
+                                handler.receive(Box::new(err.clone()));
+                                return Err(err);
                             }
                         }
                     } else {
-                        let error = TranspileError::UnknownIdentifier(UnknownIdentifier {
+                        let err = TranspileError::UnknownIdentifier(UnknownIdentifier {
                             identifier: ident.span.clone(),
                         });
-                        handler.receive(error.clone());
-                        return Err(error);
+                        handler.receive(Box::new(err.clone()));
+                        return Err(err);
                     }
                 }
                 _ => {
@@ -590,11 +588,11 @@ impl Transpiler {
                     read_only: _,
                 }) => value.read().unwrap().as_ref().map_or_else(
                     || {
-                        let error = TranspileError::MissingValue(MissingValue {
+                        let err = TranspileError::MissingValue(MissingValue {
                             expression: ident.span.clone(),
                         });
-                        handler.receive(error.clone());
-                        Err(error)
+                        handler.receive(Box::new(err.clone()));
+                        Err(err)
                     },
                     |val| {
                         let cmd = val.to_string_no_macro().map_or_else(
@@ -605,18 +603,18 @@ impl Transpiler {
                     },
                 ),
                 Some(_) => {
-                    let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
+                    let err = TranspileError::UnexpectedExpression(UnexpectedExpression(Box::new(
                         Expression::Primary(expression.clone()),
-                    ));
-                    handler.receive(error.clone());
-                    Err(error)
+                    )));
+                    handler.receive(Box::new(err.clone()));
+                    Err(err)
                 }
                 None => {
-                    let error = TranspileError::UnknownIdentifier(UnknownIdentifier {
+                    let err = TranspileError::UnknownIdentifier(UnknownIdentifier {
                         identifier: ident.span.clone(),
                     });
-                    handler.receive(error.clone());
-                    Err(error)
+                    handler.receive(Box::new(err.clone()));
+                    Err(err)
                 }
             },
 
@@ -625,11 +623,11 @@ impl Transpiler {
             | Primary::Prefix(_)
             | Primary::Indexed(_)
             | Primary::MemberAccess(_) => {
-                let error = TranspileError::UnexpectedExpression(UnexpectedExpression(
+                let err = TranspileError::UnexpectedExpression(UnexpectedExpression(Box::new(
                     Expression::Primary(expression.clone()),
-                ));
-                handler.receive(error.clone());
-                Err(error)
+                )));
+                handler.receive(Box::new(err.clone()));
+                Err(err)
             }
             Primary::StringLiteral(string) => {
                 Ok(vec![Command::Raw(string.str_content().to_string())])
@@ -643,14 +641,14 @@ impl Transpiler {
                         expected_type: ExpectedType::String,
                         expression: code.span(),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     Err(err)
                 }
                 Err(_) => {
                     let err = TranspileError::MissingValue(MissingValue {
                         expression: code.span(),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     Err(err)
                 }
             },
@@ -667,12 +665,12 @@ impl Transpiler {
                             expression: bin.span(),
                             expected_type: ExpectedType::String,
                         });
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         Err(err)
                     }
                     Err(not_comptime) => {
                         let err = TranspileError::NotComptime(not_comptime);
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         Err(err)
                     }
                 },
@@ -694,7 +692,7 @@ impl Transpiler {
             scope.get_variable(func.identifier().span.str()).as_deref()
         {
             implementation(self, scope, func).inspect_err(|err| {
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
             })
         } else {
             let (location, arguments) = self.get_or_transpile_function(

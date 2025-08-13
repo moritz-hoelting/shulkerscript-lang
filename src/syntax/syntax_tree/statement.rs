@@ -798,7 +798,7 @@ pub enum AssignmentDestination {
     /// Assignment to an identifier.
     Identifier(Identifier),
     /// Assignment to an indexed identifier.
-    Indexed(Identifier, Punctuation, Expression, Punctuation),
+    Indexed(Identifier, Punctuation, Box<Expression>, Punctuation),
 }
 
 impl SourceElement for AssignmentDestination {
@@ -872,7 +872,7 @@ impl Parser<'_> {
 
                 statement
                     .with_annotation(annotation)
-                    .inspect_err(|err| handler.receive(err.clone()))
+                    .inspect_err(|err| handler.receive(Box::new(err.clone())))
             }
             // variable declaration
             Reading::Atomic(Token::CommandLiteral(command)) => {
@@ -971,7 +971,12 @@ impl Parser<'_> {
                                 let close = tree.close;
                                 let expression = tree.tree?;
 
-                                AssignmentDestination::Indexed(identifier, open, expression, close)
+                                AssignmentDestination::Indexed(
+                                    identifier,
+                                    open,
+                                    Box::new(expression),
+                                    close,
+                                )
                             }
                             _ => AssignmentDestination::Identifier(identifier),
                         }
@@ -1036,7 +1041,7 @@ impl Parser<'_> {
                     ]),
                     found: unexpected.into_token(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 return Err(err);
             }
         };
@@ -1076,7 +1081,7 @@ impl Parser<'_> {
                                     expected: SyntaxKind::Integer,
                                     found: unexpected.into_token(),
                                 });
-                                handler.receive(err.clone());
+                                handler.receive(Box::new(err.clone()));
                                 return Err(err);
                             }
                         };

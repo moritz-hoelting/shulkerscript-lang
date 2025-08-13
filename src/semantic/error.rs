@@ -48,7 +48,7 @@ pub enum Error {
 
 /// An error that occurs when a function declaration is missing.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct UnexpectedExpression(pub Expression);
+pub struct UnexpectedExpression(pub Box<Expression>);
 
 impl Display for UnexpectedExpression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

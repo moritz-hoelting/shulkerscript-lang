@@ -161,7 +161,7 @@ pub enum Token {
     DocComment(DocComment),
     CommandLiteral(CommandLiteral),
     StringLiteral(StringLiteral),
-    MacroStringLiteral(MacroStringLiteral),
+    MacroStringLiteral(Box<MacroStringLiteral>),
 }
 
 impl SourceElement for Token {
@@ -325,7 +325,7 @@ pub struct StringLiteral {
 impl StringLiteral {
     /// Returns the string content without escapement characters, leading and trailing double quotes.
     #[must_use]
-    pub fn str_content(&self) -> Cow<str> {
+    pub fn str_content(&self) -> Cow<'_, str> {
         let string = self.span.str();
         let string = &string[1..string.len() - 1];
         if string.contains('\\') {
@@ -740,7 +740,7 @@ impl Token {
                 handler.receive(error::Error::from(UnterminatedDelimitedComment {
                     span: Span::new(iter.source_file().clone(), start, start + 2).unwrap(),
                 }));
-                return Err(TokenizeError::FatalLexicalError);
+                Err(TokenizeError::FatalLexicalError)
             }
         }
         // When there is no second slash and at the start of a line
@@ -883,14 +883,14 @@ impl Token {
             }
             .into())
         } else {
-            Ok(MacroStringLiteral {
+            Ok(Box::new(MacroStringLiteral {
                 starting_backtick,
                 parts,
                 ending_backtick: Punctuation {
                     span: Self::create_span(start, iter),
                     punctuation: '`',
                 },
-            }
+            })
             .into())
         }
     }

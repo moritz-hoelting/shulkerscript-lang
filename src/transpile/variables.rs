@@ -308,7 +308,7 @@ impl Transpiler {
                             .comptime_eval(scope, handler)
                             .map_err(|err| {
                                 let err = TranspileError::NotComptime(err);
-                                handler.receive(err.clone());
+                                handler.receive(Box::new(err.clone()));
                                 err
                             })?,
                     )
@@ -569,7 +569,7 @@ impl Transpiler {
                             },
                             expression: expression.span(),
                         });
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         return Err(err);
                     }
                     Some(_) => {
@@ -579,7 +579,7 @@ impl Transpiler {
                                 expected: ExpectedType::String,
                             },
                         });
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         return Err(err);
                     }
                     None => {
@@ -588,7 +588,7 @@ impl Transpiler {
                             identifier: identifier.span(),
                             message: "Cannot assign to a scoreboard without indexing".to_string(),
                         });
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         return Err(err);
                     }
                 },
@@ -617,7 +617,7 @@ impl Transpiler {
                                         length: targets.len(),
                                     },
                                 });
-                                handler.receive(err.clone());
+                                handler.receive(Box::new(err.clone()));
                                 return Err(err);
                             }
                         }
@@ -628,7 +628,7 @@ impl Transpiler {
                                     expected: ExpectedType::Integer,
                                 },
                             });
-                            handler.receive(err.clone());
+                            handler.receive(Box::new(err.clone()));
                             return Err(err);
                         }
                         None => {
@@ -637,7 +637,7 @@ impl Transpiler {
                                 identifier: identifier.span(),
                                 message: "Cannot assign to an array without indexing".to_string(),
                             });
-                            handler.receive(err.clone());
+                            handler.receive(Box::new(err.clone()));
                             return Err(err);
                         }
                     }
@@ -671,7 +671,7 @@ impl Transpiler {
                                         length: paths.len(),
                                     },
                                 });
-                                handler.receive(err.clone());
+                                handler.receive(Box::new(err.clone()));
                                 return Err(err);
                             }
                         }
@@ -682,7 +682,7 @@ impl Transpiler {
                                     expected: ExpectedType::Integer,
                                 },
                             });
-                            handler.receive(err.clone());
+                            handler.receive(Box::new(err.clone()));
                             return Err(err);
                         }
                         None => {
@@ -691,7 +691,7 @@ impl Transpiler {
                                 identifier: identifier.span(),
                                 message: "Cannot assign to an array without indexing".to_string(),
                             });
-                            handler.receive(err.clone());
+                            handler.receive(Box::new(err.clone()));
                             return Err(err);
                         }
                     }
@@ -709,7 +709,7 @@ impl Transpiler {
                                 expected: ExpectedType::String,
                             },
                         });
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         return Err(err);
                     }
                     Some(_) => {
@@ -719,7 +719,7 @@ impl Transpiler {
                                 expected: ExpectedType::String,
                             },
                         });
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         return Err(err);
                     }
                     None => {
@@ -728,7 +728,7 @@ impl Transpiler {
                             identifier: identifier.span(),
                             message: "Cannot assign to a tag without indexing".to_string(),
                         });
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         return Err(err);
                     }
                 },
@@ -738,13 +738,13 @@ impl Transpiler {
                             identifier: identifier.span(),
                             message: "Cannot assign to a read-only value.".to_string(),
                         });
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         return Err(err);
                     }
                     let comptime_value =
                         expression.comptime_eval(scope, handler).map_err(|err| {
                             let err = TranspileError::NotComptime(err);
-                            handler.receive(err.clone());
+                            handler.receive(Box::new(err.clone()));
                             err
                         })?;
                     *value.write().unwrap() = Some(comptime_value);
@@ -765,7 +765,7 @@ impl Transpiler {
                             }
                         ),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     Err(err)
                 }
             }?;
@@ -775,7 +775,7 @@ impl Transpiler {
                 identifier: identifier.span(),
                 message: "Variable does not exist.".to_string(),
             });
-            handler.receive(err.clone());
+            handler.receive(Box::new(err.clone()));
             Err(err)
         }
     }
@@ -796,12 +796,12 @@ impl Transpiler {
         let deobfuscate_annotation = deobfuscate_annotations.next();
 
         if let Some(duplicate) = deobfuscate_annotations.next() {
-            let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+            let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
                 annotation: duplicate.span(),
                 message: "Multiple deobfuscate annotations are not allowed.".to_string(),
             });
-            handler.receive(error.clone());
-            return Err(error);
+            handler.receive(Box::new(err.clone()));
+            return Err(err);
         }
         if let Some(deobfuscate_annotation) = deobfuscate_annotation {
             let deobfuscate_annotation_value = TranspileAnnotationValue::from_annotation_value(
@@ -818,33 +818,32 @@ impl Transpiler {
                     {
                         // TODO: change invalid criteria if boolean
                         if !crate::util::is_valid_scoreboard_objective_name(&name_eval) {
-                            let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                            let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
                                                     annotation: deobfuscate_annotation.span(),
                                                     message: "Deobfuscate annotation must be a valid scoreboard objective name.".to_string()
                                                 });
-                            handler.receive(error.clone());
-                            return Err(error);
+                            handler.receive(Box::new(err.clone()));
+                            return Err(err);
                         }
                         Ok(name_eval)
                     } else {
-                        let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                        let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
                                                 annotation: deobfuscate_annotation.span(),
                                                 message: "Deobfuscate annotation could not have been evaluated at compile time.".to_string()
                                             });
-                        handler.receive(error.clone());
-                        Err(error)
+                        handler.receive(Box::new(err.clone()));
+                        Err(err)
                     }
                 }
                 TranspileAnnotationValue::None(_) => Ok(identifier.span.str().to_string()),
                 TranspileAnnotationValue::Map(_, _) => {
-                    let error =
-                        TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                            annotation: deobfuscate_annotation.span(),
-                            message: "Deobfuscate annotation must have no value or must be string."
-                                .to_string(),
-                        });
-                    handler.receive(error.clone());
-                    Err(error)
+                    let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                        annotation: deobfuscate_annotation.span(),
+                        message: "Deobfuscate annotation must have no value or must be string."
+                            .to_string(),
+                    });
+                    handler.receive(Box::new(err.clone()));
+                    Err(err)
                 }
             }
         } else {
@@ -881,12 +880,12 @@ impl Transpiler {
         let deobfuscate_annotation = deobfuscate_annotations.next();
 
         if let Some(duplicate) = deobfuscate_annotations.next() {
-            let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+            let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
                 annotation: duplicate.span(),
                 message: "Multiple deobfuscate annotations are not allowed.".to_string(),
             });
-            handler.receive(error.clone());
-            return Err(error);
+            handler.receive(Box::new(err.clone()));
+            return Err(err);
         }
         if let Some(deobfuscate_annotation) = deobfuscate_annotation {
             let deobfuscate_annotation_value = TranspileAnnotationValue::from_annotation_value(
@@ -896,14 +895,13 @@ impl Transpiler {
 
             if let TranspileAnnotationValue::Map(map, _) = deobfuscate_annotation_value {
                 if map.len() > 2 {
-                    let error =
-                        TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                            annotation: deobfuscate_annotation.span(),
-                            message: "Deobfuscate annotation must have at most 2 key-value pairs."
-                                .to_string(),
-                        });
-                    handler.receive(error.clone());
-                    return Err(error);
+                    let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                        annotation: deobfuscate_annotation.span(),
+                        message: "Deobfuscate annotation must have at most 2 key-value pairs."
+                            .to_string(),
+                    });
+                    handler.receive(Box::new(err.clone()));
+                    return Err(err);
                 }
                 if let (Some(name), Some(target)) = (map.get("name"), map.get("target")) {
                     if let (
@@ -923,56 +921,54 @@ impl Transpiler {
                         ) {
                             // TODO: change invalid criteria if boolean
                             if !crate::util::is_valid_scoreboard_objective_name(&name_eval) {
-                                let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                                let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
                                             annotation: deobfuscate_annotation.span(),
                                             message: "Deobfuscate annotation 'name' must be a valid scoreboard objective name.".to_string()
                                         });
-                                handler.receive(error.clone());
-                                return Err(error);
+                                handler.receive(Box::new(err.clone()));
+                                return Err(err);
                             }
                             if !crate::util::is_valid_scoreboard_target(&target_eval) {
-                                let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                                let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
                                             annotation: deobfuscate_annotation.span(),
                                             message: "Deobfuscate annotation 'target' must be a valid scoreboard player name.".to_string()
                                         });
-                                handler.receive(error.clone());
-                                return Err(error);
+                                handler.receive(Box::new(err.clone()));
+                                return Err(err);
                             }
                             Ok((name_eval, target_eval))
                         } else {
-                            let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                            let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
                                         annotation: deobfuscate_annotation.span(),
                                         message: "Deobfuscate annotation 'name' or 'target' could not have been evaluated at compile time.".to_string()
                                     });
-                            handler.receive(error.clone());
-                            Err(error)
+                            handler.receive(Box::new(err.clone()));
+                            Err(err)
                         }
                     } else {
-                        let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                        let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
                                     annotation: deobfuscate_annotation.span(),
                                     message: "Deobfuscate annotation 'name' and 'target' must be compile time expressions.".to_string()
                                 });
-                        handler.receive(error.clone());
-                        Err(error)
+                        handler.receive(Box::new(err.clone()));
+                        Err(err)
                     }
                 } else {
-                    let error =
-                        TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                            annotation: deobfuscate_annotation.span(),
-                            message:
-                                "Deobfuscate annotation must have both 'name' and 'target' keys."
-                                    .to_string(),
-                        });
-                    handler.receive(error.clone());
-                    Err(error)
+                    let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                        annotation: deobfuscate_annotation.span(),
+                        message: "Deobfuscate annotation must have both 'name' and 'target' keys."
+                            .to_string(),
+                    });
+                    handler.receive(Box::new(err.clone()));
+                    Err(err)
                 }
             } else {
-                let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
                     annotation: deobfuscate_annotation.span(),
                     message: "Deobfuscate annotation must be a map.".to_string(),
                 });
-                handler.receive(error.clone());
-                Err(error)
+                handler.receive(Box::new(err.clone()));
+                Err(err)
             }
         } else {
             let hashed = md5::hash(program_identifier).to_hex_lowercase();
@@ -1017,12 +1013,12 @@ impl Transpiler {
         let deobfuscate_annotation = deobfuscate_annotations.next();
 
         if let Some(duplicate) = deobfuscate_annotations.next() {
-            let error = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+            let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
                 annotation: duplicate.span(),
                 message: "Multiple deobfuscate annotations are not allowed.".to_string(),
             });
-            handler.receive(error.clone());
-            return Err(error);
+            handler.receive(Box::new(err.clone()));
+            return Err(err);
         }
         if let Some(deobfuscate_annotation) = deobfuscate_annotation {
             let deobfuscate_annotation_value = TranspileAnnotationValue::from_annotation_value(
@@ -1048,24 +1044,21 @@ impl Transpiler {
                 }
                 TranspileAnnotationValue::Map(map, _) => {
                     // TODO: implement when map deobfuscate annotation is implemented
-                    let error =
-                        TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                            annotation: deobfuscate_annotation.span(),
-                            message: "Deobfuscate annotation value must be a string or none."
-                                .to_string(),
-                        });
-                    handler.receive(error.clone());
-                    Err(error)
+                    let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                        annotation: deobfuscate_annotation.span(),
+                        message: "Deobfuscate annotation value must be a string or none."
+                            .to_string(),
+                    });
+                    handler.receive(Box::new(err.clone()));
+                    Err(err)
                 }
                 TranspileAnnotationValue::Expression(_, _) => {
-                    let error =
-                        TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                            annotation: deobfuscate_annotation.span(),
-                            message: "Deobfuscate annotation value must be a map or none."
-                                .to_string(),
-                        });
-                    handler.receive(error.clone());
-                    Err(error)
+                    let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
+                        annotation: deobfuscate_annotation.span(),
+                        message: "Deobfuscate annotation value must be a map or none.".to_string(),
+                    });
+                    handler.receive(Box::new(err.clone()));
+                    Err(err)
                 }
             }
         } else {
@@ -1168,7 +1161,7 @@ impl Transpiler {
                                 expression: expression.span(),
                                 expected_type: to.value_type().into(),
                             });
-                            handler.receive(err.clone());
+                            handler.receive(Box::new(err.clone()));
                             Err(err)
                         }
                     }
@@ -1219,7 +1212,7 @@ impl Transpiler {
                             expression: expression.span(),
                             expected_type: to.value_type().into(),
                         });
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         Err(err)
                     }
                 }
@@ -1228,7 +1221,7 @@ impl Transpiler {
                         expected_type: ExpectedType::Boolean,
                         expression: expression.span(),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     Err(err)
                 }
             },
@@ -1237,7 +1230,7 @@ impl Transpiler {
                     expected_type: to.value_type().into(),
                     expression: expression.span(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 Err(err)
             }
         }

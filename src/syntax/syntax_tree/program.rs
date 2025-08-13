@@ -52,10 +52,10 @@ pub struct ProgramFile {
 pub struct Namespace {
     /// The `namespace` keyword.
     #[get = "pub"]
-    namespace_keyword: Keyword,
+    keyword: Keyword,
     /// The name of the namespace.
     #[get = "pub"]
-    namespace_name: StringLiteral,
+    name: StringLiteral,
     /// The semicolon.
     #[get = "pub"]
     semicolon: Punctuation,
@@ -63,7 +63,7 @@ pub struct Namespace {
 
 impl SourceElement for Namespace {
     fn span(&self) -> Span {
-        self.namespace_keyword
+        self.keyword
             .span()
             .join(&self.semicolon.span())
             .expect("Invalid span")
@@ -74,7 +74,7 @@ impl Namespace {
     /// Dissolves the namespace into its components.
     #[must_use]
     pub fn dissolve(self) -> (Keyword, StringLiteral, Punctuation) {
-        (self.namespace_keyword, self.namespace_name, self.semicolon)
+        (self.keyword, self.name, self.semicolon)
     }
 
     /// Validates a namespace string.
@@ -112,19 +112,19 @@ impl Parser<'_> {
         tracing::debug!("Parsing program");
 
         let namespace = match self.stop_at_significant() {
-            Reading::Atomic(Token::Keyword(namespace_keyword))
-                if namespace_keyword.keyword == KeywordKind::Namespace =>
+            Reading::Atomic(Token::Keyword(keyword))
+                if keyword.keyword == KeywordKind::Namespace =>
             {
                 // eat the keyword
                 self.forward();
 
-                let namespace_name = self.parse_string_literal(handler)?;
+                let name = self.parse_string_literal(handler)?;
 
                 let semicolon = self.parse_punctuation(';', true, handler)?;
 
                 Ok(Namespace {
-                    namespace_keyword,
-                    namespace_name,
+                    keyword,
+                    name,
                     semicolon,
                 })
             }
@@ -133,14 +133,14 @@ impl Parser<'_> {
                     expected: SyntaxKind::Keyword(KeywordKind::Namespace),
                     found: unexpected.into_token(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 Err(err)
             }
         }?;
 
         tracing::debug!(
             "Found namespace '{}', parsing declarations",
-            namespace.namespace_name.str_content()
+            namespace.name.str_content()
         );
 
         let mut declarations = Vec::new();

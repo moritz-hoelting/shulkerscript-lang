@@ -80,7 +80,7 @@ impl<'a> Parser<'a> {
                             }
                         }),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
 
                     return Err(err);
                 }
@@ -90,7 +90,7 @@ impl<'a> Parser<'a> {
                 expected: SyntaxKind::Punctuation(expected),
                 found: self.get_reading(None).into_token(),
             });
-            handler.receive(err.clone());
+            handler.receive(Box::new(err.clone()));
 
             return Err(err);
         };
@@ -129,7 +129,7 @@ impl<'a> Parser<'a> {
                 expected: SyntaxKind::Punctuation(expected),
                 found: self.peek().into_token(),
             });
-            handler.receive(err.clone());
+            handler.receive(Box::new(err.clone()));
             return Err(err);
         }
 
@@ -393,7 +393,7 @@ impl Frame<'_> {
                     expected: SyntaxKind::Identifier,
                     found: found.into_token(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 Err(err)
             }
         }
@@ -432,7 +432,7 @@ impl Frame<'_> {
                     expected: SyntaxKind::StringLiteral,
                     found: found.into_token(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 Err(err)
             }
         }
@@ -447,13 +447,13 @@ impl Frame<'_> {
         handler: &impl Handler<base::Error>,
     ) -> ParseResult<MacroStringLiteral> {
         match self.next_significant_token() {
-            Reading::Atomic(Token::MacroStringLiteral(literal)) => Ok(literal),
+            Reading::Atomic(Token::MacroStringLiteral(literal)) => Ok(*literal),
             found => {
                 let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                     expected: SyntaxKind::MacroStringLiteral,
                     found: found.into_token(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 Err(err)
             }
         }
@@ -469,13 +469,13 @@ impl Frame<'_> {
     ) -> ParseResult<AnyStringLiteral> {
         match self.next_significant_token() {
             Reading::Atomic(Token::StringLiteral(literal)) => Ok(literal.into()),
-            Reading::Atomic(Token::MacroStringLiteral(literal)) => Ok(literal.into()),
+            Reading::Atomic(Token::MacroStringLiteral(literal)) => Ok((*literal).into()),
             found => {
                 let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                     expected: SyntaxKind::AnyStringLiteral,
                     found: found.into_token(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 Err(err)
             }
         }
@@ -499,7 +499,7 @@ impl Frame<'_> {
                     expected: SyntaxKind::Keyword(expected),
                     found: found.into_token(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 Err(err)
             }
         }
@@ -530,7 +530,7 @@ impl Frame<'_> {
                     expected: SyntaxKind::Punctuation(expected),
                     found: found.into_token(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 Err(err)
             }
         }

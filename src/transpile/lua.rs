@@ -58,7 +58,7 @@ mod enabled {
             };
 
             self.add_globals(&lua, scope)
-                .inspect_err(|err| handler.receive(err.clone()))?;
+                .inspect_err(|err| handler.receive(Box::new(err.clone())))?;
 
             let res = lua
                 .load(self.code())
@@ -67,7 +67,7 @@ mod enabled {
                 .map_err(|err| {
                     let err =
                         TranspileError::from(LuaRuntimeError::from_lua_err(&err, self.span()));
-                    handler.receive(crate::Error::from(err.clone()));
+                    handler.receive(crate::Error::from(Box::new(err.clone())));
                     err
                 });
 
@@ -329,7 +329,7 @@ mod enabled {
                             code_block: self.span(),
                             error_message: "return table must contain non-nil 'value'".to_string(),
                         });
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         Err(err)
                     }
                     Ok(value) => {
@@ -348,7 +348,7 @@ mod enabled {
                                                     expression: self.span(),
                                                     expected_type: ExpectedType::Boolean,
                                                 });
-                                            handler.receive(err.clone());
+                                            handler.receive(Box::new(err.clone()));
                                             Err(err)
                                         }
                                     }
@@ -358,7 +358,7 @@ mod enabled {
                                                 expression: self.span(),
                                                 expected_type: ExpectedType::Boolean,
                                             });
-                                        handler.receive(err.clone());
+                                        handler.receive(Box::new(err.clone()));
                                         Err(err)
                                     }
                                 }?;
@@ -380,7 +380,7 @@ mod enabled {
                             &err,
                             self.span(),
                         ));
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         Err(err)
                     }
                 },
@@ -393,7 +393,7 @@ mod enabled {
                         code_block: self.span(),
                         error_message: format!("invalid return type {}", value.type_name()),
                     });
-                    handler.receive(err.clone());
+                    handler.receive(Box::new(err.clone()));
                     Err(err)
                 }
             }

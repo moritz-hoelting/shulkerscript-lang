@@ -20,10 +20,7 @@ fn parsing_test1() {
     )
     .expect("Failed to parse");
 
-    assert_eq!(
-        parsed.namespace().namespace_name().str_content(),
-        "parsing-test"
-    );
+    assert_eq!(parsed.namespace().name().str_content(), "parsing-test");
 
     let declarations = parsed.declarations();
     assert_eq!(declarations.len(), 1);

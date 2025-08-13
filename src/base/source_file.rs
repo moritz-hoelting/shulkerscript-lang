@@ -69,7 +69,7 @@ impl SourceFile {
 
     /// Get the [`SourceIterator`] for the source file.
     #[must_use]
-    pub fn iter<'a>(self: &'a Arc<Self>) -> SourceIterator<'a> {
+    pub fn iter(self: &Arc<Self>) -> SourceIterator<'_> {
         SourceIterator {
             source_file: self,
             iterator: self.content().char_indices().peekable(),

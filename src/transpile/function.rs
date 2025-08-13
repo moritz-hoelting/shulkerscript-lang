@@ -59,11 +59,11 @@ impl Transpiler {
             .expect("called variable should be of type function");
 
         let function_data = function.ok_or_else(|| {
-            let error = TranspileError::MissingFunctionDeclaration(
+            let err = TranspileError::MissingFunctionDeclaration(
                 MissingFunctionDeclaration::from_scope(identifier_span.clone(), scope),
             );
-            handler.receive(error.clone());
-            error
+            handler.receive(Box::new(err.clone()));
+            err
         })?;
 
         let VariableData::Function {
@@ -99,7 +99,7 @@ impl Transpiler {
                                         .to_string(),
                                 },
                             );
-                            handler.receive(err.clone());
+                            handler.receive(Box::new(err.clone()));
                             err
                         }),
                     TranspileAnnotationValue::Map(_, span) => {
@@ -108,7 +108,7 @@ impl Transpiler {
                                 annotation: span.clone(),
                                 message: "Deobfuscate annotation cannot be a map.".to_string(),
                             });
-                        handler.receive(err.clone());
+                        handler.receive(Box::new(err.clone()));
                         Err(err)
                     }
                 },
@@ -175,7 +175,7 @@ impl Transpiler {
                     name: modified_name,
                     definition: identifier_span.clone(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 return Err(err);
             }
 
@@ -193,11 +193,11 @@ impl Transpiler {
         let function_location = function_path
             .get()
             .ok_or_else(|| {
-                let error = TranspileError::MissingFunctionDeclaration(
+                let err = TranspileError::MissingFunctionDeclaration(
                     MissingFunctionDeclaration::from_scope(identifier_span.clone(), scope),
                 );
-                handler.receive(error.clone());
-                error
+                handler.receive(Box::new(err.clone()));
+                err
             })
             .map(String::to_owned)?;
 
@@ -258,7 +258,7 @@ impl Transpiler {
                     actual: arg_count,
                     span: identifier_span.clone(),
                 });
-                handler.receive(err.clone());
+                handler.receive(Box::new(err.clone()));
                 Err(err)
             }
             Some(arg_count) if arg_count > 0 => {
@@ -283,7 +283,7 @@ impl Transpiler {
                                 Ok(val) => Ok(Parameter::Static(val.to_macro_string())),
                                 Err(err) => {
                                     let err = TranspileError::NotComptime(err);
-                                    handler.receive(err.clone());
+                                    handler.receive(Box::new(err.clone()));
                                     Err(err)
                                 }
                             })
@@ -305,7 +305,7 @@ impl Transpiler {
                                 let err = TranspileError::UnknownIdentifier(UnknownIdentifier {
                                     identifier: ident.span(),
                                 });
-                                handler.receive(err.clone());
+                                handler.receive(Box::new(err.clone()));
                                 err
                             })?;
                             match var.as_ref() {
@@ -353,7 +353,7 @@ impl Transpiler {
                                             ExpectedType::String,
                                         ]),
                                     });
-                                    handler.receive(err.clone());
+                                    handler.receive(Box::new(err.clone()));
                                     Err(err)
                                 }
                             }
