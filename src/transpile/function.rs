@@ -32,7 +32,7 @@ use super::{
 #[derive(Debug, Clone)]
 pub enum TranspiledFunctionArguments {
     None,
-    Static(BTreeMap<String, MacroString>),
+    Static(BTreeMap<String, MacroString>, Vec<Command>),
     Dynamic(Vec<Command>),
 }
 
@@ -430,9 +430,9 @@ impl Transpiler {
                 }
 
                 if compiled_args.iter().any(|arg| !arg.is_static()) {
-                    let (mut setup_cmds, move_cmds, static_params) = parameters.clone().into_iter().zip(compiled_args).fold(
-                        (Vec::new(), Vec::new(), BTreeMap::new()),
-                        |(mut acc_setup, mut acc_move, mut statics), (param, data)| {
+                    let (require_dyn_params, mut setup_cmds, move_cmds, static_params) = parameters.clone().into_iter().zip(compiled_args).fold(
+                        (false, Vec::new(), Vec::new(), BTreeMap::new()),
+                        |(mut require_dyn_params, mut acc_setup, mut acc_move, mut statics), (param, data)| {
                             match param.variable_type() {
                                 FunctionVariableType::Macro(_) => {
                                     let arg_name = crate::util::identifier_to_macro(param.identifier().span.str());
@@ -455,6 +455,7 @@ impl Transpiler {
                                             };
                                         }
                                         Parameter::Storage { prepare_cmds, storage_name, path } => {
+                                            require_dyn_params = true;
                                             acc_setup.extend(prepare_cmds);
                                             acc_move.push(Command::Raw(
                                                 format!(r"data modify storage shulkerscript:function_arguments {arg_name} set from storage {storage_name} {path}")
@@ -495,6 +496,7 @@ impl Transpiler {
                                     }
                                 },
                                 FunctionVariableType::Boolean(_) => {
+                                    require_dyn_params = true;
                                     let target_storage_name = format!("shulkerscript:arguments_{}", function_location.replace(['/', ':'], "_"));
                                     let param_str = param.identifier().span.str();
                                     let target_path = crate::util::identifier_to_scoreboard_target(param_str);
@@ -524,50 +526,67 @@ impl Transpiler {
                                     }
                                 },
                             }
-                        (acc_setup, acc_move, statics)},
+                        (require_dyn_params, acc_setup, acc_move, statics)},
                     );
-                    let statics_len = static_params.len();
-                    let joined_statics =
-                        super::util::join_macro_strings(static_params.into_iter().enumerate().map(
-                            |(i, (k, v))| match v {
-                                MacroString::String(s) => {
-                                    let mut s = format!(r#"{k}:"{s}""#);
-                                    if i < statics_len - 1 {
-                                        s.push(',');
+                    if require_dyn_params {
+                        let statics_len = static_params.len();
+                        let joined_statics = super::util::join_macro_strings(
+                            static_params
+                                .into_iter()
+                                .enumerate()
+                                .map(|(i, (k, v))| match v {
+                                    MacroString::String(s) => {
+                                        let mut s = format!(r#"{k}:"{s}""#);
+                                        if i < statics_len - 1 {
+                                            s.push(',');
+                                        }
+                                        MacroString::String(s)
                                     }
-                                    MacroString::String(s)
-                                }
-                                MacroString::MacroString(mut parts) => {
-                                    parts.insert(0, MacroStringPart::String(format!(r#"{k}:""#)));
-                                    let mut ending = '"'.to_string();
-                                    if i < statics_len - 1 {
-                                        ending.push(',');
+                                    MacroString::MacroString(mut parts) => {
+                                        parts.insert(
+                                            0,
+                                            MacroStringPart::String(format!(r#"{k}:""#)),
+                                        );
+                                        let mut ending = '"'.to_string();
+                                        if i < statics_len - 1 {
+                                            ending.push(',');
+                                        }
+                                        parts.push(MacroStringPart::String(ending));
+                                        MacroString::MacroString(parts)
                                     }
-                                    parts.push(MacroStringPart::String(ending));
-                                    MacroString::MacroString(parts)
-                                }
-                            },
-                        ));
-                    let statics_cmd = match joined_statics {
-                        MacroString::String(s) => Command::Raw(format!(
-                            r"data merge storage shulkerscript:function_arguments {{{s}}}"
-                        )),
-                        MacroString::MacroString(_) => Command::UsesMacro(
-                            super::util::join_macro_strings([
-                                MacroString::String(
-                                    "data merge storage shulkerscript:function_arguments {"
-                                        .to_string(),
-                                ),
-                                joined_statics,
-                                MacroString::String("}".to_string()),
-                            ])
-                            .into(),
-                        ),
-                    };
-                    setup_cmds.push(statics_cmd);
-                    setup_cmds.extend(move_cmds);
+                                }),
+                        );
+                        let storage_suffix = function_location.replace(['/', ':'], "_");
+                        let statics_cmd = match joined_statics {
+                            MacroString::String(s) => Command::Raw(format!(
+                                r"data merge storage shulkerscript:function_arguments_{storage_suffix} {{{s}}}"
+                            )),
+                            MacroString::MacroString(_) => {
+                                let prefix = MacroString::String(
+                                    format!("data merge storage shulkerscript:function_arguments_{storage_suffix} {{"),
+                                );
+                                Command::UsesMacro(
+                                    super::util::join_macro_strings([
+                                        prefix,
+                                        joined_statics,
+                                        MacroString::String("}".to_string()),
+                                    ])
+                                    .into(),
+                                )
+                            }
+                        };
+                        setup_cmds.push(statics_cmd);
+                        setup_cmds.extend(move_cmds);
 
-                    Ok(TranspiledFunctionArguments::Dynamic(setup_cmds))
+                        Ok(TranspiledFunctionArguments::Dynamic(setup_cmds))
+                    } else {
+                        setup_cmds.extend(move_cmds);
+
+                        Ok(TranspiledFunctionArguments::Static(
+                            static_params,
+                            setup_cmds,
+                        ))
+                    }
                 } else {
                     let function_args = parameters
                         .clone()
@@ -579,7 +598,10 @@ impl Transpiler {
                         )
                         .map(|(k, v)| (k.identifier().span.str().to_string(), v))
                         .collect();
-                    Ok(TranspiledFunctionArguments::Static(function_args))
+                    Ok(TranspiledFunctionArguments::Static(
+                        function_args,
+                        Vec::new(),
+                    ))
                 }
             }
             _ => Ok(TranspiledFunctionArguments::None),

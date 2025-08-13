@@ -703,48 +703,61 @@ impl Transpiler {
             )?;
             let mut function_call = format!("function {location}");
             match arguments {
-                TranspiledFunctionArguments::Static(arguments) => {
+                TranspiledFunctionArguments::Static(arguments, mut setup_cmds) => {
                     use std::fmt::Write;
-                    let arguments_iter = arguments.iter().map(|(ident, v)| match v {
-                        MacroString::String(s) => MacroString::String(format!(
-                            r#"{macro_name}:"{escaped}""#,
-                            macro_name = crate::util::identifier_to_macro(ident),
-                            escaped = crate::util::escape_str(s)
-                        )),
-                        MacroString::MacroString(parts) => MacroString::MacroString(
-                            std::iter::once(MacroStringPart::String(format!(
-                                r#"{macro_name}:""#,
-                                macro_name = crate::util::identifier_to_macro(ident)
-                            )))
-                            .chain(parts.clone().into_iter().map(|part| match part {
-                                MacroStringPart::String(s) => {
-                                    MacroStringPart::String(crate::util::escape_str(&s).to_string())
-                                }
-                                macro_usage @ MacroStringPart::MacroUsage(_) => macro_usage,
-                            }))
-                            .chain(std::iter::once(MacroStringPart::String('"'.to_string())))
-                            .collect(),
-                        ),
-                    });
-                    let arguments = super::util::join_macro_strings(arguments_iter);
 
-                    let cmd = match arguments {
-                        MacroString::String(arguments) => {
-                            write!(function_call, " {{{arguments}}}").unwrap();
-                            Command::Raw(function_call)
-                        }
-                        MacroString::MacroString(mut parts) => {
-                            function_call.push_str(" {");
-                            parts.insert(0, MacroStringPart::String(function_call));
-                            parts.push(MacroStringPart::String('}'.to_string()));
-                            Command::UsesMacro(MacroString::MacroString(parts).into())
+                    let cmd = if arguments.is_empty() {
+                        Command::Raw(function_call)
+                    } else {
+                        let arguments_iter = arguments.iter().map(|(ident, v)| match v {
+                            MacroString::String(s) => MacroString::String(format!(
+                                r#"{macro_name}:"{escaped}""#,
+                                macro_name = crate::util::identifier_to_macro(ident),
+                                escaped = crate::util::escape_str(s)
+                            )),
+                            MacroString::MacroString(parts) => MacroString::MacroString(
+                                std::iter::once(MacroStringPart::String(format!(
+                                    r#"{macro_name}:""#,
+                                    macro_name = crate::util::identifier_to_macro(ident)
+                                )))
+                                .chain(parts.clone().into_iter().map(|part| match part {
+                                    MacroStringPart::String(s) => MacroStringPart::String(
+                                        crate::util::escape_str(&s).to_string(),
+                                    ),
+                                    macro_usage @ MacroStringPart::MacroUsage(_) => macro_usage,
+                                }))
+                                .chain(std::iter::once(MacroStringPart::String('"'.to_string())))
+                                .collect(),
+                            ),
+                        });
+                        let arguments = super::util::join_macro_strings(arguments_iter);
+
+                        match arguments {
+                            MacroString::String(arguments) => {
+                                write!(function_call, " {{{arguments}}}").unwrap();
+                                Command::Raw(function_call)
+                            }
+                            MacroString::MacroString(mut parts) => {
+                                function_call.push_str(" {");
+                                parts.insert(0, MacroStringPart::String(function_call));
+                                parts.push(MacroStringPart::String('}'.to_string()));
+                                Command::UsesMacro(MacroString::MacroString(parts).into())
+                            }
                         }
                     };
 
-                    Ok(vec![cmd])
+                    setup_cmds.push(cmd);
+
+                    Ok(setup_cmds)
                 }
                 TranspiledFunctionArguments::Dynamic(mut cmds) => {
-                    function_call.push_str(" with storage shulkerscript:function_arguments");
+                    use std::fmt::Write as _;
+
+                    let _ = write!(
+                        function_call,
+                        " with storage shulkerscript:function_arguments_{suffix}",
+                        suffix = location.replace(['/', ':'], "_")
+                    );
                     cmds.push(Command::Raw(function_call));
                     Ok(cmds)
                 }
