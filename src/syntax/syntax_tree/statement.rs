@@ -35,13 +35,14 @@ use super::{expression::Expression, Annotation, AnyStringLiteral};
 ///
 /// Syntax Synopsis:
 ///
-/// ``` ebnf
+/// ```ebnf
 /// Statement:
 ///     Block
 ///     | LiteralCommand
 ///     | Conditional
 ///     | Grouping
 ///     | DocComment
+///     | ExecuteBlock
 ///     | Semicolon
 ///     ;
 /// ```
@@ -131,7 +132,7 @@ impl Statement {
 ///
 /// Syntax Synopsis:
 ///
-/// ``` ebnf
+/// ```ebnf
 /// Block:
 ///     '{' Statement* '}'
 ///     ;
@@ -171,11 +172,11 @@ impl SourceElement for Block {
 ///
 /// Syntax Synopsis:
 ///
-/// ``` ebnf
+/// ```ebnf
 /// Grouping:
-/// 'group' Block
+///   'group' Block
 /// ;
-/// ````
+/// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct Grouping {
@@ -207,9 +208,9 @@ impl SourceElement for Grouping {
 /// Represents a statement that ends with a semicolon in the syntax tree.
 ///
 /// Syntax Synopsis:
-/// ``` ebnf
+/// ```ebnf
 /// Semicolon:
-///    SemicolonStatement ';'
+///   SemicolonStatement ';'
 ///   ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -243,10 +244,10 @@ impl Semicolon {
 /// Represents a statement that ends with a semicolon in the syntax tree.
 ///
 /// Syntax Synopsis:
-/// ``` ebnf
+/// ```ebnf
 /// SemicolonStatement:
-///    (Expression | VariableDeclaration | Assignment)
-///    ';'
+///   (Expression | VariableDeclaration | Assignment | ReturnStatement)
+///   ';'
 ///   ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -318,6 +319,7 @@ impl ReturnStatement {
 ///    | ArrayVariableDeclaration
 ///    | ScoreVariableDeclaration
 ///    | TagVariableDeclaration
+///    | ComptimeValueDeclaration
 ///    ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

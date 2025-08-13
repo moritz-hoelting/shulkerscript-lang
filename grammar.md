@@ -1,63 +1,145 @@
 # Grammar of the Shulkerscript language
 
-## Table of contents
+## Program
 
-### Program
 ```ebnf
-Program: Namespace Declaration*;
+Program:
+  Namespace
+  Declaration*
+  ;
 ```
 
-### Namespace
+## Declaration
+
 ```ebnf
-Namespace: 'namespace' StringLiteral;
+Declaration:
+    Function
+    | Import
+    | TagDeclaration
+    | ('pub'? VariableDeclaration ';')
+  ;
 ```
 
-### StringLiteral
+## Namespace
+
 ```ebnf
-StringLiteral: '"' TEXT '"';
+Namespace:
+   'namespace' StringLiteral ';' ;
 ```
 
-### MacroStringLiteral
-```ebnf
-MacroStringLiteral: '`' ( TEXT | '$(' [a-zA-Z0-9_]+ ')' )* '`';
-```
+## Function
 
-### AnyStringLiteral
-```ebnf
-AnyStringLiteral: StringLiteral | MacroStringLiteral;
-```
-
-### Declaration
-```ebnf
-Declaration: FunctionDeclaration | Import | TagDeclaration;
-```
-
-### Import
-```ebnf
-Import: 'from' StringLiteral 'import' Identifier;
-```
-
-### TagDeclaration
-```ebnf
-TagDeclaration: 'tag' StringLiteral ('of' StringLiteral)? 'replace'? '[' (StringLiteral (',' StringLiteral)*)? ']';
-```
-
-### FunctionDeclaration
 ```ebnf
 Function:
-    Annotation* 'pub'? 'fn' Identifier '(' ParameterList? ')' Block
+    Annotation* 'pub'? 'fn' Identifier '(' FunctionParameterList? ')' Block
     ;
-ParameterList:
-    Identifier (',' Identifier)* ','?  
-    ;
+
 ```
 
-### Annotation
+## Import
+
 ```ebnf
-Annotation: '#[' Identifier ('=' StringLiteral)? ']';
+Import:
+    'from' StringLiteral 'import' ('*' | Identifier (',' Identifier)*) ';'
+    ;
 ```
 
-### Statement
+## TagDeclaration
+
+```ebnf
+TagDeclaration:
+    'tag' ('<' StringLiteral '>')? StringLiteral 'replace'? '[' (StringLiteral (',' StringLiteral)*)? ']'
+    ;
+```
+
+## VariableDeclaration
+
+```ebnf
+VariableDeclaration:
+   SingleVariableDeclaration
+   | ArrayVariableDeclaration
+   | ScoreVariableDeclaration
+   | TagVariableDeclaration
+   | ComptimeValueDeclaration
+   ;
+```
+
+## StringLiteral
+
+```ebnf
+StringLiteral:
+  '"' TEXT '"';
+```
+
+## Annotation
+
+```ebnf
+Annotation:
+    '#[' AnnotationAssignment ']'
+    ;
+```
+
+## Block
+
+```ebnf
+Block:
+    '{' Statement* '}'
+    ;
+```
+
+## FunctionParameterList
+
+```ebnf
+FunctionParameterList:
+    FunctionArgument (',' FunctionArgument)* ','?  
+    ;
+```
+
+## ArrayVariableDeclaration
+
+```ebnf
+ArrayVariableDeclaration:
+    ('int' | 'bool') identifier '[' integer ']' VariableDeclarationAssignment?
+```
+
+## ComptimeValueDeclaration
+
+```ebnf
+ComptimeValueDeclaration:
+    'val' identifier VariableDeclarationAssignment?
+```
+
+## ScoreVariableDeclaration
+
+```ebnf
+ScoreVariableDeclaration:
+    'int' ('<' StringLiteral '>')? identifier '[' AnyStringLiteral? ']' VariableDeclarationAssignment?
+```
+
+## SingleVariableDeclaration
+
+```ebnf
+SingleVariableDeclaration:
+    ('int' | 'bool') identifier VariableDeclarationAssignment?
+```
+
+## TagVariableDeclaration
+
+```ebnf
+TagVariableDeclaration:
+    'bool' identifier '[' AnyStringLiteral? ']' VariableDeclarationAssignment?
+```
+
+## AnnotationAssignment
+
+```ebnf
+AnnotationAssignment:
+    Identifier AnnotationValue
+    ;
+```
+
+## Statement
+
 ```ebnf
 Statement:
     Block
@@ -65,115 +147,345 @@ Statement:
     | Conditional
     | Grouping
     | DocComment
+    | ExecuteBlock
     | Semicolon
-    | Run
     ;
 ```
 
-### Block
-```ebnf	
-Block: '{' Statement* '}';
-```
+## FunctionArgument
 
-### Run
 ```ebnf
-Run:
-    'run' Expression ';'
+FunctionArgument:
+    FunctionVariableType Identifier
     ;
 ```
 
-### Conditional
+## VariableDeclarationAssignment
+
+```ebnf
+VariableDeclarationAssignment:
+    '=' Expression
+```
+
+## AnyStringLiteral
+
+```ebnf
+AnyStringLiteral: StringLiteral | MacroStringLiteral ;
+```
+
+## AnnotationValue
+
+```ebnf
+AnnotationValue:
+    '=' Expression
+    | '(' AnnotationAssignment ( ',' AnnotationAssignment )* ')'
+    ;
+```
+
+## Conditional
+
 ```ebnf
 Conditional:
-    'if' ParenthizedCondition Block ('else' Block)?
-    ;
+'if' Parenthized
+;
 ```
 
-### Condition
+## ExecuteBlock
+
 ```ebnf
-Condition:
-    PrimaryCondition
-    BinaryCondition
-    ;
+ExecuteBlock:
+   (ExecuteBlockHead ExecuteBlockTail)
+  | (Conditional Block Else)
+  ;
 ```
 
-#### PrimaryCondition
+## Grouping
+
 ```ebnf
-PrimaryCondition:
-    ConditionalPrefix
-    | ParenthesizedCondition
-    | AnyStringLiteral
-    ;
+Grouping:
+  'group' Block
+;
 ```
 
-#### ConditionalPrefix
+## Semicolon
+
 ```ebnf
-ConditionalPrefix:
-    ConditionalPrefixOperator PrimaryCondition
+Semicolon:
+  SemicolonStatement ';'
+  ;
+```
+
+## FunctionVariableType
+
+```ebnf
+FunctionVariableType:
+    'macro' | 'int' | 'bool'
     ;
 ```
 
-#### ConditionalPrefixOperator
-``` ebnf
-ConditionalPrefixOperator: '!';
+## Expression
+
+```ebnf
+Expression:
+    Primary | Binary ;
 ```
 
-#### BinaryCondition
-``` ebnf
-BinaryCondition:
-    Condition ConditionalBinaryOperator Condition
+## MacroStringLiteral
+
+```ebnf
+MacroStringLiteral:
+  '`' ( TEXT | '$(' [a-zA-Z0-9_]+ ')' )* '`';
+```
+
+## Else
+
+```ebnf
+Else:
+    'else' Block
     ;
 ```
 
-#### ConditionalBinaryOperator
-``` ebnf
-ConditionalBinaryOperator:
-    '&&'
+## ExecuteBlockHead
+
+```ebnf
+ExecuteBlockHead:
+  Conditional
+ | Align
+ | Anchored
+ | As
+ | AsAt
+ | At
+ | Facing
+ | In
+ | On
+ | Positioned
+ | Rotated
+ | Store
+ | Summon
+;
+```
+
+## ExecuteBlockTail
+
+```ebnf
+ExecuteBlockTail:
+ ExecuteBlock
+| Block
+;
+```
+
+## SemicolonStatement
+
+```ebnf
+SemicolonStatement:
+  (Expression | VariableDeclaration | Assignment | ReturnStatement)
+  ';'
+  ;
+```
+
+## Binary
+
+```ebnf
+Binary:
+    Expression BinaryOperator Expression
+    ;
+```
+
+## Primary
+
+```ebnf
+Primary:
+    Identifier
+    | Prefix
+    | Parenthesized
+    | Indexed
+    | Integer
+    | Boolean
+    | StringLiteral
+    | FunctionCall
+    | MemberAccess
+    | MacroStringLiteral
+    | LuaCode
+```
+
+## Align
+
+```ebnf
+Align:
+  'align' '(' AnyStringLiteral ')' ;
+```
+
+## Anchored
+
+```ebnf
+Anchored:
+  'anchored' '(' AnyStringLiteral ')' ;
+```
+
+## As
+
+```ebnf
+As:
+  'as' '(' AnyStringLiteral ')' ;
+```
+
+## AsAt
+
+```ebnf
+AsAt:
+  'asat' '(' AnyStringLiteral ')' ;
+```
+
+## At
+
+```ebnf
+At:
+  'at' '(' AnyStringLiteral ')' ;
+```
+
+## Facing
+
+```ebnf
+Facing:
+  'facing' '(' AnyStringLiteral ')' ;
+```
+
+## In
+
+```ebnf
+In:
+  'in' '(' AnyStringLiteral ')' ;
+```
+
+## On
+
+```ebnf
+On:
+  'on' '(' AnyStringLiteral ')' ;
+```
+
+## Positioned
+
+```ebnf
+Positioned:
+  'positioned' '(' AnyStringLiteral ')' ;
+```
+
+## Rotated
+
+```ebnf
+Rotated:
+  'rotated' '(' AnyStringLiteral ')' ;
+```
+
+## Store
+
+```ebnf
+Store:
+  'store' '(' AnyStringLiteral ')' ;
+```
+
+## Summon
+
+```ebnf
+Summon:
+  'summon' '(' AnyStringLiteral ')' ;
+```
+
+## Assignment
+
+```ebnf
+Assignment:
+   AssignmentDestination '=' Expression
+```
+
+## ReturnStatement
+
+```ebnf
+ReturnStatement:
+    `return` Expression ;
+```
+
+## BinaryOperator
+
+```ebnf
+BinaryOperator:
+    '+'
+    | '-'
+    | '*'
+    | '/'
+    | '%'
+    | '=='
+    | '!='
+    | '<'
+    | '<='
+    | '>'
+    | '>='
+    | '&&'
     | '||'
     ;
 ```
 
-#### ParenthizedCondition
-```ebnf
-ParenthizedCondition:
-    '(' Condition ')'
-    ;
-```
+## FunctionCall
 
-
-### Grouping
-``` ebnf
-Grouping:
-    'group' Block
-    ;
-```
-
-### Expression
-```ebnf
-Expression:
-    Primary
-    ;
-```
-
-### Primary
-```ebnf
-Primary:
-    FunctionCall
-    | AnyStringLiteral
-    | LuaCode
-    ;
-```
-
-### FunctionCall
 ```ebnf
 FunctionCall:
     Identifier '(' (Expression (',' Expression)*)? ')'
     ;
 ```
 
-### LuaCode
+## Indexed
+
+```ebnf
+Indexed:
+    PrimaryExpression '[' Expression ']'
+    ;
+```
+
+## LuaCode
+
 ```ebnf
 LuaCode:
     'lua' '(' (Expression (',' Expression)*)? ')' '{' (.*?)* '}'
+```
+
+## MemberAccess
+
+```ebnf
+MemberAccess:
+    Primary '.' Identifier
+```
+
+## Parenthesized
+
+```ebnf
+Parenthesized:
+    '(' Expression ')'
     ;
 ```
+
+## Prefix
+
+```ebnf
+Prefix:
+    PrefixOperator Primary
+    ;
+```
+
+## AssignmentDestination
+
+```ebnf
+AssignmentDestination:
+    Identifier
+    | Identifier '[' Expression ']'
+    ;
+```
+
+## PrefixOperator
+
+```ebnf
+PrefixOperator:
+    '!' | '-' | 'run'
+    ;
+```
+

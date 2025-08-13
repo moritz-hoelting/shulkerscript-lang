@@ -73,6 +73,7 @@ impl SourceElement for ExecuteBlock {
 ///  | Store
 ///  | Summon
 /// ;
+/// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner, From)]
 #[allow(missing_docs)]
@@ -120,6 +121,7 @@ impl SourceElement for ExecuteBlockHead {
 ///  ExecuteBlock
 /// | Block
 /// ;
+/// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumAsInner, From)]
 #[allow(missing_docs)]
@@ -144,7 +146,7 @@ impl SourceElement for ExecuteBlockTail {
 ///
 /// Syntax Synopsis:
 ///
-/// ``` ebnf
+/// ```ebnf
 /// Conditional:
 /// 'if' Parenthized
 /// ;
@@ -181,7 +183,7 @@ impl SourceElement for Conditional {
 ///
 /// Syntax Synopsis:
 ///
-/// ``` ebnf
+/// ```ebnf
 /// Else:
 ///     'else' Block
 ///     ;
@@ -217,8 +219,7 @@ impl SourceElement for Else {
 ///
 /// ```ebnf
 /// As:
-/// 'as' '(' AnyStringLiteral ')'
-/// ;
+///   'as' '(' AnyStringLiteral ')' ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
@@ -263,8 +264,8 @@ impl As {
 /// Syntax Synopsis:
 /// ```ebnf
 /// Align:
-///     'align' '(' AnyStringLiteral ')'
-/// ;
+///   'align' '(' AnyStringLiteral ')' ;
+/// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct Align {
@@ -309,8 +310,7 @@ impl Align {
 /// Syntax Synopsis:
 /// ```ebnf
 /// Anchored:
-///    'anchored' '(' AnyStringLiteral ')'
-/// ;
+///   'anchored' '(' AnyStringLiteral ')' ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
@@ -354,8 +354,7 @@ impl Anchored {
 /// Syntax Synopsis:
 /// ```ebnf
 /// AsAt:
-///   'asat' '(' AnyStringLiteral ')'
-/// ;
+///   'asat' '(' AnyStringLiteral ')' ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
@@ -399,8 +398,7 @@ impl AsAt {
 /// Syntax Synopsis:
 /// ```ebnf
 /// At:
-///  'at' '(' AnyStringLiteral ')'
-/// ;
+///   'at' '(' AnyStringLiteral ')' ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
@@ -444,8 +442,7 @@ impl At {
 /// Syntax Synopsis:
 /// ```ebnf
 /// Facing:
-///  'facing' '(' AnyStringLiteral ')'
-/// ;
+///   'facing' '(' AnyStringLiteral ')' ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
@@ -489,8 +486,7 @@ impl Facing {
 /// Syntax Synopsis:
 /// ```ebnf
 /// In:
-/// 'in' '(' AnyStringLiteral ')'
-/// ;
+///   'in' '(' AnyStringLiteral ')' ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
@@ -534,8 +530,7 @@ impl In {
 /// Syntax Synopsis:
 /// ```ebnf
 /// On:
-/// 'on' '(' AnyStringLiteral ')'
-/// ;
+///   'on' '(' AnyStringLiteral ')' ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
@@ -579,8 +574,7 @@ impl On {
 /// Syntax Synopsis:
 /// ```ebnf
 /// Positioned:
-/// 'positioned' '(' AnyStringLiteral ')'
-/// ;
+///   'positioned' '(' AnyStringLiteral ')' ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
@@ -624,8 +618,7 @@ impl Positioned {
 /// Syntax Synopsis:
 /// ```ebnf
 /// Rotated:
-/// 'rotated' '(' AnyStringLiteral ')'
-/// ;
+///   'rotated' '(' AnyStringLiteral ')' ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
@@ -669,8 +662,7 @@ impl Rotated {
 /// Syntax Synopsis:
 /// ```ebnf
 /// Store:
-/// 'store' '(' AnyStringLiteral ')'
-/// ;
+///   'store' '(' AnyStringLiteral ')' ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
@@ -714,8 +706,7 @@ impl Store {
 /// Syntax Synopsis:
 /// ```ebnf
 /// Summon:
-/// 'summon' '(' AnyStringLiteral ')'
-/// ;
+///   'summon' '(' AnyStringLiteral ')' ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]

@@ -20,6 +20,13 @@ use crate::{
 use super::declaration::Declaration;
 
 /// Program is a collection of declarations preceeded by a namespace selector.
+///
+/// ```ebnf
+/// Program:
+///   Namespace
+///   Declaration*
+///   ;
+/// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
 pub struct ProgramFile {

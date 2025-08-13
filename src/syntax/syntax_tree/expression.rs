@@ -143,7 +143,7 @@ impl SourceElement for Binary {
 ///
 /// ```ebnf
 /// Expression:
-///     Primary | Binary
+///     Primary | Binary ;
 /// ```
 #[allow(missing_docs)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -166,11 +166,12 @@ impl SourceElement for Expression {
 ///
 /// Syntax Synopsis:
 ///
-/// ``` ebnf
+/// ```ebnf
 /// Primary:
 ///     Identifier
 ///     | Prefix
 ///     | Parenthesized
+///     | Indexed
 ///     | Integer
 ///     | Boolean
 ///     | StringLiteral
@@ -307,7 +308,7 @@ impl SourceElement for Indexed {
 /// Syntax Synopsis:
 /// ```ebnf
 /// PrefixOperator:
-///     '!' | '-'
+///     '!' | '-' | 'run'
 ///     ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -359,7 +360,7 @@ impl SourceElement for Prefix {
 ///
 /// Syntax Synopsis:
 ///
-/// ``` ebnf
+/// ```ebnf
 /// FunctionCall:
 ///     Identifier '(' (Expression (',' Expression)*)? ')'
 ///     ;

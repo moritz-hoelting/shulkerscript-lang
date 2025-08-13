@@ -32,11 +32,11 @@ use super::{
 ///
 /// Syntax Synopsis:
 ///
-/// ``` ebnf
+/// ```ebnf
 /// Declaration:
 ///     Function
 ///     | Import
-///     | Tag
+///     | TagDeclaration
 ///     | ('pub'? VariableDeclaration ';')
 ///   ;
 /// ```
@@ -97,12 +97,12 @@ impl Declaration {
 ///
 /// Syntax Synopsis:
 ///
-/// ``` ebnf
+/// ```ebnf
 /// Function:
-///     Annotation* 'pub'? 'fn' Identifier '(' ParameterList? ')' Block
+///     Annotation* 'pub'? 'fn' Identifier '(' FunctionParameterList? ')' Block
 ///     ;
 ///
-/// ParameterList:
+/// FunctionParameterList:
 ///     FunctionArgument (',' FunctionArgument)* ','?  
 ///     ;
 /// ```
@@ -176,7 +176,7 @@ impl SourceElement for Function {
 ///
 /// Syntax Synopsis:
 ///
-/// ``` ebnf
+/// ```ebnf
 /// FunctionVariableType:
 ///     'macro' | 'int' | 'bool'
 ///     ;
@@ -193,7 +193,7 @@ pub enum FunctionVariableType {
 ///
 /// Syntax Synopsis:
 ///
-/// ``` ebnf
+/// ```ebnf
 /// FunctionArgument:
 ///     FunctionVariableType Identifier
 ///     ;
@@ -211,7 +211,7 @@ pub struct FunctionParameter {
 ///
 /// Syntax Synopsis:
 ///
-/// ``` ebnf
+/// ```ebnf
 /// Import:
 ///     'from' StringLiteral 'import' ('*' | Identifier (',' Identifier)*) ';'
 ///     ;
@@ -266,7 +266,7 @@ impl SourceElement for Import {
 ///
 /// Syntax Synopsis:
 ///
-/// ``` ebnf
+/// ```ebnf
 /// TagDeclaration:
 ///     'tag' ('<' StringLiteral '>')? StringLiteral 'replace'? '[' (StringLiteral (',' StringLiteral)*)? ']'
 ///     ;

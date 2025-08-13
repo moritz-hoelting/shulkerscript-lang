@@ -96,7 +96,7 @@ impl SourceElement for AnyStringLiteral {
 ///
 /// Syntax Synopsis:
 ///
-/// ``` ebnf
+/// ```ebnf
 /// Annotation:
 ///     '#[' AnnotationAssignment ']'
 ///     ;
@@ -149,7 +149,7 @@ impl SourceElement for Annotation {
 ///
 /// Syntax Synopsis:
 ///
-/// ``` ebnf
+/// ```ebnf
 /// AnnotationValue:
 ///     '=' Expression
 ///     | '(' AnnotationAssignment ( ',' AnnotationAssignment )* ')'
@@ -200,7 +200,7 @@ impl SourceElement for AnnotationValue {
 ///
 /// Syntax Synopsis:
 ///
-/// ``` ebnf
+/// ```ebnf
 /// AnnotationAssignment:
 ///     Identifier AnnotationValue
 ///     ;

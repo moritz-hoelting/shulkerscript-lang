@@ -310,6 +310,11 @@ impl Debug for Boolean {
 }
 
 /// Represents a hardcoded string literal value in the source code.
+///
+/// ```ebnf
+/// StringLiteral:
+///   '"' TEXT '"';
+/// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StringLiteral {
@@ -344,6 +349,11 @@ impl SourceElement for StringLiteral {
 }
 
 /// Represents a hardcoded macro string literal value in the source code.
+///
+/// ```ebnf
+/// MacroStringLiteral:
+///   '`' ( TEXT | '$(' [a-zA-Z0-9_]+ ')' )* '`';
+/// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MacroStringLiteral {
