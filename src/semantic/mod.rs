@@ -706,13 +706,14 @@ impl Primary {
                 _ => false,
             },
             Self::MemberAccess(_) => {
-                // TODO:
+                // TODO: correct return value after check
                 true
             }
             Self::Identifier(ident) => match scope.get_variable(ident.span.str()) {
                 Some(VariableType::BooleanStorage) => expected == ValueType::Boolean,
                 Some(VariableType::ScoreboardValue) => expected == ValueType::Integer,
                 Some(VariableType::Tag) => expected == ValueType::String,
+                Some(VariableType::ComptimeValue) => true,
                 _ => false,
             },
             Self::Prefix(prefixed) => match prefixed.operator() {

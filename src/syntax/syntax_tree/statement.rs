@@ -1154,12 +1154,25 @@ impl Parser<'_> {
                     _ => unreachable!(),
                 }
             }
-            None => Ok(VariableDeclaration::Single(SingleVariableDeclaration {
-                variable_type,
-                identifier,
-                assignment,
-                annotations: VecDeque::new(),
-            })),
+            None => {
+                if matches!(variable_type.keyword, KeywordKind::Val) {
+                    Ok(VariableDeclaration::ComptimeValue(
+                        ComptimeValueDeclaration {
+                            val_keyword: variable_type,
+                            identifier,
+                            assignment,
+                            annotations: VecDeque::new(),
+                        },
+                    ))
+                } else {
+                    Ok(VariableDeclaration::Single(SingleVariableDeclaration {
+                        variable_type,
+                        identifier,
+                        assignment,
+                        annotations: VecDeque::new(),
+                    }))
+                }
+            }
         }
     }
 }
