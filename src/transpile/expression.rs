@@ -17,16 +17,17 @@ use super::{
     },
     Scope, TranspileResult, Transpiler, VariableData,
 };
-use crate::syntax::syntax_tree::expression::{Indexed, Parenthesized};
 #[cfg(feature = "shulkerbox")]
 use crate::{
     base::{self, source_file::SourceElement, Handler, VoidHandler},
     lexical::token::{Identifier, MacroStringLiteralPart, StringLiteral},
     syntax::syntax_tree::expression::{
-        Binary, BinaryOperator, Expression, MemberAccess, PrefixOperator, Primary,
+        Binary, BinaryOperator, Expression, Indexed, MemberAccess, Parenthesized, PrefixOperator,
+        Primary,
     },
     transpile::{
         error::{FunctionArgumentsNotAllowed, MissingValue},
+        variables::FunctionVariableDataType,
         TranspileError,
     },
 };
@@ -579,7 +580,10 @@ impl Identifier {
                         }),
                     }
                 }
-                VariableData::Function { path, .. } => {
+                VariableData::Function {
+                    variable_data: FunctionVariableDataType::Simple { path, .. },
+                    ..
+                } => {
                     match member_access.member().span.str() {
                         "path" => {
                             #[expect(clippy::option_if_let_else)]
@@ -597,7 +601,11 @@ impl Identifier {
                         }),
                     }
                 }
-                VariableData::InternalFunction { .. } => Err(NotComptime {
+                VariableData::Function {
+                    variable_data: FunctionVariableDataType::ComptimeArguments { .. },
+                    ..
+                }
+                | VariableData::InternalFunction { .. } => Err(NotComptime {
                     expression: member_access.member().span(),
                 }),
                 VariableData::MacroParameter { macro_name, .. } => {

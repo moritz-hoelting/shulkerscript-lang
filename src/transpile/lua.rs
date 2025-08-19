@@ -426,7 +426,7 @@ mod disabled {
             handler: &impl Handler<base::Error>,
         ) -> TranspileResult<((), ())> {
             let _ = scope;
-            handler.receive(TranspileError::LuaDisabled);
+            handler.receive(Box::new(TranspileError::LuaDisabled));
             tracing::error!("Lua code evaluation is disabled");
             Err(TranspileError::LuaDisabled)
         }
@@ -440,9 +440,9 @@ mod disabled {
             &self,
             scope: &Arc<Scope>,
             handler: &impl Handler<base::Error>,
-        ) -> TranspileResult<Option<ComptimeValue>> {
+        ) -> TranspileResult<Result<ComptimeValue, crate::transpile::error::NotComptime>> {
             let _ = scope;
-            handler.receive(TranspileError::LuaDisabled);
+            handler.receive(Box::new(TranspileError::LuaDisabled));
             tracing::error!("Lua code evaluation is disabled");
             Err(TranspileError::LuaDisabled)
         }

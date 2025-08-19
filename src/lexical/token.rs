@@ -54,6 +54,8 @@ pub enum KeywordKind {
     Macro,
     Val,
     Return,
+    While,
+    For,
 }
 
 impl Display for KeywordKind {
@@ -121,6 +123,8 @@ impl KeywordKind {
             Self::Macro => "macro",
             Self::Val => "val",
             Self::Return => "return",
+            Self::While => "while",
+            Self::For => "for",
         }
     }
 

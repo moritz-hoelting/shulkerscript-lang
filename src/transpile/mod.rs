@@ -16,6 +16,7 @@ use crate::{
 #[doc(hidden)]
 #[cfg(feature = "shulkerbox")]
 pub mod conversions;
+
 pub mod error;
 
 pub mod expression;

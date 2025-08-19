@@ -62,7 +62,7 @@ pub fn identifier_to_macro(ident: &str) -> std::borrow::Cow<'_, str> {
 /// Does only strip invalid characters if the `shulkerbox` feature is not enabled.
 #[cfg(not(feature = "shulkerbox"))]
 #[must_use]
-pub fn identifier_to_macro(ident: &str) -> std::borrow::Cow<str> {
+pub fn identifier_to_macro(ident: &str) -> std::borrow::Cow<'_, str> {
     if ident.contains("__")
         || ident
             .chars()
@@ -98,7 +98,7 @@ pub fn identifier_to_scoreboard_target(ident: &str) -> std::borrow::Cow<'_, str>
 /// Does only strip invalid characters if the `shulkerbox` feature is not enabled.
 #[cfg(not(feature = "shulkerbox"))]
 #[must_use]
-pub fn identifier_to_scoreboard_target(ident: &str) -> std::borrow::Cow<str> {
+pub fn identifier_to_scoreboard_target(ident: &str) -> std::borrow::Cow<'_, str> {
     if !(..=16).contains(&ident.len())
         || ident
             .chars()

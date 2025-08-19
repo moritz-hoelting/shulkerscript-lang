@@ -1,9 +1,9 @@
 //! Transpiler for `Shulkerscript`
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     ops::Deref,
-    sync::{Arc, OnceLock},
+    sync::{Arc, OnceLock, RwLock},
 };
 
 use itertools::Itertools;
@@ -13,7 +13,7 @@ use crate::{
     base::{self, source_file::SourceElement, Handler},
     semantic::error::UnexpectedExpression,
     syntax::syntax_tree::{
-        declaration::{Declaration, ImportItems},
+        declaration::{Declaration, FunctionVariableType, ImportItems},
         expression::{Expression, FunctionCall, PrefixOperator, Primary},
         program::{Namespace, ProgramFile},
         statement::{
@@ -25,6 +25,7 @@ use crate::{
     transpile::{
         error::IllegalAnnotationContent,
         util::{MacroString, MacroStringPart},
+        variables::FunctionVariableDataType,
     },
 };
 
@@ -240,6 +241,7 @@ impl Transpiler {
     }
 
     /// Transpiles the given declaration.
+    #[expect(clippy::too_many_lines)]
     fn transpile_declaration(
         &mut self,
         declaration: &Declaration,
@@ -283,12 +285,25 @@ impl Transpiler {
                     public: function.is_public(),
                     annotations,
                 };
+                let has_comptime_params = function_data
+                    .parameters
+                    .iter()
+                    .any(|param| matches!(param.variable_type(), FunctionVariableType::Value(_)));
+                let function_scope = Scope::with_parent(scope.clone());
                 scope.set_variable(
                     &name,
                     VariableData::Function {
                         function_data,
-                        path: OnceLock::new(),
-                        function_scope: Scope::with_parent(scope.clone()),
+                        function_scope,
+                        variable_data: if has_comptime_params {
+                            FunctionVariableDataType::ComptimeArguments {
+                                function_paths: RwLock::new(HashMap::new()),
+                            }
+                        } else {
+                            FunctionVariableDataType::Simple {
+                                path: OnceLock::new(),
+                            }
+                        },
                     },
                 );
             }
@@ -296,8 +311,6 @@ impl Transpiler {
                 let path = import.module().str_content();
                 let import_identifier =
                     super::util::calculate_import_identifier(&program_identifier, path);
-
-                // let aliases = &mut self.aliases;
 
                 match import.items() {
                     ImportItems::All(_) => {

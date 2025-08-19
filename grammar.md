@@ -219,7 +219,7 @@ Semicolon:
 
 ```ebnf
 FunctionVariableType:
-    'macro' | 'int' | 'bool'
+    'macro' | 'int' | 'bool' | 'val'
     ;
 ```
 

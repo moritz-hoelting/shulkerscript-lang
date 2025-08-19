@@ -161,7 +161,12 @@ impl Function {
     ) -> Result<(), error::Error> {
         let child_scope = SemanticScope::with_parent(scope);
 
-        if let Some(parameters) = self.parameters().as_ref().map(ConnectedList::elements) {
+        if let Some(parameters) = self
+            .parameters()
+            .as_ref()
+            .map(ConnectedList::elements)
+            .map(Iterator::collect::<Vec<_>>)
+        {
             if let Some(incompatible) = self.annotations().iter().find(|a| {
                 ["tick", "load", "uninstall"].contains(&a.assignment().identifier.span.str())
             }) {
@@ -174,6 +179,25 @@ impl Function {
                     });
                 handler.receive(err.clone());
                 return Err(err);
+            } else if parameters
+                .iter()
+                .any(|param| matches!(param.variable_type(), FunctionVariableType::Value(_)))
+            {
+                if let Some(incompatible) = self
+                    .annotations()
+                    .iter()
+                    .find(|a| a.assignment().identifier.span.str() == "deobfuscate")
+                {
+                    let err =
+                            error::Error::IncompatibleFunctionAnnotation(IncompatibleFunctionAnnotation {
+                                span: incompatible.assignment().identifier.span.clone(),
+                                reason:
+                                    "functions with the `deobfuscate` annotation cannot have compile-time parameters"
+                                        .to_string(),
+                            });
+                    handler.receive(err.clone());
+                    return Err(err);
+                }
             }
 
             for param in parameters {
@@ -182,6 +206,7 @@ impl Function {
                     FunctionVariableType::Boolean(_) => VariableType::BooleanStorage,
                     FunctionVariableType::Integer(_) => VariableType::ScoreboardValue,
                     FunctionVariableType::Macro(_) => VariableType::MacroParameter,
+                    FunctionVariableType::Value(_) => VariableType::ComptimeValue,
                 };
                 child_scope.set_variable(name, var);
             }

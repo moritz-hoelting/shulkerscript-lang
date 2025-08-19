@@ -47,10 +47,10 @@ pub enum VariableData {
     Function {
         /// The function data.
         function_data: FunctionData,
-        /// The path to the function once it is generated.
-        path: OnceLock<String>,
         /// The scope of the function.
         function_scope: Arc<Scope>,
+        /// The variable data.
+        variable_data: FunctionVariableDataType,
     },
     /// A macro function parameter.
     MacroParameter {
@@ -109,6 +109,34 @@ pub enum VariableData {
         /// Whether the value is read-only.
         read_only: bool,
     },
+}
+
+#[cfg(feature = "shulkerbox")]
+#[derive(Debug)]
+pub enum FunctionVariableDataType {
+    Simple {
+        /// The path to the function once it is generated.
+        path: OnceLock<String>,
+    },
+    ComptimeArguments {
+        /// The paths of the functions with different comptime arguments by hash.
+        function_paths: RwLock<HashMap<String, String>>,
+    },
+}
+
+#[cfg(feature = "shulkerbox")]
+impl Clone for FunctionVariableDataType {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Simple { path } => Self::Simple { path: path.clone() },
+            Self::ComptimeArguments { function_paths } => {
+                let function_paths = function_paths.read().unwrap();
+                Self::ComptimeArguments {
+                    function_paths: RwLock::new(function_paths.clone()),
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, EnumAsInner)]

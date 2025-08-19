@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Member access (e.g. `.objective` to get objective name where int is stored)
 - Return statement
 - internal `print` function
+- reserve `while` and `for` keyword
 - Example: barebones compiler
 
 ### Changed

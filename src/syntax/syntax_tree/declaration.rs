@@ -179,7 +179,7 @@ impl SourceElement for Function {
 ///
 /// ```ebnf
 /// FunctionVariableType:
-///     'macro' | 'int' | 'bool'
+///     'macro' | 'int' | 'bool' | 'val'
 ///     ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -188,6 +188,7 @@ pub enum FunctionVariableType {
     Macro(Keyword),
     Integer(Keyword),
     Boolean(Keyword),
+    Value(Keyword),
 }
 
 /// Represents a function argument in the syntax tree.
@@ -607,12 +608,24 @@ impl Parser<'_> {
                     identifier,
                 })
             }
+            Reading::Atomic(Token::Keyword(keyword)) if keyword.keyword == KeywordKind::Val => {
+                let variable_type = FunctionVariableType::Value(keyword);
+                self.forward();
+
+                let identifier = self.parse_identifier(handler)?;
+
+                Ok(FunctionParameter {
+                    variable_type,
+                    identifier,
+                })
+            }
             unexpected => {
                 let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                     expected: SyntaxKind::Either(&[
                         SyntaxKind::Keyword(KeywordKind::Int),
                         SyntaxKind::Keyword(KeywordKind::Bool),
                         SyntaxKind::Keyword(KeywordKind::Macro),
+                        SyntaxKind::Keyword(KeywordKind::Val),
                     ]),
                     found: unexpected.into_token(),
                 });
