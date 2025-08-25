@@ -12,7 +12,7 @@ use serde_json::{json, Value as JsonValue};
 
 use crate::{
     base::{source_file::SourceElement as _, VoidHandler},
-    lexical::token::{Identifier, MacroStringLiteralPart},
+    lexical::token::{Identifier, TemplateStringLiteralPart},
     semantic::error::{InvalidFunctionArguments, UnexpectedExpression},
     syntax::syntax_tree::expression::{Expression, FunctionCall, Primary},
     transpile::{
@@ -343,20 +343,25 @@ fn print_function(
                     reason: IllegalIndexingReason::NotIdentifier,
                 })),
             },
-            Primary::MacroStringLiteral(macro_string) => {
+            Primary::TemplateStringLiteral(template_string) => {
                 let mut cmds = Vec::new();
                 let mut parts = Vec::new();
-                for part in macro_string.parts() {
+                for part in template_string.parts() {
                     match part {
-                        MacroStringLiteralPart::Text(text) => {
+                        TemplateStringLiteralPart::Text(text) => {
                             parts.push(JsonValue::String(text.str().to_string()));
                         }
-                        MacroStringLiteralPart::MacroUsage { identifier, .. } => {
-                            let (cur_contains_macro, cur_cmds, part) =
-                                get_identifier_part(identifier, transpiler, scope)?;
-                            contains_macro |= cur_contains_macro;
-                            cmds.extend(cur_cmds);
-                            parts.push(part);
+                        TemplateStringLiteralPart::Expression { expression, .. } => {
+                            match expression {
+                                Expression::Primary(Primary::Identifier(identifier)) => {
+                                    let (cur_contains_macro, cur_cmds, part) =
+                                        get_identifier_part(identifier, transpiler, scope)?;
+                                    contains_macro |= cur_contains_macro;
+                                    cmds.extend(cur_cmds);
+                                    parts.push(part);
+                                }
+                                _ => todo!("other expression in template string literal"),
+                            }
                         }
                     }
                 }

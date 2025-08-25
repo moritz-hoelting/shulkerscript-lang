@@ -448,8 +448,8 @@ impl Transpiler {
                             Expression::Primary(Primary::StringLiteral(string)) => {
                                 Ok(Parameter::Static(string.str_content().to_string().into()))
                             }
-                            Expression::Primary(Primary::MacroStringLiteral(literal)) => {
-                                Ok(Parameter::Static(literal.into()))
+                            Expression::Primary(Primary::TemplateStringLiteral(literal)) => {
+                                Ok(Parameter::Static(literal.to_macro_string(scope, handler)?))
                             }
                             Expression::Primary(primary @ Primary::Identifier(ident)) => {
                                 let var =

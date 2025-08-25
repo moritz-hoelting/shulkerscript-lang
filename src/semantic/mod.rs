@@ -4,7 +4,7 @@
 
 use crate::{
     base::{self, source_file::SourceElement as _, Handler},
-    lexical::token::{KeywordKind, MacroStringLiteral, MacroStringLiteralPart},
+    lexical::token::{KeywordKind, TemplateStringLiteral, TemplateStringLiteralPart},
     syntax::syntax_tree::{
         declaration::{Declaration, Function, FunctionVariableType, ImportItems},
         expression::{Binary, BinaryOperator, Expression, LuaCode, PrefixOperator, Primary},
@@ -581,7 +581,7 @@ impl Primary {
                 }
             }
             Self::Boolean(_) | Self::Integer(_) | Self::StringLiteral(_) => Ok(()),
-            Self::MacroStringLiteral(lit) => lit.analyze_semantics(scope, handler),
+            Self::TemplateStringLiteral(lit) => lit.analyze_semantics(scope, handler),
             Self::FunctionCall(call) => {
                 let var = scope.get_variable(call.identifier().span.str());
                 var.map_or_else(
@@ -719,7 +719,7 @@ impl Primary {
         match self {
             Self::Boolean(_) => expected == ValueType::Boolean,
             Self::Integer(_) => expected == ValueType::Integer,
-            Self::StringLiteral(_) | Self::MacroStringLiteral(_) => {
+            Self::StringLiteral(_) | Self::TemplateStringLiteral(_) => {
                 matches!(expected, ValueType::String | ValueType::Boolean)
             }
             Self::FunctionCall(_) => matches!(expected, ValueType::Boolean | ValueType::Integer),
@@ -948,12 +948,12 @@ impl AnyStringLiteral {
     ) -> Result<(), error::Error> {
         match self {
             Self::StringLiteral(_) => Ok(()),
-            Self::MacroStringLiteral(lit) => lit.analyze_semantics(scope, handler),
+            Self::TemplateStringLiteral(lit) => lit.analyze_semantics(scope, handler),
         }
     }
 }
 
-impl MacroStringLiteral {
+impl TemplateStringLiteral {
     fn analyze_semantics(
         &self,
         scope: &SemanticScope,
@@ -963,25 +963,30 @@ impl MacroStringLiteral {
 
         for part in self.parts() {
             match part {
-                MacroStringLiteralPart::MacroUsage { identifier, .. } => {
-                    if let Some(variable_type) = scope.get_variable(identifier.span.str()) {
-                        if variable_type != VariableType::MacroParameter {
-                            let err =
-                                error::Error::UnexpectedExpression(UnexpectedExpression(Box::new(
-                                    Expression::Primary(Primary::Identifier(identifier.clone())),
-                                )));
+                TemplateStringLiteralPart::Expression { expression, .. } => match expression {
+                    Expression::Primary(Primary::Identifier(identifier)) => {
+                        if let Some(variable_type) = scope.get_variable(identifier.span.str()) {
+                            // TODO: correct checks
+                            // if variable_type != VariableType::MacroParameter {
+                            //     let err = error::Error::UnexpectedExpression(UnexpectedExpression(
+                            //         Box::new(Expression::Primary(Primary::Identifier(
+                            //             identifier.clone(),
+                            //         ))),
+                            //     ));
+                            //     handler.receive(err.clone());
+                            //     errs.push(err);
+                            // }
+                        } else {
+                            let err = error::Error::UnknownIdentifier(UnknownIdentifier {
+                                identifier: identifier.span.clone(),
+                            });
                             handler.receive(err.clone());
                             errs.push(err);
                         }
-                    } else {
-                        let err = error::Error::UnknownIdentifier(UnknownIdentifier {
-                            identifier: identifier.span.clone(),
-                        });
-                        handler.receive(err.clone());
-                        errs.push(err);
                     }
-                }
-                MacroStringLiteralPart::Text(_) => {}
+                    _ => todo!("handle other expressions in template string literals"),
+                },
+                TemplateStringLiteralPart::Text(_) => {}
             }
         }
 

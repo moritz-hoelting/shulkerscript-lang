@@ -1,10 +1,18 @@
 //! Utility methods for transpiling
 
-use std::{fmt::Display, str::FromStr};
+use std::{fmt::Display, str::FromStr, sync::Arc};
 
 use crate::{
-    lexical::token::{MacroStringLiteral, MacroStringLiteralPart},
-    syntax::syntax_tree::AnyStringLiteral,
+    base::{self, source_file::SourceElement as _, Handler},
+    lexical::token::{TemplateStringLiteral, TemplateStringLiteralPart},
+    syntax::syntax_tree::{
+        expression::{Expression, Primary},
+        AnyStringLiteral,
+    },
+    transpile::{
+        error::{TranspileError, UnknownIdentifier},
+        Scope, TranspileResult, VariableData,
+    },
 };
 
 /// String that can contain macros
@@ -247,53 +255,79 @@ where
     }
 }
 
-impl From<&AnyStringLiteral> for MacroString {
-    fn from(value: &AnyStringLiteral) -> Self {
-        match value {
-            AnyStringLiteral::StringLiteral(literal) => Self::from(literal.str_content().as_ref()),
-            AnyStringLiteral::MacroStringLiteral(literal) => Self::from(literal),
+impl AnyStringLiteral {
+    /// Convert the any string literal to a macro string, using the provided scope to resolve variables
+    ///
+    /// # Errors
+    /// - If an identifier in a template string is not found in the scope
+    pub fn to_macro_string(
+        &self,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> TranspileResult<MacroString> {
+        match self {
+            Self::StringLiteral(literal) => Ok(MacroString::from(literal.str_content().as_ref())),
+            Self::TemplateStringLiteral(literal) => literal.to_macro_string(scope, handler),
         }
     }
 }
 
-impl From<AnyStringLiteral> for MacroString {
-    fn from(value: AnyStringLiteral) -> Self {
-        Self::from(&value)
-    }
-}
-
-impl From<&MacroStringLiteral> for MacroString {
-    fn from(value: &MacroStringLiteral) -> Self {
-        if value
+impl TemplateStringLiteral {
+    /// Convert the template string literal to a macro string, using the provided scope to resolve variables
+    ///
+    /// # Errors
+    /// - If an identifier in a template string is not found in the scope
+    pub fn to_macro_string(
+        &self,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> TranspileResult<MacroString> {
+        if self
             .parts()
             .iter()
-            .any(|p| matches!(p, MacroStringLiteralPart::MacroUsage { .. }))
+            .any(|p| matches!(p, TemplateStringLiteralPart::Expression { .. }))
         {
-            Self::MacroString(
-                value
-                    .parts()
+            let macro_string = MacroString::MacroString(
+                self.parts()
                     .iter()
                     .map(|part| match part {
-                        MacroStringLiteralPart::Text(span) => MacroStringPart::String(
+                        TemplateStringLiteralPart::Text(span) => Ok(MacroStringPart::String(
                             crate::util::unescape_macro_string(span.str()).to_string(),
-                        ),
-                        MacroStringLiteralPart::MacroUsage { identifier, .. } => {
-                            MacroStringPart::MacroUsage(
-                                crate::util::identifier_to_macro(identifier.span.str()).to_string(),
-                            )
+                        )),
+                        TemplateStringLiteralPart::Expression { expression, .. } => {
+                            match expression {
+                                Expression::Primary(Primary::Identifier(identifier)) =>
+                                {
+                                    #[expect(clippy::option_if_let_else)]
+                                    if let Some(var_data) =
+                                        scope.get_variable(identifier.span.str())
+                                    {
+                                        match var_data.as_ref() {
+                                            VariableData::MacroParameter { macro_name, .. } => Ok(
+                                                MacroStringPart::MacroUsage(macro_name.to_owned()),
+                                            ),
+                                            _ => todo!("other identifiers in template strings"),
+                                        }
+                                    } else {
+                                        let err =
+                                            TranspileError::UnknownIdentifier(UnknownIdentifier {
+                                                identifier: identifier.span(),
+                                            });
+                                        handler.receive(Box::new(err.clone()));
+                                        Err(err)
+                                    }
+                                }
+                                _ => todo!("other expressions in template strings"),
+                            }
                         }
                     })
-                    .collect(),
-            )
-        } else {
-            Self::String(value.str_content())
-        }
-    }
-}
+                    .collect::<TranspileResult<Vec<MacroStringPart>>>()?,
+            );
 
-impl From<MacroStringLiteral> for MacroString {
-    fn from(value: MacroStringLiteral) -> Self {
-        Self::from(&value)
+            Ok(macro_string)
+        } else {
+            Ok(MacroString::String(self.str_content()))
+        }
     }
 }
 

@@ -70,11 +70,15 @@ impl TokenStream {
                         TokenizeError::InvalidMacroNameCharacter(err),
                     ));
                 }
-                Err(TokenizeError::UnclosedMacroUsage(err)) => {
-                    handler.receive(Error::TokenizeError(TokenizeError::UnclosedMacroUsage(err)));
+                Err(TokenizeError::UnclosedExpressionInTemplateUsage(err)) => {
+                    handler.receive(Error::TokenizeError(
+                        TokenizeError::UnclosedExpressionInTemplateUsage(err),
+                    ));
                 }
-                Err(TokenizeError::EmptyMacroUsage(err)) => {
-                    handler.receive(Error::TokenizeError(TokenizeError::EmptyMacroUsage(err)));
+                Err(TokenizeError::EmptyExpressionInTemplateUsage(err)) => {
+                    handler.receive(Error::TokenizeError(
+                        TokenizeError::EmptyExpressionInTemplateUsage(err),
+                    ));
                 }
             }
         }

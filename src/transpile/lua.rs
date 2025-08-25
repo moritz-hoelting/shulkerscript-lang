@@ -149,6 +149,8 @@ mod enabled {
 
             table.set("version", crate::VERSION)?;
 
+            // TODO: add functions for requesting data/scoreboard locations
+
             Ok(table)
         }
 
@@ -323,26 +325,41 @@ mod enabled {
                     handler,
                 ),
                 Value::Boolean(boolean) => Ok(Some(ComptimeValue::Boolean(boolean))),
-                Value::Table(table) => match table.get::<Value>("value") {
-                    Ok(Value::Nil) => {
-                        let err = TranspileError::LuaRuntimeError(LuaRuntimeError {
-                            code_block: self.span(),
-                            error_message: "return table must contain non-nil 'value'".to_string(),
-                        });
-                        handler.receive(Box::new(err.clone()));
-                        Err(err)
-                    }
-                    Ok(value) => {
-                        let value = match self.handle_lua_result(value, handler)? {
-                            Some(ComptimeValue::String(s)) => {
-                                let contains_macro = match table.get::<Value>("contains_macro") {
-                                    Ok(Value::Boolean(boolean)) => Ok(boolean),
-                                    Ok(value) => {
-                                        if let Some(ComptimeValue::Boolean(boolean)) =
-                                            self.handle_lua_result(value, handler)?
-                                        {
-                                            Ok(boolean)
-                                        } else {
+                Value::Table(table) => {
+                    // TODO: allow to return arrays when comptime arrays are implemented
+                    match table.get::<Value>("value") {
+                        Ok(Value::Nil) => {
+                            let err = TranspileError::LuaRuntimeError(LuaRuntimeError {
+                                code_block: self.span(),
+                                error_message: "return table must contain non-nil 'value'"
+                                    .to_string(),
+                            });
+                            handler.receive(Box::new(err.clone()));
+                            Err(err)
+                        }
+                        Ok(value) => {
+                            let value = match self.handle_lua_result(value, handler)? {
+                                Some(ComptimeValue::String(s)) => {
+                                    let contains_macro = match table.get::<Value>("contains_macro")
+                                    {
+                                        Ok(Value::Boolean(boolean)) => Ok(boolean),
+                                        Ok(value) => {
+                                            if let Some(ComptimeValue::Boolean(boolean)) =
+                                                self.handle_lua_result(value, handler)?
+                                            {
+                                                Ok(boolean)
+                                            } else {
+                                                let err = TranspileError::MismatchedTypes(
+                                                    MismatchedTypes {
+                                                        expression: self.span(),
+                                                        expected_type: ExpectedType::Boolean,
+                                                    },
+                                                );
+                                                handler.receive(Box::new(err.clone()));
+                                                Err(err)
+                                            }
+                                        }
+                                        _ => {
                                             let err =
                                                 TranspileError::MismatchedTypes(MismatchedTypes {
                                                     expression: self.span(),
@@ -351,39 +368,29 @@ mod enabled {
                                             handler.receive(Box::new(err.clone()));
                                             Err(err)
                                         }
-                                    }
-                                    _ => {
-                                        let err =
-                                            TranspileError::MismatchedTypes(MismatchedTypes {
-                                                expression: self.span(),
-                                                expected_type: ExpectedType::Boolean,
-                                            });
-                                        handler.receive(Box::new(err.clone()));
-                                        Err(err)
-                                    }
-                                }?;
+                                    }?;
 
-                                if contains_macro {
-                                    Some(ComptimeValue::MacroString(
-                                        s.parse().expect("parsing cannot fail"),
-                                    ))
-                                } else {
-                                    Some(ComptimeValue::String(s))
+                                    if contains_macro {
+                                        Some(ComptimeValue::MacroString(
+                                            s.parse().expect("parsing cannot fail"),
+                                        ))
+                                    } else {
+                                        Some(ComptimeValue::String(s))
+                                    }
                                 }
-                            }
-                            value => value,
-                        };
-                        Ok(value)
+                                value => value,
+                            };
+                            Ok(value)
+                        }
+                        Err(err) => {
+                            let err = TranspileError::LuaRuntimeError(
+                                LuaRuntimeError::from_lua_err(&err, self.span()),
+                            );
+                            handler.receive(Box::new(err.clone()));
+                            Err(err)
+                        }
                     }
-                    Err(err) => {
-                        let err = TranspileError::LuaRuntimeError(LuaRuntimeError::from_lua_err(
-                            &err,
-                            self.span(),
-                        ));
-                        handler.receive(Box::new(err.clone()));
-                        Err(err)
-                    }
-                },
+                }
                 Value::Error(_)
                 | Value::Thread(_)
                 | Value::UserData(_)

@@ -275,14 +275,8 @@ mod tests {
             serde_json::from_str::<SerdeWrapper<ProgramFile>>(&serialized).unwrap();
 
         assert_eq!(
-            Arc::as_ptr(
-                deserialized
-                    .namespace()
-                    .namespace_keyword()
-                    .span
-                    .source_file()
-            ),
-            Arc::as_ptr(deserialized.namespace().namespace_name().span.source_file())
+            Arc::as_ptr(deserialized.namespace().keyword().span.source_file()),
+            Arc::as_ptr(deserialized.namespace().name().span.source_file())
         );
     }
 }

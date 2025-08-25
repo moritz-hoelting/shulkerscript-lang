@@ -20,7 +20,7 @@ use super::{
 #[cfg(feature = "shulkerbox")]
 use crate::{
     base::{self, source_file::SourceElement, Handler, VoidHandler},
-    lexical::token::{Identifier, MacroStringLiteralPart, StringLiteral},
+    lexical::token::{Identifier, StringLiteral, TemplateStringLiteralPart},
     syntax::syntax_tree::expression::{
         Binary, BinaryOperator, Expression, Indexed, MemberAccess, Parenthesized, PrefixOperator,
         Primary,
@@ -337,7 +337,7 @@ impl Primary {
                     }
                 }
             }
-            Self::StringLiteral(_) | Self::MacroStringLiteral(_) => {
+            Self::StringLiteral(_) | Self::TemplateStringLiteral(_) => {
                 matches!(r#type, ValueType::String | ValueType::Boolean)
             }
         }
@@ -412,17 +412,20 @@ impl Primary {
                     expression: lua.span(),
                 })
                 .and_then(|val| val),
-            Self::MacroStringLiteral(macro_string_literal) => {
-                if macro_string_literal
+            Self::TemplateStringLiteral(template_string_literal) => {
+                if template_string_literal
                     .parts()
                     .iter()
-                    .any(|part| matches!(part, MacroStringLiteralPart::MacroUsage { .. }))
+                    .any(|part| matches!(part, TemplateStringLiteralPart::Expression { .. }))
                 {
-                    Ok(ComptimeValue::MacroString(
-                        macro_string_literal.clone().into(),
-                    ))
+                    template_string_literal
+                        .to_macro_string(scope, handler)
+                        .map(ComptimeValue::MacroString)
+                        .map_err(|_| NotComptime {
+                            expression: template_string_literal.span(),
+                        })
                 } else {
-                    Ok(ComptimeValue::String(macro_string_literal.str_content()))
+                    Ok(ComptimeValue::String(template_string_literal.str_content()))
                 }
             }
         }
@@ -446,7 +449,7 @@ impl Primary {
             | Self::FunctionCall(_)
             | Self::Integer(_)
             | Self::Lua(_)
-            | Self::MacroStringLiteral(_)
+            | Self::TemplateStringLiteral(_)
             | Self::MemberAccess(_)
             | Self::Prefix(_) => Err(NotComptime {
                 expression: self.span(),
@@ -476,7 +479,7 @@ impl Primary {
             | Self::FunctionCall(_)
             | Self::Integer(_)
             | Self::Lua(_)
-            | Self::MacroStringLiteral(_)
+            | Self::TemplateStringLiteral(_)
             | Self::MemberAccess(_)
             | Self::Prefix(_) => false,
         }
@@ -1260,7 +1263,7 @@ impl Transpiler {
                     Err(err)
                 }
             }
-            Primary::StringLiteral(_) | Primary::MacroStringLiteral(_) => {
+            Primary::StringLiteral(_) | Primary::TemplateStringLiteral(_) => {
                 if matches!(
                     target,
                     DataLocation::Storage {
@@ -1662,9 +1665,11 @@ impl Transpiler {
                 Vec::new(),
                 ExtendedCondition::Runtime(Condition::Atom(s.str_content().to_string().into())),
             )),
-            Primary::MacroStringLiteral(macro_string) => Ok((
+            Primary::TemplateStringLiteral(template_string) => Ok((
                 Vec::new(),
-                ExtendedCondition::Runtime(Condition::Atom(macro_string.into())),
+                ExtendedCondition::Runtime(Condition::Atom(
+                    template_string.to_macro_string(scope, handler)?.into(),
+                )),
             )),
             Primary::FunctionCall(func) => {
                 if func

@@ -7,8 +7,8 @@ use crate::{
     base::{self, Handler},
     lexical::{
         token::{
-            Identifier, Integer, Keyword, KeywordKind, MacroStringLiteral, Punctuation,
-            StringLiteral, Token,
+            Identifier, Integer, Keyword, KeywordKind, Punctuation, StringLiteral,
+            TemplateStringLiteral, Token,
         },
         token_stream::{Delimited, Delimiter, TokenStream, TokenTree},
     },
@@ -438,19 +438,19 @@ impl Frame<'_> {
         }
     }
 
-    /// Expects the next [`Token`] to be an [`MacroStringLiteral`], and returns it.
+    /// Expects the next [`Token`] to be an [`TemplateStringLiteral`], and returns it.
     ///
     /// # Errors
-    /// If the next [`Token`] is not an [`MacroStringLiteral`].
-    pub fn parse_macro_string_literal(
+    /// If the next [`Token`] is not an [`TemplateStringLiteral`].
+    pub fn parse_template_string_literal(
         &mut self,
         handler: &impl Handler<base::Error>,
-    ) -> ParseResult<MacroStringLiteral> {
+    ) -> ParseResult<TemplateStringLiteral> {
         match self.next_significant_token() {
-            Reading::Atomic(Token::MacroStringLiteral(literal)) => Ok(*literal),
+            Reading::Atomic(Token::TemplateStringLiteral(literal)) => Ok(*literal),
             found => {
                 let err = Error::UnexpectedSyntax(UnexpectedSyntax {
-                    expected: SyntaxKind::MacroStringLiteral,
+                    expected: SyntaxKind::TemplateStringLiteral,
                     found: found.into_token(),
                 });
                 handler.receive(Box::new(err.clone()));
@@ -469,7 +469,7 @@ impl Frame<'_> {
     ) -> ParseResult<AnyStringLiteral> {
         match self.next_significant_token() {
             Reading::Atomic(Token::StringLiteral(literal)) => Ok(literal.into()),
-            Reading::Atomic(Token::MacroStringLiteral(literal)) => Ok((*literal).into()),
+            Reading::Atomic(Token::TemplateStringLiteral(literal)) => Ok((*literal).into()),
             found => {
                 let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                     expected: SyntaxKind::AnyStringLiteral,

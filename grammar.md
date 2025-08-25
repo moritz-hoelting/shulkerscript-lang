@@ -230,13 +230,6 @@ Expression:
     Primary | Binary ;
 ```
 
-## MacroStringLiteral
-
-```ebnf
-MacroStringLiteral:
-  '`' ( TEXT | '$(' [a-zA-Z0-9_]+ ')' )* '`';
-```
-
 ## Else
 
 ```ebnf
@@ -304,7 +297,7 @@ Primary:
     | StringLiteral
     | FunctionCall
     | MemberAccess
-    | MacroStringLiteral
+    | TemplateStringLiteral
     | LuaCode
 ```
 
@@ -470,6 +463,13 @@ Parenthesized:
 Prefix:
     PrefixOperator Primary
     ;
+```
+
+## TemplateStringLiteral
+
+```ebnf
+TemplateStringLiteral:
+  '`' ( TEXT | '$(' Expression ')' )* '`';
 ```
 
 ## AssignmentDestination

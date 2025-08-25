@@ -69,7 +69,6 @@ impl Transpiler {
     ///
     /// # Errors
     /// - [`TranspileError::MissingFunctionDeclaration`] If a called function is missing
-    #[expect(clippy::too_many_lines)]
     #[tracing::instrument(level = "trace", skip_all)]
     pub fn transpile(
         mut self,
@@ -645,7 +644,9 @@ impl Transpiler {
             Primary::StringLiteral(string) => {
                 Ok(vec![Command::Raw(string.str_content().to_string())])
             }
-            Primary::MacroStringLiteral(string) => Ok(vec![Command::UsesMacro(string.into())]),
+            Primary::TemplateStringLiteral(string) => Ok(vec![Command::UsesMacro(
+                string.to_macro_string(scope, handler)?.into(),
+            )]),
             Primary::Lua(code) => match code.eval_comptime(scope, handler)? {
                 Ok(ComptimeValue::String(cmd)) => Ok(vec![Command::Raw(cmd)]),
                 Ok(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd.into())]),
@@ -987,37 +988,41 @@ impl Transpiler {
                 }
             }
             ExecuteBlockHead::As(r#as) => {
-                let selector = r#as.as_selector();
+                let selector = r#as.as_selector().to_macro_string(scope, handler)?;
                 tail.map(|(pre_cmds, tail)| {
                     (pre_cmds, Execute::As(selector.into(), Box::new(tail)))
                 })
             }
             ExecuteBlockHead::At(at) => {
-                let selector = at.at_selector();
+                let selector = at.at_selector().to_macro_string(scope, handler)?;
                 tail.map(|(pre_cmds, tail)| {
                     (pre_cmds, Execute::At(selector.into(), Box::new(tail)))
                 })
             }
             ExecuteBlockHead::Align(align) => {
-                let align = align.align_selector();
+                let align = align.align_selector().to_macro_string(scope, handler)?;
                 tail.map(|(pre_cmds, tail)| {
                     (pre_cmds, Execute::Align(align.into(), Box::new(tail)))
                 })
             }
             ExecuteBlockHead::Anchored(anchored) => {
-                let anchor = anchored.anchored_selector();
+                let anchor = anchored
+                    .anchored_selector()
+                    .to_macro_string(scope, handler)?;
                 tail.map(|(pre_cmds, tail)| {
                     (pre_cmds, Execute::Anchored(anchor.into(), Box::new(tail)))
                 })
             }
             ExecuteBlockHead::In(r#in) => {
-                let dimension = r#in.in_selector();
+                let dimension = r#in.in_selector().to_macro_string(scope, handler)?;
                 tail.map(|(pre_cmds, tail)| {
                     (pre_cmds, Execute::In(dimension.into(), Box::new(tail)))
                 })
             }
             ExecuteBlockHead::Positioned(positioned) => {
-                let position = positioned.positioned_selector();
+                let position = positioned
+                    .positioned_selector()
+                    .to_macro_string(scope, handler)?;
                 tail.map(|(pre_cmds, tail)| {
                     (
                         pre_cmds,
@@ -1026,37 +1031,37 @@ impl Transpiler {
                 })
             }
             ExecuteBlockHead::Rotated(rotated) => {
-                let rotation = rotated.rotated_selector();
+                let rotation = rotated.rotated_selector().to_macro_string(scope, handler)?;
                 tail.map(|(pre_cmds, tail)| {
                     (pre_cmds, Execute::Rotated(rotation.into(), Box::new(tail)))
                 })
             }
             ExecuteBlockHead::Facing(facing) => {
-                let facing = facing.facing_selector();
+                let facing = facing.facing_selector().to_macro_string(scope, handler)?;
                 tail.map(|(pre_cmds, tail)| {
                     (pre_cmds, Execute::Facing(facing.into(), Box::new(tail)))
                 })
             }
             ExecuteBlockHead::AsAt(as_at) => {
-                let selector = as_at.asat_selector();
+                let selector = as_at.asat_selector().to_macro_string(scope, handler)?;
                 tail.map(|(pre_cmds, tail)| {
                     (pre_cmds, Execute::AsAt(selector.into(), Box::new(tail)))
                 })
             }
             ExecuteBlockHead::On(on) => {
-                let dimension = on.on_selector();
+                let dimension = on.on_selector().to_macro_string(scope, handler)?;
                 tail.map(|(pre_cmds, tail)| {
                     (pre_cmds, Execute::On(dimension.into(), Box::new(tail)))
                 })
             }
             ExecuteBlockHead::Store(store) => {
-                let store = store.store_selector();
+                let store = store.store_selector().to_macro_string(scope, handler)?;
                 tail.map(|(pre_cmds, tail)| {
                     (pre_cmds, Execute::Store(store.into(), Box::new(tail)))
                 })
             }
             ExecuteBlockHead::Summon(summon) => {
-                let entity = summon.summon_selector();
+                let entity = summon.summon_selector().to_macro_string(scope, handler)?;
                 tail.map(|(pre_cmds, tail)| {
                     (pre_cmds, Execute::Summon(entity.into(), Box::new(tail)))
                 })

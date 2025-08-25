@@ -12,7 +12,7 @@ use crate::{
         Handler, VoidHandler,
     },
     lexical::{
-        token::{Identifier, MacroStringLiteral, Punctuation, StringLiteral, Token},
+        token::{Identifier, Punctuation, StringLiteral, TemplateStringLiteral, Token},
         token_stream::Delimiter,
     },
     syntax::parser::Reading,
@@ -69,25 +69,25 @@ pub struct DelimitedList<T> {
     pub close: Punctuation,
 }
 
-/// Represents a syntax tree node that can be either a string literal or a macro string literal.
+/// Represents a syntax tree node that can be either a string literal or a template string literal.
 ///
 /// Syntax Synopsis:
 /// ```ebnf
-/// AnyStringLiteral: StringLiteral | MacroStringLiteral ;
+/// AnyStringLiteral: StringLiteral | TemplateStringLiteral ;
 /// ```
 #[allow(missing_docs)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, From)]
 pub enum AnyStringLiteral {
     StringLiteral(StringLiteral),
-    MacroStringLiteral(MacroStringLiteral),
+    TemplateStringLiteral(TemplateStringLiteral),
 }
 
 impl SourceElement for AnyStringLiteral {
     fn span(&self) -> Span {
         match self {
             Self::StringLiteral(string_literal) => string_literal.span(),
-            Self::MacroStringLiteral(macro_string_literal) => macro_string_literal.span(),
+            Self::TemplateStringLiteral(template_string_literal) => template_string_literal.span(),
         }
     }
 }

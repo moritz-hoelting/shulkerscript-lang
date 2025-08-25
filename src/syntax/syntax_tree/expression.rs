@@ -13,8 +13,8 @@ use crate::{
     },
     lexical::{
         token::{
-            Boolean, Identifier, Integer, Keyword, KeywordKind, MacroStringLiteral, Punctuation,
-            StringLiteral, Token,
+            Boolean, Identifier, Integer, Keyword, KeywordKind, Punctuation, StringLiteral,
+            TemplateStringLiteral, Token,
         },
         token_stream::Delimiter,
     },
@@ -177,7 +177,7 @@ impl SourceElement for Expression {
 ///     | StringLiteral
 ///     | FunctionCall
 ///     | MemberAccess
-///     | MacroStringLiteral
+///     | TemplateStringLiteral
 ///     | LuaCode
 /// ```
 #[allow(missing_docs)]
@@ -193,7 +193,7 @@ pub enum Primary {
     StringLiteral(StringLiteral),
     FunctionCall(FunctionCall),
     MemberAccess(MemberAccess),
-    MacroStringLiteral(MacroStringLiteral),
+    TemplateStringLiteral(TemplateStringLiteral),
     Lua(Box<LuaCode>),
 }
 
@@ -209,7 +209,7 @@ impl SourceElement for Primary {
             Self::StringLiteral(string_literal) => string_literal.span(),
             Self::FunctionCall(function_call) => function_call.span(),
             Self::MemberAccess(member_access) => member_access.span(),
-            Self::MacroStringLiteral(macro_string_literal) => macro_string_literal.span(),
+            Self::TemplateStringLiteral(template_string_literal) => template_string_literal.span(),
             Self::Lua(lua_code) => lua_code.span(),
         }
     }
@@ -661,12 +661,12 @@ impl Parser<'_> {
                 Ok(Primary::StringLiteral(literal))
             }
 
-            // macro string literal expression
-            Reading::Atomic(Token::MacroStringLiteral(macro_string_literal)) => {
-                // eat the macro string literal
+            // template string literal expression
+            Reading::Atomic(Token::TemplateStringLiteral(template_string_literal)) => {
+                // eat the template string literal
                 self.forward();
 
-                Ok(Primary::MacroStringLiteral(*macro_string_literal))
+                Ok(Primary::TemplateStringLiteral(*template_string_literal))
             }
 
             // lua code expression
