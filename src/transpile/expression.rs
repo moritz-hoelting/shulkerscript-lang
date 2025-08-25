@@ -20,7 +20,7 @@ use super::{
 #[cfg(feature = "shulkerbox")]
 use crate::{
     base::{self, source_file::SourceElement, Handler, VoidHandler},
-    lexical::token::{Identifier, StringLiteral, TemplateStringLiteralPart},
+    lexical::token::{Identifier, StringLiteral},
     syntax::syntax_tree::expression::{
         Binary, BinaryOperator, Expression, Indexed, MemberAccess, Parenthesized, PrefixOperator,
         Primary,
@@ -413,6 +413,8 @@ impl Primary {
                 })
                 .and_then(|val| val),
             Self::TemplateStringLiteral(template_string_literal) => {
+                use crate::syntax::syntax_tree::expression::TemplateStringLiteralPart;
+
                 if template_string_literal
                     .parts()
                     .iter()

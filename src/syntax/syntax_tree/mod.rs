@@ -12,10 +12,10 @@ use crate::{
         Handler, VoidHandler,
     },
     lexical::{
-        token::{Identifier, Punctuation, StringLiteral, TemplateStringLiteral, Token},
+        token::{Identifier, Punctuation, StringLiteral, Token},
         token_stream::Delimiter,
     },
-    syntax::parser::Reading,
+    syntax::{parser::Reading, syntax_tree::expression::TemplateStringLiteral},
 };
 
 use super::{

@@ -3,7 +3,7 @@
 use std::{
     cmp::Ordering,
     fmt::Debug,
-    iter::{Iterator, Peekable},
+    iter::Iterator,
     ops::Range,
     path::{Path, PathBuf},
     str::CharIndices,
@@ -11,6 +11,7 @@ use std::{
 };
 
 use getset::{CopyGetters, Getters};
+use itertools::{structs::MultiPeek, Itertools as _};
 
 use super::{file_provider::FileProvider, Error};
 
@@ -72,8 +73,9 @@ impl SourceFile {
     pub fn iter(self: &Arc<Self>) -> SourceIterator<'_> {
         SourceIterator {
             source_file: self,
-            iterator: self.content().char_indices().peekable(),
+            iterator: self.content().char_indices().multipeek(),
             prev: None,
+            in_template_string_expression_open_count: Vec::new(),
         }
     }
 
@@ -337,15 +339,68 @@ pub struct SourceIterator<'a> {
     /// Get the source file that the iterator is iterating over.
     #[get_copy = "pub"]
     source_file: &'a Arc<SourceFile>,
-    iterator: Peekable<CharIndices<'a>>,
+    iterator: MultiPeek<CharIndices<'a>>,
     /// Get the previous character that was iterated over.
     #[get_copy = "pub"]
     prev: Option<(usize, char)>,
+    /// Current state for parsing template strings.
+    in_template_string_expression_open_count: Vec<u32>,
 }
 impl SourceIterator<'_> {
     /// Peek at the next character in the source file.
     pub fn peek(&mut self) -> Option<(usize, char)> {
+        self.iterator.reset_peek();
         self.iterator.peek().copied()
+    }
+
+    /// Peek at the next character in the source file.
+    pub fn multipeek(&mut self) -> Option<(usize, char)> {
+        self.iterator.peek().copied()
+    }
+
+    /// Reset the multipeek state of the iterator.
+    pub fn reset_multipeek(&mut self) {
+        self.iterator.reset_peek();
+    }
+
+    /// Increase the count of open parentheses in the current template string expression.
+    pub fn increase_template_string_expression_open_paren_count(&mut self) {
+        if let Some(count) = self.in_template_string_expression_open_count.last_mut() {
+            *count += 1;
+        }
+    }
+
+    /// Decrease the count of open parentheses in the current template string expression.
+    pub fn decrease_template_string_expression_open_paren_count(&mut self) {
+        if let Some(count) = self.in_template_string_expression_open_count.last_mut() {
+            *count = count.saturating_sub(1);
+        }
+    }
+
+    /// Enter a template string expression.
+    pub fn enter_template_string(&mut self) {
+        self.in_template_string_expression_open_count.push(0);
+    }
+
+    /// Exit a template string expression.
+    pub fn exit_template_string(&mut self) {
+        self.in_template_string_expression_open_count.pop();
+    }
+
+    /// Check if the iterator is currently in a template string expression.
+    #[must_use]
+    pub fn is_in_template_string_expression(&self) -> Option<bool> {
+        self.in_template_string_expression_open_count
+            .last()
+            .map(|&count| count > 0)
+    }
+
+    /// Get the number of open parentheses in the current template string expression.
+    #[must_use]
+    pub fn template_string_expression_open_paren_count(&self) -> Option<u32> {
+        self.in_template_string_expression_open_count
+            .last()
+            .copied()
     }
 }
 impl Iterator for SourceIterator<'_> {

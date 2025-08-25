@@ -37,7 +37,7 @@ pub enum SyntaxKind {
     Integer,
     Boolean,
     StringLiteral,
-    TemplateStringLiteral,
+    TemplateStringLiteralPart,
     AnyStringLiteral,
     Statement,
     Expression,
@@ -76,7 +76,7 @@ impl SyntaxKind {
             Self::Integer => "an integer token".to_string(),
             Self::Boolean => "a boolean token".to_string(),
             Self::StringLiteral => "a string literal".to_string(),
-            Self::TemplateStringLiteral => "a template string literal".to_string(),
+            Self::TemplateStringLiteralPart => "part of a template string literal".to_string(),
             Self::AnyStringLiteral => "a (template) string literal".to_string(),
             Self::Statement => "a statement syntax".to_string(),
             Self::Expression => "an expression syntax".to_string(),
@@ -116,7 +116,7 @@ impl Display for UnexpectedSyntax {
             Some(Token::Boolean(..)) => "a boolean token".to_string(),
             Some(Token::CommandLiteral(..)) => "a literal command token".to_string(),
             Some(Token::StringLiteral(..)) => "a string literal token".to_string(),
-            Some(Token::TemplateStringLiteral(..)) => "a template string literal token".to_string(),
+            Some(Token::TemplateStringText(..)) => "a template string text token".to_string(),
 
             None => "EOF".to_string(),
         };

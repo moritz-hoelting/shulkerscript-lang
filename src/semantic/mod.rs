@@ -4,10 +4,13 @@
 
 use crate::{
     base::{self, source_file::SourceElement as _, Handler},
-    lexical::token::{KeywordKind, TemplateStringLiteral, TemplateStringLiteralPart},
+    lexical::token::KeywordKind,
     syntax::syntax_tree::{
         declaration::{Declaration, Function, FunctionVariableType, ImportItems},
-        expression::{Binary, BinaryOperator, Expression, LuaCode, PrefixOperator, Primary},
+        expression::{
+            Binary, BinaryOperator, Expression, LuaCode, PrefixOperator, Primary,
+            TemplateStringLiteral, TemplateStringLiteralPart,
+        },
         program::{Namespace, ProgramFile},
         statement::{
             execute_block::{
@@ -963,29 +966,33 @@ impl TemplateStringLiteral {
 
         for part in self.parts() {
             match part {
-                TemplateStringLiteralPart::Expression { expression, .. } => match expression {
-                    Expression::Primary(Primary::Identifier(identifier)) => {
-                        if let Some(variable_type) = scope.get_variable(identifier.span.str()) {
-                            // TODO: correct checks
-                            // if variable_type != VariableType::MacroParameter {
-                            //     let err = error::Error::UnexpectedExpression(UnexpectedExpression(
-                            //         Box::new(Expression::Primary(Primary::Identifier(
-                            //             identifier.clone(),
-                            //         ))),
-                            //     ));
-                            //     handler.receive(err.clone());
-                            //     errs.push(err);
-                            // }
-                        } else {
-                            let err = error::Error::UnknownIdentifier(UnknownIdentifier {
-                                identifier: identifier.span.clone(),
-                            });
-                            handler.receive(err.clone());
-                            errs.push(err);
+                TemplateStringLiteralPart::Expression { expression, .. } => {
+                    match expression.as_ref() {
+                        Expression::Primary(Primary::Identifier(identifier)) => {
+                            if let Some(variable_type) = scope.get_variable(identifier.span.str()) {
+                                // TODO: correct checks
+                                // if variable_type != VariableType::MacroParameter {
+                                //     let err = error::Error::UnexpectedExpression(UnexpectedExpression(
+                                //         Box::new(Expression::Primary(Primary::Identifier(
+                                //             identifier.clone(),
+                                //         ))),
+                                //     ));
+                                //     handler.receive(err.clone());
+                                //     errs.push(err);
+                                // }
+                            } else {
+                                let err = error::Error::UnknownIdentifier(UnknownIdentifier {
+                                    identifier: identifier.span.clone(),
+                                });
+                                handler.receive(err.clone());
+                                errs.push(err);
+                            }
+                        }
+                        _ => {
+                            // TODO: handle other expressions in template string literals
                         }
                     }
-                    _ => todo!("handle other expressions in template string literals"),
-                },
+                }
                 TemplateStringLiteralPart::Text(_) => {}
             }
         }

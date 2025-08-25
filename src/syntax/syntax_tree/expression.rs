@@ -14,14 +14,15 @@ use crate::{
     lexical::{
         token::{
             Boolean, Identifier, Integer, Keyword, KeywordKind, Punctuation, StringLiteral,
-            TemplateStringLiteral, Token,
+            TemplateStringLiteralText, Token,
         },
         token_stream::Delimiter,
     },
     syntax::{
         self,
-        error::{Error, ParseResult, UnexpectedSyntax},
+        error::{Error, ParseResult, SyntaxKind, UnexpectedSyntax},
         parser::{Parser, Reading},
+        syntax_tree::AnyStringLiteral,
     },
 };
 
@@ -391,6 +392,95 @@ impl SourceElement for FunctionCall {
     }
 }
 
+/// Represents a hardcoded template string literal value in the source code.
+///
+/// ```ebnf
+/// TemplateStringLiteral:
+///   '`' ( TemplateStringLiteralText | '$(' Expression ')' )* '`';
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TemplateStringLiteral {
+    /// The backtick that starts the template string literal.
+    pub(crate) starting_backtick: Punctuation,
+    /// The parts that make up the template string literal.
+    pub(crate) parts: Vec<TemplateStringLiteralPart>,
+    /// The backtick that ends the template string literal.
+    pub(crate) ending_backtick: Punctuation,
+}
+
+impl TemplateStringLiteral {
+    /// Returns the string content without escapement characters, leading and trailing double quotes.
+    #[must_use]
+    pub fn str_content(&self) -> String {
+        let mut content = String::new();
+
+        for part in &self.parts {
+            match part {
+                TemplateStringLiteralPart::Text(text) => {
+                    content += &crate::util::unescape_macro_string(text.span.str());
+                }
+                TemplateStringLiteralPart::Expression { expression, .. } => {
+                    // write!(
+                    //     content,
+                    //     "$({})",
+                    //     crate::util::identifier_to_macro(identifier.span.str())
+                    // )
+                    // .expect("can always write to string");
+                    todo!("handle expression in template string literal")
+                }
+            }
+        }
+
+        content
+    }
+
+    /// Returns the parts that make up the template string literal.
+    #[must_use]
+    pub fn parts(&self) -> &[TemplateStringLiteralPart] {
+        &self.parts
+    }
+}
+
+impl SourceElement for TemplateStringLiteral {
+    fn span(&self) -> Span {
+        self.starting_backtick
+            .span
+            .join(&self.ending_backtick.span)
+            .expect("Invalid template string literal span")
+    }
+}
+
+/// Represents a part of a template string literal value in the source code.
+#[allow(missing_docs)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TemplateStringLiteralPart {
+    Text(TemplateStringLiteralText),
+    Expression {
+        dollar: Punctuation,
+        open_brace: Punctuation,
+        expression: Box<Expression>,
+        close_brace: Punctuation,
+    },
+}
+
+impl SourceElement for TemplateStringLiteralPart {
+    fn span(&self) -> Span {
+        match self {
+            Self::Text(text) => text.span(),
+            Self::Expression {
+                dollar,
+                close_brace,
+                ..
+            } => dollar
+                .span()
+                .join(&close_brace.span())
+                .expect("Invalid template string literal part span"),
+        }
+    }
+}
+
 /// Represents a lua code block in the syntax tree.
 ///
 /// Syntax Synopsis:
@@ -589,6 +679,13 @@ impl Parser<'_> {
                 }))
             }
 
+            // template string literal
+            Reading::Atomic(Token::Punctuation(punc)) if punc.punctuation == '`' => {
+                let template_string_literal = self.parse_template_string_literal(handler)?;
+
+                Ok(Primary::TemplateStringLiteral(template_string_literal))
+            }
+
             // parenthesized expression
             Reading::IntoDelimited(left_parenthesis) if left_parenthesis.punctuation == '(' => self
                 .parse_parenthesized(handler)
@@ -659,14 +756,6 @@ impl Parser<'_> {
                 self.forward();
 
                 Ok(Primary::StringLiteral(literal))
-            }
-
-            // template string literal expression
-            Reading::Atomic(Token::TemplateStringLiteral(template_string_literal)) => {
-                // eat the template string literal
-                self.forward();
-
-                Ok(Primary::TemplateStringLiteral(*template_string_literal))
             }
 
             // lua code expression
@@ -837,6 +926,90 @@ impl Parser<'_> {
                 let err = Error::UnexpectedSyntax(UnexpectedSyntax {
                     expected: syntax::error::SyntaxKind::Operator,
                     found: unexpected.into_token(),
+                });
+                handler.receive(Box::new(err.clone()));
+                Err(err)
+            }
+        }
+    }
+
+    /// Expects the next [`Token`] to be an [`TemplateStringLiteral`], and returns it.
+    ///
+    /// # Errors
+    /// If the next [`Token`] is not an [`TemplateStringLiteral`].
+    pub fn parse_template_string_literal(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> ParseResult<TemplateStringLiteral> {
+        let starting_backtick = self.parse_punctuation('`', true, handler)?;
+
+        let mut parts = Vec::new();
+
+        loop {
+            match self.stop_at_significant() {
+                Reading::Atomic(Token::Punctuation(ending_backtick))
+                    if ending_backtick.punctuation == '`' =>
+                {
+                    self.forward();
+
+                    // closing tick
+                    return Ok(TemplateStringLiteral {
+                        starting_backtick,
+                        parts,
+                        ending_backtick,
+                    });
+                }
+                Reading::Atomic(Token::Punctuation(dollar)) if dollar.punctuation == '$' => {
+                    self.forward();
+
+                    let delimited_expression = self.step_into(
+                        Delimiter::Parenthesis,
+                        |parser| parser.parse_expression(handler),
+                        handler,
+                    )?;
+
+                    parts.push(TemplateStringLiteralPart::Expression {
+                        dollar,
+                        open_brace: delimited_expression.open,
+                        expression: Box::new(delimited_expression.tree?),
+                        close_brace: delimited_expression.close,
+                    });
+                }
+
+                Reading::Atomic(Token::TemplateStringText(text)) => {
+                    self.forward();
+                    parts.push(TemplateStringLiteralPart::Text(text));
+                }
+
+                unexpected => {
+                    let err = Error::UnexpectedSyntax(UnexpectedSyntax {
+                        expected: syntax::error::SyntaxKind::TemplateStringLiteralPart,
+                        found: unexpected.into_token(),
+                    });
+                    handler.receive(Box::new(err.clone()));
+                    return Err(err);
+                }
+            }
+        }
+    }
+
+    /// Expects the next [`Token`] to be an [`AnyStringLiteral`], and returns it.
+    ///
+    /// # Errors
+    /// If the next [`Token`] is not an [`AnyStringLiteral`].
+    pub fn parse_any_string_literal(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> ParseResult<AnyStringLiteral> {
+        match self.next_significant_token() {
+            Reading::Atomic(Token::StringLiteral(literal)) => Ok(literal.into()),
+            Reading::Atomic(Token::Punctuation(punc)) if punc.punctuation == '`' => self
+                .parse_template_string_literal(handler)
+                .map(AnyStringLiteral::TemplateStringLiteral),
+            found => {
+                let err = Error::UnexpectedSyntax(UnexpectedSyntax {
+                    expected: SyntaxKind::AnyStringLiteral,
+                    found: found.into_token(),
                 });
                 handler.receive(Box::new(err.clone()));
                 Err(err)

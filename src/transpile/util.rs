@@ -4,9 +4,8 @@ use std::{fmt::Display, str::FromStr, sync::Arc};
 
 use crate::{
     base::{self, source_file::SourceElement as _, Handler},
-    lexical::token::{TemplateStringLiteral, TemplateStringLiteralPart},
     syntax::syntax_tree::{
-        expression::{Expression, Primary},
+        expression::{Expression, Primary, TemplateStringLiteral, TemplateStringLiteralPart},
         AnyStringLiteral,
     },
     transpile::{
@@ -291,11 +290,11 @@ impl TemplateStringLiteral {
                 self.parts()
                     .iter()
                     .map(|part| match part {
-                        TemplateStringLiteralPart::Text(span) => Ok(MacroStringPart::String(
-                            crate::util::unescape_macro_string(span.str()).to_string(),
+                        TemplateStringLiteralPart::Text(text) => Ok(MacroStringPart::String(
+                            crate::util::unescape_macro_string(text.span.str()).to_string(),
                         )),
                         TemplateStringLiteralPart::Expression { expression, .. } => {
-                            match expression {
+                            match expression.as_ref() {
                                 Expression::Primary(Primary::Identifier(identifier)) =>
                                 {
                                     #[expect(clippy::option_if_let_else)]

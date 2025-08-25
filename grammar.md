@@ -170,7 +170,7 @@ VariableDeclarationAssignment:
 ## AnyStringLiteral
 
 ```ebnf
-AnyStringLiteral: StringLiteral | MacroStringLiteral ;
+AnyStringLiteral: StringLiteral | TemplateStringLiteral ;
 ```
 
 ## AnnotationValue
@@ -228,6 +228,13 @@ FunctionVariableType:
 ```ebnf
 Expression:
     Primary | Binary ;
+```
+
+## TemplateStringLiteral
+
+```ebnf
+TemplateStringLiteral:
+  '`' ( TemplateStringLiteralText | '$(' Expression ')' )* '`';
 ```
 
 ## Else
@@ -299,6 +306,13 @@ Primary:
     | MemberAccess
     | TemplateStringLiteral
     | LuaCode
+```
+
+## TemplateStringLiteralText
+
+```ebnf
+TemplateStringLiteralText:
+  TEXT ;
 ```
 
 ## Align
@@ -463,13 +477,6 @@ Parenthesized:
 Prefix:
     PrefixOperator Primary
     ;
-```
-
-## TemplateStringLiteral
-
-```ebnf
-TemplateStringLiteral:
-  '`' ( TEXT | '$(' Expression ')' )* '`';
 ```
 
 ## AssignmentDestination

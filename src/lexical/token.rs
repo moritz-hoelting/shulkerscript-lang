@@ -8,14 +8,11 @@ use std::{
     sync::OnceLock,
 };
 
-use crate::{
-    base::{
-        self,
-        log::SourceCodeDisplay,
-        source_file::{SourceElement, SourceIterator, Span},
-        Handler,
-    },
-    syntax::syntax_tree::expression::{Expression, Primary},
+use crate::base::{
+    self,
+    log::SourceCodeDisplay,
+    source_file::{SourceElement, SourceIterator, Span},
+    Handler,
 };
 use derive_more::From;
 use enum_as_inner::EnumAsInner;
@@ -168,7 +165,7 @@ pub enum Token {
     DocComment(DocComment),
     CommandLiteral(CommandLiteral),
     StringLiteral(StringLiteral),
-    TemplateStringLiteral(Box<TemplateStringLiteral>),
+    TemplateStringText(TemplateStringLiteralText),
 }
 
 impl SourceElement for Token {
@@ -184,7 +181,7 @@ impl SourceElement for Token {
             Self::DocComment(token) => token.span(),
             Self::CommandLiteral(token) => token.span(),
             Self::StringLiteral(token) => token.span(),
-            Self::TemplateStringLiteral(token) => token.span(),
+            Self::TemplateStringText(token) => token.span(),
         }
     }
 }
@@ -355,77 +352,23 @@ impl SourceElement for StringLiteral {
     }
 }
 
-/// Represents a hardcoded template string literal value in the source code.
+/// Represents a hardcoded template string text value in the source code.
 ///
 /// ```ebnf
-/// TemplateStringLiteral:
-///   '`' ( TEXT | '$(' Expression ')' )* '`';
+/// TemplateStringLiteralText:
+///   TEXT ;
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TemplateStringLiteral {
-    /// The backtick that starts the template string literal.
-    starting_backtick: Punctuation,
-    /// The parts that make up the template string literal.
-    parts: Vec<TemplateStringLiteralPart>,
-    /// The backtick that ends the template string literal.
-    ending_backtick: Punctuation,
+pub struct TemplateStringLiteralText {
+    /// Is the span that makes up the token.
+    pub span: Span,
 }
 
-impl TemplateStringLiteral {
-    /// Returns the string content without escapement characters, leading and trailing double quotes.
-    #[must_use]
-    pub fn str_content(&self) -> String {
-        let mut content = String::new();
-
-        for part in &self.parts {
-            match part {
-                TemplateStringLiteralPart::Text(span) => {
-                    content += &crate::util::unescape_macro_string(span.str());
-                }
-                TemplateStringLiteralPart::Expression { expression, .. } => {
-                    // write!(
-                    //     content,
-                    //     "$({})",
-                    //     crate::util::identifier_to_macro(identifier.span.str())
-                    // )
-                    // .expect("can always write to string");
-                    todo!("handle expression in template string literal")
-                }
-            }
-        }
-
-        content
-    }
-
-    /// Returns the parts that make up the template string literal.
-    #[must_use]
-    pub fn parts(&self) -> &[TemplateStringLiteralPart] {
-        &self.parts
-    }
-}
-
-impl SourceElement for TemplateStringLiteral {
+impl SourceElement for TemplateStringLiteralText {
     fn span(&self) -> Span {
-        self.starting_backtick
-            .span
-            .join(&self.ending_backtick.span)
-            .expect("Invalid template string literal span")
+        self.span.clone()
     }
-}
-
-/// Represents a part of a template string literal value in the source code.
-#[allow(missing_docs)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum TemplateStringLiteralPart {
-    Text(Span),
-    Expression {
-        dollar: Punctuation,
-        open_brace: Punctuation,
-        expression: Expression,
-        close_brace: Punctuation,
-    },
 }
 
 /// Is an enumeration representing the two kinds of comments in the Shulkerscript programming language.
@@ -618,26 +561,6 @@ impl Token {
         )
     }
 
-    /// Creates a span from the given start location to the current location of the iterator with the given offset.
-    #[must_use]
-    fn create_span_with_end_offset(
-        start: usize,
-        iter: &mut SourceIterator,
-        end_offset: isize,
-    ) -> Span {
-        iter.peek().map_or_else(
-            || Span::to_end_with_offset(iter.source_file().clone(), start, end_offset).unwrap(),
-            |(index, _)| {
-                Span::new(
-                    iter.source_file().clone(),
-                    start,
-                    index.saturating_add_signed(end_offset),
-                )
-                .unwrap()
-            },
-        )
-    }
-
     /// Checks if the given character is a valid first character of an identifier.
     fn is_first_identifier_character(character: char) -> bool {
         character == '_'
@@ -794,113 +717,78 @@ impl Token {
         .into()
     }
 
-    /// Handles a sequence of characters that are enclosed in backticks and contain expressions
-    fn handle_template_string_literal(
-        iter: &mut SourceIterator,
-        mut start: usize,
-    ) -> Result<Self, TokenizeError> {
-        let mut is_escaped = false;
-        let mut is_inside_expression = false;
-        let mut encountered_open_parenthesis = false;
-        let starting_backtick = Punctuation {
-            span: Self::create_span(start, iter),
-            punctuation: '`',
-        };
-        start += 1;
-        let mut parts = Vec::new();
-
-        while iter.peek().is_some() {
-            let (index, character) = iter.next().unwrap();
-
-            #[expect(clippy::collapsible_else_if)]
-            if is_inside_expression {
-                if character == ')' {
-                    // Check if the template usage is empty
-                    if start + 2 == index {
-                        return Err(UnclosedExpressionInTemplateUsage {
-                            span: Span::new(iter.source_file().clone(), start, index + 1).unwrap(),
-                        }
-                        .into());
-                    }
-                    parts.push(TemplateStringLiteralPart::Expression {
-                        dollar: Punctuation {
-                            span: Span::new(iter.source_file().clone(), start, start + 1).unwrap(),
-                            punctuation: '$',
-                        },
-                        open_brace: Punctuation {
-                            span: Span::new(iter.source_file().clone(), start + 1, start + 2)
-                                .unwrap(),
-                            punctuation: '(',
-                        },
-                        expression: {
-                            // TODO: correctly parse expression
-                            Expression::Primary(Primary::Identifier(Identifier {
-                                span: Self::create_span_with_end_offset(start + 2, iter, -1),
-                            }))
-                        },
-                        close_brace: Punctuation {
-                            span: Span::new(iter.source_file().clone(), index, index + 1).unwrap(),
-                            punctuation: ')',
-                        },
-                    });
-                    start = index + 1;
-                    is_inside_expression = false;
-                } else if !encountered_open_parenthesis && character == '(' {
-                    encountered_open_parenthesis = true;
-                } else if encountered_open_parenthesis && !Self::is_identifier_character(character)
-                {
-                    if character == '`' {
-                        return Err(UnclosedExpressionInTemplateUsage {
-                            span: Span::new(iter.source_file().clone(), start, start + 2).unwrap(),
-                        }
-                        .into());
-                    }
-
-                    Self::walk_iter(iter, |c| c != ')' && !Self::is_identifier_character(c));
-                    return Err(InvalidMacroNameCharacter {
-                        span: Self::create_span(index, iter),
-                    }
-                    .into());
-                }
-            } else {
-                if character == '$' && iter.peek().is_some_and(|(_, c)| c == '(') {
-                    parts.push(TemplateStringLiteralPart::Text(
-                        Self::create_span_with_end_offset(start, iter, -1),
-                    ));
-                    start = index;
-                    is_inside_expression = true;
-                    encountered_open_parenthesis = false;
-                } else if character == '\\' {
-                    is_escaped = !is_escaped;
-                } else if character == '`' && !is_escaped {
-                    if start != index {
-                        parts.push(TemplateStringLiteralPart::Text(
-                            Self::create_span_with_end_offset(start, iter, -1),
-                        ));
-                    }
-                    start = index;
-                    break;
-                } else {
-                    is_escaped = false;
-                }
-            }
+    /// Handles a backticks for opening and closing template strings
+    fn handle_template_string_quotes(iter: &mut SourceIterator, start: usize) -> Self {
+        if iter
+            .is_in_template_string_expression()
+            .is_some_and(|last| !last)
+        {
+            // in template string text
+            iter.exit_template_string();
+        } else {
+            // outside template string or in expression
+            iter.enter_template_string();
         }
 
-        if is_inside_expression {
-            Err(UnclosedExpressionInTemplateUsage {
-                span: Span::new(iter.source_file().clone(), start, start + 2).unwrap(),
+        Punctuation {
+            span: Self::create_span(start, iter),
+            punctuation: '`',
+        }
+        .into()
+    }
+
+    fn handle_template_string_inner(
+        iter: &mut SourceIterator,
+        start: usize,
+        character: char,
+        prev_token: Option<&Self>,
+    ) -> Self {
+        if character == '$' && iter.peek().is_some_and(|(_, c)| c == '(') {
+            // starts immediately with expression, return punctuation
+            return Punctuation {
+                span: Self::create_span(start, iter),
+                punctuation: '$',
             }
-            .into())
-        } else {
-            Ok(Box::new(TemplateStringLiteral {
-                starting_backtick,
-                parts,
-                ending_backtick: Punctuation {
+            .into();
+        }
+
+        match (character, prev_token) {
+            ('(', Some(Self::Punctuation(punc))) if punc.punctuation == '$' => {
+                // Found expression opening parenthesis
+                iter.increase_template_string_expression_open_paren_count();
+
+                return Punctuation {
                     span: Self::create_span(start, iter),
-                    punctuation: '`',
-                },
-            })
-            .into())
+                    punctuation: '(',
+                }
+                .into();
+            }
+            _ => {}
+        }
+
+        loop {
+            if character != '`' {
+                iter.reset_multipeek();
+                Self::walk_iter(iter, |c| c != '$' && c != '`');
+            }
+
+            iter.reset_multipeek();
+            let first_peek_none_or_backtick = iter.multipeek().map(|(_, c)| c);
+            let second_peek_open_paren = iter.multipeek().is_some_and(|(_, c)| c == '(');
+
+            if character == '`'
+                || first_peek_none_or_backtick.is_none_or(|c| c == '`')
+                || second_peek_open_paren
+            {
+                // Found expression start, end of text
+
+                break TemplateStringLiteralText {
+                    span: Self::create_span(start, iter),
+                }
+                .into();
+            }
+
+            iter.next();
         }
     }
 
@@ -934,8 +822,13 @@ impl Token {
             .next()
             .ok_or(TokenizeError::EndOfSourceCodeIteratorArgument)?;
 
+        if iter.is_in_template_string_expression().is_some_and(|b| !b) && character != '`' {
+            Ok(Self::handle_template_string_inner(
+                iter, start, character, prev_token,
+            ))
+        }
         // Found white spaces
-        if character.is_whitespace() {
+        else if character.is_whitespace() {
             Ok(Self::handle_whitespace(iter, start))
         }
         // Found identifier/keyword
@@ -952,7 +845,7 @@ impl Token {
         }
         // Found macro string literal
         else if character == '`' {
-            Self::handle_template_string_literal(iter, start)
+            Ok(Self::handle_template_string_quotes(iter, start))
         }
         // Found integer literal
         else if character.is_ascii_digit() {
@@ -960,6 +853,12 @@ impl Token {
         }
         // Found a punctuation
         else if character.is_ascii_punctuation() {
+            if character == '(' {
+                iter.increase_template_string_expression_open_paren_count();
+            } else if character == ')' {
+                iter.decrease_template_string_expression_open_paren_count();
+            }
+
             Ok(Punctuation {
                 span: Self::create_span(start, iter),
                 punctuation: character,

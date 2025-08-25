@@ -12,9 +12,11 @@ use serde_json::{json, Value as JsonValue};
 
 use crate::{
     base::{source_file::SourceElement as _, VoidHandler},
-    lexical::token::{Identifier, TemplateStringLiteralPart},
+    lexical::token::Identifier,
     semantic::error::{InvalidFunctionArguments, UnexpectedExpression},
-    syntax::syntax_tree::expression::{Expression, FunctionCall, Primary},
+    syntax::syntax_tree::expression::{
+        Expression, FunctionCall, Primary, TemplateStringLiteralPart,
+    },
     transpile::{
         error::{IllegalIndexing, IllegalIndexingReason, UnknownIdentifier},
         expression::{ComptimeValue, DataLocation, ExpectedType, StorageType},
@@ -349,10 +351,10 @@ fn print_function(
                 for part in template_string.parts() {
                     match part {
                         TemplateStringLiteralPart::Text(text) => {
-                            parts.push(JsonValue::String(text.str().to_string()));
+                            parts.push(JsonValue::String(text.span.str().to_string()));
                         }
                         TemplateStringLiteralPart::Expression { expression, .. } => {
-                            match expression {
+                            match expression.as_ref() {
                                 Expression::Primary(Primary::Identifier(identifier)) => {
                                     let (cur_contains_macro, cur_cmds, part) =
                                         get_identifier_part(identifier, transpiler, scope)?;
