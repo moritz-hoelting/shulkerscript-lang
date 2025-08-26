@@ -14,6 +14,8 @@ use crate::{
     },
 };
 
+use super::expression::ComptimeValue;
+
 /// String that can contain macros
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -291,7 +293,7 @@ impl TemplateStringLiteral {
                     .iter()
                     .map(|part| match part {
                         TemplateStringLiteralPart::Text(text) => Ok(MacroStringPart::String(
-                            crate::util::unescape_macro_string(text.span.str()).to_string(),
+                            crate::util::unescape_template_string(text.span.str()).into_owned(),
                         )),
                         TemplateStringLiteralPart::Expression { expression, .. } => {
                             match expression.as_ref() {
@@ -305,6 +307,17 @@ impl TemplateStringLiteral {
                                             VariableData::MacroParameter { macro_name, .. } => Ok(
                                                 MacroStringPart::MacroUsage(macro_name.to_owned()),
                                             ),
+                                            VariableData::ComptimeValue { value, .. } => {
+                                                let value = value.read().unwrap().as_ref().map_or_else(
+                                                    || "null".into(),
+                                                    ComptimeValue::to_macro_string,
+                                                );
+                                                
+                                                match value.as_str() {
+                                                    Ok(s) => Ok(MacroStringPart::String(s.into_owned())),
+                                                    Err(_) => todo!("comptime value resulting in macro string with macros")
+                                                }
+                                            }
                                             _ => todo!("other identifiers in template strings"),
                                         }
                                     } else {
@@ -325,7 +338,7 @@ impl TemplateStringLiteral {
 
             Ok(macro_string)
         } else {
-            Ok(MacroString::String(self.str_content()))
+            Ok(MacroString::String(self.as_str(scope, handler)?.into_owned()))
         }
     }
 }

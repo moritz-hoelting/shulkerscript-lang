@@ -10,7 +10,6 @@ use std::{
 
 use crate::base::{
     self,
-    log::SourceCodeDisplay,
     source_file::{SourceElement, SourceIterator, Span},
     Handler,
 };
@@ -445,100 +444,14 @@ impl CommandLiteral {
 /// Is an error that can occur when invoking the [`Token::tokenize`] method.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, thiserror::Error)]
 #[allow(missing_docs)]
+#[expect(missing_copy_implementations)]
 pub enum TokenizeError {
     #[error("encountered a fatal lexical error that causes the process to stop.")]
     FatalLexicalError,
 
     #[error("the iterator argument is at the end of the source code.")]
     EndOfSourceCodeIteratorArgument,
-
-    #[error(transparent)]
-    InvalidMacroNameCharacter(#[from] InvalidMacroNameCharacter),
-
-    #[error(transparent)]
-    UnclosedExpressionInTemplateUsage(#[from] UnclosedExpressionInTemplateUsage),
-
-    #[error(transparent)]
-    EmptyExpressionInTemplateUsage(#[from] EmptyExpressionInTemplateUsage),
 }
-
-/// Is an error that can occur when the macro name contains invalid characters.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct InvalidMacroNameCharacter {
-    /// The span of the invalid characters.
-    pub span: Span,
-}
-
-impl Display for InvalidMacroNameCharacter {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            base::log::Message::new(base::log::Severity::Error, format!("The macro name contains invalid characters: `{}`. Only alphanumeric characters and underscores are allowed.", self.span.str()))
-        )?;
-        write!(
-            f,
-            "\n{}",
-            SourceCodeDisplay::new(&self.span, Option::<u8>::None)
-        )
-    }
-}
-
-impl std::error::Error for InvalidMacroNameCharacter {}
-
-/// Is an error that can occur when the expression is not closed.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UnclosedExpressionInTemplateUsage {
-    /// The span of the unclosed expression.
-    pub span: Span,
-}
-
-impl Display for UnclosedExpressionInTemplateUsage {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            base::log::Message::new(
-                base::log::Severity::Error,
-                "An expression was opened with `$(` but never closed."
-            )
-        )?;
-        write!(
-            f,
-            "\n{}",
-            SourceCodeDisplay::new(&self.span, Option::<u8>::None)
-        )
-    }
-}
-
-impl std::error::Error for UnclosedExpressionInTemplateUsage {}
-
-/// Is an error that can occur when the expression is not closed.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct EmptyExpressionInTemplateUsage {
-    /// The span of the unclosed expression.
-    pub span: Span,
-}
-
-impl Display for EmptyExpressionInTemplateUsage {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            base::log::Message::new(
-                base::log::Severity::Error,
-                "An expression was opened with `$(` but closed immediately with `)`."
-            )
-        )?;
-        write!(
-            f,
-            "\n{}",
-            SourceCodeDisplay::new(&self.span, Option::<u8>::None)
-        )
-    }
-}
-
-impl std::error::Error for EmptyExpressionInTemplateUsage {}
 
 impl Token {
     /// Increments the iterator while the predicate returns true.
@@ -743,7 +656,9 @@ impl Token {
         character: char,
         prev_token: Option<&Self>,
     ) -> Self {
-        if character == '$' && iter.peek().is_some_and(|(_, c)| c == '(') {
+        let prev_was_backslash = iter.prev().is_some_and(|(_, c)| c == '\\');
+
+        if !prev_was_backslash && character == '$' && iter.peek().is_some_and(|(_, c)| c == '(') {
             // starts immediately with expression, return punctuation
             return Punctuation {
                 span: Self::create_span(start, iter),
@@ -753,7 +668,9 @@ impl Token {
         }
 
         match (character, prev_token) {
-            ('(', Some(Self::Punctuation(punc))) if punc.punctuation == '$' => {
+            ('(', Some(Self::Punctuation(punc)))
+                if !prev_was_backslash && punc.punctuation == '$' =>
+            {
                 // Found expression opening parenthesis
                 iter.increase_template_string_expression_open_paren_count();
 
@@ -769,17 +686,19 @@ impl Token {
         loop {
             if character != '`' {
                 iter.reset_multipeek();
-                Self::walk_iter(iter, |c| c != '$' && c != '`');
+                Self::walk_iter(iter, |c| !matches!(c, '$' | '`' | '\\'));
             }
 
             iter.reset_multipeek();
-            let first_peek_none_or_backtick = iter.multipeek().map(|(_, c)| c);
+            let first_peek = iter.multipeek().map(|(_, c)| c);
             let second_peek_open_paren = iter.multipeek().is_some_and(|(_, c)| c == '(');
 
-            if character == '`'
-                || first_peek_none_or_backtick.is_none_or(|c| c == '`')
-                || second_peek_open_paren
-            {
+            if first_peek.is_some_and(|c| c == '\\') {
+                iter.next();
+                iter.next();
+            }
+
+            if character == '`' || first_peek.is_none_or(|c| c == '`') || second_peek_open_paren {
                 // Found expression start, end of text
 
                 break TemplateStringLiteralText {

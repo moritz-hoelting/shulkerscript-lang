@@ -20,15 +20,16 @@ pub fn escape_str(s: &str) -> Cow<'_, str> {
     }
 }
 
-/// Unescapes '\`', `\`, `\n`, `\r` and `\t` in a string.
+/// Unescapes '\`', `\`, `\n`, `\r` and `\t`, `\$` in a string.
 #[must_use]
-pub fn unescape_macro_string(s: &str) -> Cow<'_, str> {
+pub fn unescape_template_string(s: &str) -> Cow<'_, str> {
     if s.contains('\\') || s.contains('`') {
         Cow::Owned(
             s.replace("\\n", "\n")
                 .replace("\\r", "\r")
                 .replace("\\t", "\t")
                 .replace("\\`", "`")
+                .replace("\\$", "$")
                 .replace("\\\\", "\\"),
         )
     } else {
@@ -147,33 +148,33 @@ mod tests {
 
     #[test]
     fn test_unescape_macro_string() {
-        assert_eq!(unescape_macro_string("Hello, world!"), "Hello, world!");
+        assert_eq!(unescape_template_string("Hello, world!"), "Hello, world!");
         assert_eq!(
-            unescape_macro_string(r#"Hello, "world"!"#),
+            unescape_template_string(r#"Hello, "world"!"#),
             r#"Hello, "world"!"#
         );
         assert_eq!(
-            unescape_macro_string(r"Hello, \world\!"),
+            unescape_template_string(r"Hello, \world\!"),
             r"Hello, \world\!"
         );
         assert_eq!(
-            unescape_macro_string(r"Hello, \nworld\!"),
+            unescape_template_string(r"Hello, \nworld\!"),
             "Hello, \nworld\\!"
         );
         assert_eq!(
-            unescape_macro_string(r"Hello, \rworld\!"),
+            unescape_template_string(r"Hello, \rworld\!"),
             "Hello, \rworld\\!"
         );
         assert_eq!(
-            unescape_macro_string(r"Hello, \tworld\!"),
+            unescape_template_string(r"Hello, \tworld\!"),
             "Hello, \tworld\\!"
         );
         assert_eq!(
-            unescape_macro_string(r"Hello, \`world\!"),
+            unescape_template_string(r"Hello, \`world\!"),
             r"Hello, `world\!"
         );
         assert_eq!(
-            unescape_macro_string(r"Hello, \\world\!"),
+            unescape_template_string(r"Hello, \\world\!"),
             r"Hello, \world\!"
         );
     }

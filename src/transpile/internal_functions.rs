@@ -18,7 +18,7 @@ use crate::{
         Expression, FunctionCall, Primary, TemplateStringLiteralPart,
     },
     transpile::{
-        error::{IllegalIndexing, IllegalIndexingReason, UnknownIdentifier},
+        error::{IllegalIndexing, IllegalIndexingReason, NotComptime, UnknownIdentifier},
         expression::{ComptimeValue, DataLocation, ExpectedType, StorageType},
         util::MacroString,
         TranspileError,
@@ -97,7 +97,6 @@ fn print_function(
 ) -> TranspileResult<Vec<Command>> {
     const PARAM_COLOR: &str = "gray";
 
-    #[expect(clippy::option_if_let_else)]
     fn get_identifier_part(
         ident: &Identifier,
         transpiler: &mut Transpiler,
@@ -127,6 +126,158 @@ fn print_function(
                             storage_name: storage_name.to_string(),
                             path: path.to_string(),
                             r#type: StorageType::Boolean,
+                        },
+                        transpiler,
+                    );
+
+                    Ok((false, cmd, value))
+                }
+                VariableData::ComptimeValue { value, .. } => {
+                    let value = {
+                        let guard = value.read().map_err(|_| {
+                            TranspileError::NotComptime(NotComptime {
+                                expression: ident.span(),
+                            })
+                        })?;
+                        guard.as_ref().map_or_else(
+                            || "null".into(),
+                            super::expression::ComptimeValue::to_macro_string,
+                        )
+                    };
+
+                    Ok((
+                        value.contains_macros(),
+                        None,
+                        json!({"text": value.to_string(), "color": PARAM_COLOR}),
+                    ))
+                }
+                _ => Err(TranspileError::UnexpectedExpression(UnexpectedExpression(
+                    Box::new(Expression::Primary(Primary::Identifier(ident.to_owned()))),
+                ))),
+            }
+        } else {
+            Err(TranspileError::UnknownIdentifier(UnknownIdentifier {
+                identifier: ident.span(),
+            }))
+        }
+    }
+
+    fn get_indexed_part(
+        ident: &Identifier,
+        index: &Expression,
+        transpiler: &mut Transpiler,
+        scope: &Arc<Scope>,
+    ) -> TranspileResult<(bool, Option<Command>, JsonValue)> {
+        if let Some(var) = scope.get_variable(ident.span.str()).as_deref() {
+            match var {
+                VariableData::Scoreboard { objective } => {
+                    let Ok(ComptimeValue::String(target)) =
+                        index.comptime_eval(scope, &VoidHandler)
+                    else {
+                        return Err(TranspileError::IllegalIndexing(IllegalIndexing {
+                            reason: IllegalIndexingReason::InvalidComptimeType {
+                                expected: ExpectedType::String,
+                            },
+                            expression: index.span(),
+                        }));
+                    };
+
+                    let (cmd, value) = get_data_location(
+                        &DataLocation::ScoreboardValue {
+                            objective: objective.to_string(),
+                            target,
+                        },
+                        transpiler,
+                    );
+
+                    Ok((false, cmd, value))
+                }
+                VariableData::ScoreboardArray { objective, targets } => {
+                    let Ok(ComptimeValue::Integer(idx)) = index.comptime_eval(scope, &VoidHandler)
+                    else {
+                        return Err(TranspileError::IllegalIndexing(IllegalIndexing {
+                            reason: IllegalIndexingReason::InvalidComptimeType {
+                                expected: ExpectedType::Integer,
+                            },
+                            expression: index.span(),
+                        }));
+                    };
+
+                    #[expect(clippy::option_if_let_else)]
+                    if let Some(target) = usize::try_from(idx)
+                        .ok()
+                        .and_then(|index| targets.get(index))
+                    {
+                        let (cmd, value) = get_data_location(
+                            &DataLocation::ScoreboardValue {
+                                objective: objective.to_string(),
+                                target: target.to_string(),
+                            },
+                            transpiler,
+                        );
+                        Ok((false, cmd, value))
+                    } else {
+                        Err(TranspileError::IllegalIndexing(IllegalIndexing {
+                            reason: IllegalIndexingReason::IndexOutOfBounds {
+                                index: usize::try_from(idx).unwrap_or(usize::MAX),
+                                length: targets.len(),
+                            },
+                            expression: index.span(),
+                        }))
+                    }
+                }
+                VariableData::BooleanStorageArray {
+                    storage_name,
+                    paths,
+                } => {
+                    let Ok(ComptimeValue::Integer(idx)) = index.comptime_eval(scope, &VoidHandler)
+                    else {
+                        return Err(TranspileError::IllegalIndexing(IllegalIndexing {
+                            reason: IllegalIndexingReason::InvalidComptimeType {
+                                expected: ExpectedType::Integer,
+                            },
+                            expression: index.span(),
+                        }));
+                    };
+
+                    #[expect(clippy::option_if_let_else)]
+                    if let Some(path) = usize::try_from(idx).ok().and_then(|index| paths.get(index))
+                    {
+                        let (cmd, value) = get_data_location(
+                            &DataLocation::Storage {
+                                storage_name: storage_name.to_string(),
+                                path: path.to_string(),
+                                r#type: StorageType::Boolean,
+                            },
+                            transpiler,
+                        );
+                        Ok((false, cmd, value))
+                    } else {
+                        Err(TranspileError::IllegalIndexing(IllegalIndexing {
+                            reason: IllegalIndexingReason::IndexOutOfBounds {
+                                index: usize::try_from(idx).unwrap_or(usize::MAX),
+                                length: paths.len(),
+                            },
+                            expression: index.span(),
+                        }))
+                    }
+                }
+                VariableData::Tag { tag_name } => {
+                    let Ok(ComptimeValue::String(entity)) =
+                        index.comptime_eval(scope, &VoidHandler)
+                    else {
+                        return Err(TranspileError::IllegalIndexing(IllegalIndexing {
+                            reason: IllegalIndexingReason::InvalidComptimeType {
+                                expected: ExpectedType::String,
+                            },
+                            expression: index.span(),
+                        }));
+                    };
+
+                    let (cmd, value) = get_data_location(
+                        &DataLocation::Tag {
+                            tag_name: tag_name.clone(),
+                            entity,
                         },
                         transpiler,
                     );
@@ -194,7 +345,7 @@ fn print_function(
         ("@a".into(), first)
     };
 
-    let mut contains_macro = matches!(target, MacroString::MacroString(_));
+    let mut contains_macro = target.contains_macros();
 
     let (mut cmds, parts) = match message_expression {
         Expression::Primary(primary) => match primary {
@@ -361,6 +512,24 @@ fn print_function(
                                     contains_macro |= cur_contains_macro;
                                     cmds.extend(cur_cmds);
                                     parts.push(part);
+                                }
+                                Expression::Primary(Primary::Indexed(indexed)) => {
+                                    match indexed.object().as_ref() {
+                                        Primary::Identifier(ident) => {
+                                            let (cur_contains_macro, cur_cmds, part) =
+                                                get_indexed_part(
+                                                    ident,
+                                                    indexed.index(),
+                                                    transpiler,
+                                                    scope,
+                                                )?;
+
+                                            contains_macro |= cur_contains_macro;
+                                            cmds.extend(cur_cmds);
+                                            parts.push(part);
+                                        }
+                                        _ => todo!("other expression in indexed"),
+                                    }
                                 }
                                 _ => todo!("other expression in template string literal"),
                             }

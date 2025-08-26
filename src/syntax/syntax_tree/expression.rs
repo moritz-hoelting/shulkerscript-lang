@@ -410,31 +410,6 @@ pub struct TemplateStringLiteral {
 }
 
 impl TemplateStringLiteral {
-    /// Returns the string content without escapement characters, leading and trailing double quotes.
-    #[must_use]
-    pub fn str_content(&self) -> String {
-        let mut content = String::new();
-
-        for part in &self.parts {
-            match part {
-                TemplateStringLiteralPart::Text(text) => {
-                    content += &crate::util::unescape_macro_string(text.span.str());
-                }
-                TemplateStringLiteralPart::Expression { expression, .. } => {
-                    // write!(
-                    //     content,
-                    //     "$({})",
-                    //     crate::util::identifier_to_macro(identifier.span.str())
-                    // )
-                    // .expect("can always write to string");
-                    todo!("handle expression in template string literal")
-                }
-            }
-        }
-
-        content
-    }
-
     /// Returns the parts that make up the template string literal.
     #[must_use]
     pub fn parts(&self) -> &[TemplateStringLiteralPart] {

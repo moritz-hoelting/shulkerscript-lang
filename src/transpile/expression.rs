@@ -427,7 +427,14 @@ impl Primary {
                             expression: template_string_literal.span(),
                         })
                 } else {
-                    Ok(ComptimeValue::String(template_string_literal.str_content()))
+                    Ok(ComptimeValue::String(
+                        template_string_literal
+                            .as_str(scope, handler)
+                            .map_err(|_| NotComptime {
+                                expression: template_string_literal.span(),
+                            })?
+                            .into_owned(),
+                    ))
                 }
             }
         }

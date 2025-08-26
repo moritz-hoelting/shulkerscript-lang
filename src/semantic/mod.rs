@@ -970,7 +970,7 @@ impl TemplateStringLiteral {
                     match expression.as_ref() {
                         Expression::Primary(Primary::Identifier(identifier)) => {
                             if let Some(variable_type) = scope.get_variable(identifier.span.str()) {
-                                // TODO: correct checks
+                                // TODO: template string correct checks
                                 // if variable_type != VariableType::MacroParameter {
                                 //     let err = error::Error::UnexpectedExpression(UnexpectedExpression(
                                 //         Box::new(Expression::Primary(Primary::Identifier(
@@ -988,8 +988,50 @@ impl TemplateStringLiteral {
                                 errs.push(err);
                             }
                         }
+                        Expression::Primary(Primary::Indexed(indexed)) => {
+                            if let Primary::Identifier(identifier) = indexed.object().as_ref() {
+                                if let Some(variable_type) =
+                                    scope.get_variable(identifier.span.str())
+                                {
+                                    match variable_type {
+                                        VariableType::BooleanStorageArray
+                                        | VariableType::ScoreboardArray
+                                        | VariableType::Tag
+                                        | VariableType::Scoreboard => {
+                                            // Valid types
+                                        }
+                                        _ => {
+                                            let err = error::Error::UnexpectedExpression(
+                                                UnexpectedExpression(expression.clone()),
+                                            );
+                                            handler.receive(err.clone());
+                                            errs.push(err);
+                                        }
+                                    }
+                                } else {
+                                    let err = error::Error::UnknownIdentifier(UnknownIdentifier {
+                                        identifier: identifier.span.clone(),
+                                    });
+                                    handler.receive(err.clone());
+                                    errs.push(err);
+                                }
+                            } else {
+                                let err = error::Error::UnexpectedExpression(UnexpectedExpression(
+                                    expression.clone(),
+                                ));
+                                handler.receive(err.clone());
+                                errs.push(err);
+                            }
+                            if let Err(err) = indexed.index().analyze_semantics(scope, handler) {
+                                errs.push(err);
+                            }
+                        }
                         _ => {
-                            // TODO: handle other expressions in template string literals
+                            let err = error::Error::UnexpectedExpression(UnexpectedExpression(
+                                expression.clone(),
+                            ));
+                            handler.receive(err.clone());
+                            errs.push(err);
                         }
                     }
                 }
