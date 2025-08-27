@@ -1,7 +1,8 @@
 //! Utility methods for transpiling
 
-use std::{fmt::Display, str::FromStr, sync::Arc};
+use std::{fmt::Display, str::FromStr};
 
+#[cfg(feature = "shulkerbox")]
 use crate::{
     base::{self, source_file::SourceElement as _, Handler},
     syntax::syntax_tree::{
@@ -10,11 +11,12 @@ use crate::{
     },
     transpile::{
         error::{TranspileError, UnknownIdentifier},
+        expression::ComptimeValue,
         Scope, TranspileResult, VariableData,
     },
 };
-
-use super::expression::ComptimeValue;
+#[cfg(feature = "shulkerbox")]
+use std::sync::Arc;
 
 /// String that can contain macros
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -256,6 +258,7 @@ where
     }
 }
 
+#[cfg(feature = "shulkerbox")]
 impl AnyStringLiteral {
     /// Convert the any string literal to a macro string, using the provided scope to resolve variables
     ///
@@ -273,6 +276,7 @@ impl AnyStringLiteral {
     }
 }
 
+#[cfg(feature = "shulkerbox")]
 impl TemplateStringLiteral {
     /// Convert the template string literal to a macro string, using the provided scope to resolve variables
     ///
@@ -312,7 +316,7 @@ impl TemplateStringLiteral {
                                                     || "null".into(),
                                                     ComptimeValue::to_macro_string,
                                                 );
-                                                
+
                                                 match value.as_str() {
                                                     Ok(s) => Ok(MacroStringPart::String(s.into_owned())),
                                                     Err(_) => todo!("comptime value resulting in macro string with macros")
@@ -345,7 +349,9 @@ impl TemplateStringLiteral {
 
             Ok(macro_string)
         } else {
-            Ok(MacroString::String(self.as_str(scope, handler)?.into_owned()))
+            Ok(MacroString::String(
+                self.as_str(scope, handler)?.into_owned(),
+            ))
         }
     }
 }
