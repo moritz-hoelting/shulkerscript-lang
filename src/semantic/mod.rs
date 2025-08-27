@@ -456,9 +456,10 @@ impl Assignment {
                 return Err(err);
             }
         } else {
-            let err = error::Error::UnknownIdentifier(UnknownIdentifier {
-                identifier: self.destination().span(),
-            });
+            let err = error::Error::UnknownIdentifier(UnknownIdentifier::from_semantic_scope(
+                self.destination().span(),
+                scope,
+            ));
             handler.receive(err.clone());
             return Err(err);
         }
@@ -574,9 +575,9 @@ impl Primary {
         match self {
             Self::Identifier(ident) => {
                 if scope.get_variable(ident.span.str()).is_none() {
-                    let err = error::Error::UnknownIdentifier(UnknownIdentifier {
-                        identifier: ident.span.clone(),
-                    });
+                    let err = error::Error::UnknownIdentifier(
+                        UnknownIdentifier::from_semantic_scope(ident.span.clone(), scope),
+                    );
                     handler.receive(err.clone());
                     Err(err)
                 } else {
@@ -589,9 +590,12 @@ impl Primary {
                 let var = scope.get_variable(call.identifier().span.str());
                 var.map_or_else(
                     || {
-                        let err = error::Error::UnknownIdentifier(UnknownIdentifier {
-                            identifier: call.identifier().span.clone(),
-                        });
+                        let err = error::Error::UnknownIdentifier(
+                            UnknownIdentifier::from_semantic_scope(
+                                call.identifier().span.clone(),
+                                scope,
+                            ),
+                        );
                         handler.receive(err.clone());
                         Err(err)
                     },
@@ -661,8 +665,8 @@ impl Primary {
                     Err(err)
                 }
             }
-            Self::MemberAccess(_) => {
-                // TODO:
+            Self::MemberAccess(member_access) => {
+                member_access.parent().analyze_semantics(scope, handler)?;
                 Ok(())
             }
             Self::Parenthesized(expr) => expr.analyze_semantics(scope, handler),
@@ -971,9 +975,12 @@ impl TemplateStringLiteral {
                     match expression.as_ref() {
                         Expression::Primary(Primary::Identifier(identifier)) => {
                             if scope.get_variable(identifier.span.str()).is_none() {
-                                let err = error::Error::UnknownIdentifier(UnknownIdentifier {
-                                    identifier: identifier.span.clone(),
-                                });
+                                let err = error::Error::UnknownIdentifier(
+                                    UnknownIdentifier::from_semantic_scope(
+                                        identifier.span.clone(),
+                                        scope,
+                                    ),
+                                );
                                 handler.receive(err.clone());
                                 errs.push(err);
                             }
@@ -999,9 +1006,12 @@ impl TemplateStringLiteral {
                                         }
                                     }
                                 } else {
-                                    let err = error::Error::UnknownIdentifier(UnknownIdentifier {
-                                        identifier: identifier.span.clone(),
-                                    });
+                                    let err = error::Error::UnknownIdentifier(
+                                        UnknownIdentifier::from_semantic_scope(
+                                            identifier.span.clone(),
+                                            scope,
+                                        ),
+                                    );
                                     handler.receive(err.clone());
                                     errs.push(err);
                                 }

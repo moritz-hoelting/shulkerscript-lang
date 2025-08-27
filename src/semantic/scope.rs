@@ -1,5 +1,7 @@
 use std::{collections::HashMap, sync::RwLock};
 
+use crate::{base::source_file::Span, transpile::error::UnknownIdentifier};
+
 /// Type of variable
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
 pub enum VariableType {
@@ -93,5 +95,31 @@ impl<'a> SemanticScope<'a> {
     /// Gets the parent scope.
     pub fn get_parent(&self) -> Option<&Self> {
         self.parent
+    }
+}
+
+impl UnknownIdentifier {
+    pub(super) fn from_semantic_scope(identifier: Span, scope: &SemanticScope<'_>) -> Self {
+        use itertools::Itertools as _;
+
+        let own_name = identifier.str();
+        let alternatives = scope
+            .get_all_variables()
+            .iter()
+            .filter_map(|(name, _)| {
+                let normalized_distance = strsim::normalized_damerau_levenshtein(own_name, name);
+                (normalized_distance > 0.8 || strsim::damerau_levenshtein(own_name, name) < 3)
+                    .then_some((normalized_distance, name))
+            })
+            .sorted_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(_, data)| data)
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        Self {
+            identifier,
+            alternatives,
+        }
     }
 }

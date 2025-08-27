@@ -1460,9 +1460,10 @@ impl Transpiler {
 
                     self.move_data(&from, target, primary, handler)
                 } else {
-                    let err = TranspileError::UnknownIdentifier(UnknownIdentifier {
-                        identifier: ident.span.clone(),
-                    });
+                    let err = TranspileError::UnknownIdentifier(UnknownIdentifier::from_scope(
+                        ident.span.clone(),
+                        scope,
+                    ));
                     handler.receive(Box::new(err.clone()));
                     Err(err)
                 }
@@ -1587,9 +1588,10 @@ impl Transpiler {
 
                     self.move_data(&from, target, primary, handler)
                 } else {
-                    let err = TranspileError::UnknownIdentifier(UnknownIdentifier {
-                        identifier: ident.span.clone(),
-                    });
+                    let err = TranspileError::UnknownIdentifier(UnknownIdentifier::from_scope(
+                        ident.span.clone(),
+                        scope,
+                    ));
                     handler.receive(Box::new(err.clone()));
                     Err(err)
                 }
@@ -1740,9 +1742,10 @@ impl Transpiler {
                         }
                     }
                 } else {
-                    let err = TranspileError::UnknownIdentifier(UnknownIdentifier {
-                        identifier: ident.span.clone(),
-                    });
+                    let err = TranspileError::UnknownIdentifier(UnknownIdentifier::from_scope(
+                        ident.span.clone(),
+                        scope,
+                    ));
                     handler.receive(Box::new(err.clone()));
                     Err(err)
                 }
@@ -1816,9 +1819,10 @@ impl Transpiler {
                         }
                     }
                 } else {
-                    let err = TranspileError::UnknownIdentifier(UnknownIdentifier {
-                        identifier: ident.span.clone(),
-                    });
+                    let err = TranspileError::UnknownIdentifier(UnknownIdentifier::from_scope(
+                        ident.span.clone(),
+                        scope,
+                    ));
                     handler.receive(Box::new(err.clone()));
                     Err(err)
                 }

@@ -156,9 +156,9 @@ fn print_function(
                 ))),
             }
         } else {
-            Err(TranspileError::UnknownIdentifier(UnknownIdentifier {
-                identifier: ident.span(),
-            }))
+            Err(TranspileError::UnknownIdentifier(
+                UnknownIdentifier::from_scope(ident.span(), scope),
+            ))
         }
     }
 
@@ -289,9 +289,9 @@ fn print_function(
                 ))),
             }
         } else {
-            Err(TranspileError::UnknownIdentifier(UnknownIdentifier {
-                identifier: ident.span(),
-            }))
+            Err(TranspileError::UnknownIdentifier(
+                UnknownIdentifier::from_scope(ident.span(), scope),
+            ))
         }
     }
 

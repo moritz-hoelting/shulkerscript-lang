@@ -295,9 +295,9 @@ mod enabled {
                     }));
                 }
                 None => {
-                    return Err(TranspileError::UnknownIdentifier(UnknownIdentifier {
-                        identifier: identifier.span(),
-                    }));
+                    return Err(TranspileError::UnknownIdentifier(
+                        UnknownIdentifier::from_scope(identifier.span(), scope),
+                    ));
                 }
             };
 

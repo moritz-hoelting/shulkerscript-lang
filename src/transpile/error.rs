@@ -303,11 +303,46 @@ impl std::error::Error for AssignmentError {}
 pub struct UnknownIdentifier {
     /// The unknown identifier.
     #[get = "pub"]
-    pub identifier: Span,
+    pub(crate) identifier: Span,
+    /// Alternatives to the current identifier
+    #[get = "pub"]
+    pub(crate) alternatives: Vec<String>,
+}
+
+impl UnknownIdentifier {
+    #[cfg(feature = "shulkerbox")]
+    pub(crate) fn from_scope(
+        identifier: Span,
+        scope: &std::sync::Arc<super::variables::Scope>,
+    ) -> Self {
+        use itertools::Itertools as _;
+
+        let own_name = identifier.str();
+        let alternatives = scope
+            .get_all_variables()
+            .iter()
+            .filter_map(|(name, _)| {
+                let normalized_distance = strsim::normalized_damerau_levenshtein(own_name, name);
+                (normalized_distance > 0.8 || strsim::damerau_levenshtein(own_name, name) < 3)
+                    .then_some((normalized_distance, name))
+            })
+            .sorted_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(_, data)| data)
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        Self {
+            identifier,
+            alternatives,
+        }
+    }
 }
 
 impl Display for UnknownIdentifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use std::fmt::Write as _;
+
         write!(
             f,
             "{}",
@@ -317,10 +352,23 @@ impl Display for UnknownIdentifier {
             )
         )?;
 
+        let help_message = if self.alternatives.is_empty() {
+            None
+        } else {
+            let mut message = String::from("did you mean ");
+            for (i, alternative) in self.alternatives.iter().enumerate() {
+                if i > 0 {
+                    message.push_str(", ");
+                }
+                let _ = write!(message, "`{alternative}`");
+            }
+            Some(message + "?")
+        };
+
         write!(
             f,
             "\n{}",
-            SourceCodeDisplay::new(&self.identifier, Option::<u8>::None)
+            SourceCodeDisplay::new(&self.identifier, help_message.as_ref())
         )
     }
 }

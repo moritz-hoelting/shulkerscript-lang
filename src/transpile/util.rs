@@ -326,9 +326,7 @@ impl TemplateStringLiteral {
                                         }
                                     } else {
                                         let err =
-                                            TranspileError::UnknownIdentifier(UnknownIdentifier {
-                                                identifier: identifier.span(),
-                                            });
+                                            TranspileError::UnknownIdentifier(UnknownIdentifier::from_scope(identifier.span(), scope));
                                         handler.receive(Box::new(err.clone()));
                                         Err(err)
                                     }

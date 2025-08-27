@@ -455,9 +455,7 @@ impl Transpiler {
                                 let var =
                                     scope.get_variable(ident.span.str()).ok_or_else(|| {
                                         let err =
-                                            TranspileError::UnknownIdentifier(UnknownIdentifier {
-                                                identifier: ident.span(),
-                                            });
+                                            TranspileError::UnknownIdentifier(UnknownIdentifier::from_scope(ident.span(), scope));
                                         handler.receive(Box::new(err.clone()));
                                         err
                                     })?;
