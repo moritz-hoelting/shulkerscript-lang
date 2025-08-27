@@ -412,7 +412,7 @@ impl Transpiler {
                     },
                 }
 
-                let mut compiled_args = Vec::<Parameter>::new();
+                let mut compiled_args = Vec::<(Parameter, Span)>::new();
                 let mut errs = Vec::new();
 
                 for (expression, is_comptime) in arguments
@@ -571,11 +571,13 @@ impl Transpiler {
 
                     match value {
                         Ok(value) => {
-                            compiled_args.push(value);
+                            compiled_args.push((value, expression.span()));
                         }
                         Err(err) => {
-                            compiled_args
-                                .push(Parameter::Static(MacroString::String(String::new())));
+                            compiled_args.push((
+                                Parameter::Static(MacroString::String(String::new())),
+                                expression.span(),
+                            ));
                             errs.push(err.clone());
                         }
                     }
@@ -584,111 +586,164 @@ impl Transpiler {
                     return Err(err.clone());
                 }
 
-                if compiled_args.iter().any(|arg| !arg.is_static()) {
-                    let (require_dyn_params, mut setup_cmds, move_cmds, static_params) = parameters.clone().into_iter().zip(compiled_args).fold(
-                        (false, Vec::new(), Vec::new(), BTreeMap::new()),
-                        |(mut require_dyn_params, mut acc_setup, mut acc_move, mut statics), (param, data)| {
-                            match param.variable_type() {
-                                FunctionVariableType::Macro(_) => {
-                                    let arg_name = crate::util::identifier_to_macro(param.identifier().span.str());
-                                    match data {
-                                        Parameter::Comptime => {}
-                                        Parameter::Static(s) => {
-                                            match s {
-                                                MacroString::String(value) => statics.insert(
-                                                    arg_name.to_string(),
-                                                    MacroString::String(crate::util::escape_str(&value).to_string())
+                if compiled_args.iter().any(|(arg, _)| !arg.is_static()) {
+                    let mut require_dyn_params = false;
+                    let mut setup_cmds = Vec::new();
+                    let mut move_cmds = Vec::new();
+                    let mut statics = BTreeMap::new();
+
+                    for (param, (data, span)) in parameters.clone().into_iter().zip(compiled_args) {
+                        match param.variable_type() {
+                            FunctionVariableType::Macro(_) => {
+                                let arg_name =
+                                    crate::util::identifier_to_macro(param.identifier().span.str());
+                                match data {
+                                    Parameter::Comptime => {}
+                                    Parameter::Static(s) => {
+                                        match s {
+                                            MacroString::String(value) => statics.insert(
+                                                arg_name.to_string(),
+                                                MacroString::String(
+                                                    crate::util::escape_str(&value).to_string(),
                                                 ),
-                                                MacroString::MacroString(parts) => {
-                                                    let parts = parts.into_iter().map(|part| {
-                                                        match part {
-                                                            MacroStringPart::String(s) => MacroStringPart::String(crate::util::escape_str(&s).to_string()),
-                                                            MacroStringPart::MacroUsage(m) => MacroStringPart::MacroUsage(m),
+                                            ),
+                                            MacroString::MacroString(parts) => {
+                                                let parts = parts
+                                                    .into_iter()
+                                                    .map(|part| match part {
+                                                        MacroStringPart::String(s) => {
+                                                            MacroStringPart::String(
+                                                                crate::util::escape_str(&s)
+                                                                    .to_string(),
+                                                            )
                                                         }
-                                                    }).collect();
-                                                    statics.insert(arg_name.to_string(), MacroString::MacroString(parts))
-                                                }
-                                            };
-                                        }
-                                        Parameter::Storage { prepare_cmds, storage_name, path } => {
-                                            require_dyn_params = true;
-                                            acc_setup.extend(prepare_cmds);
-                                            acc_move.push(Command::Raw(
+                                                        MacroStringPart::MacroUsage(m) => {
+                                                            MacroStringPart::MacroUsage(m)
+                                                        }
+                                                    })
+                                                    .collect();
+                                                statics.insert(
+                                                    arg_name.to_string(),
+                                                    MacroString::MacroString(parts),
+                                                )
+                                            }
+                                        };
+                                    }
+                                    Parameter::Storage {
+                                        prepare_cmds,
+                                        storage_name,
+                                        path,
+                                    } => {
+                                        require_dyn_params = true;
+                                        setup_cmds.extend(prepare_cmds);
+                                        move_cmds.push(Command::Raw(
                                                 format!(r"data modify storage shulkerscript:function_arguments {arg_name} set from storage {storage_name} {path}")
                                             ));
-                                        }
                                     }
                                 }
-                                FunctionVariableType::Integer(_) => {
-                                    let objective = format!("shu_arguments_{}", function_location.replace(['/', ':'], "_"));
-                                    let param_str = param.identifier().span.str();
-                                    let target = crate::util::identifier_to_scoreboard_target(param_str);
+                            }
+                            FunctionVariableType::Integer(_) => {
+                                let objective = format!(
+                                    "shu_arguments_{}",
+                                    function_location.replace(['/', ':'], "_")
+                                );
+                                let param_str = param.identifier().span.str();
+                                let target =
+                                    crate::util::identifier_to_scoreboard_target(param_str);
 
-                                    match data {
-                                        Parameter::Comptime => {}
-                                        Parameter::Static(s) => {
-                                            match s.as_str() {
-                                                Ok(s) => {
-                                                    if s.parse::<i32>().is_ok() {
-                                                        acc_move.push(Command::Raw(format!(r"scoreboard players set {target} {objective} {s}")));
-                                                    } else {
-                                                        panic!("non-integer static argument")
-                                                    }
-                                                }
-                                                Err(parts) => {
-                                                    acc_move.push(Command::UsesMacro(MacroString::MacroString(
+                                match data {
+                                    Parameter::Comptime => {}
+                                    Parameter::Static(s) => match s.as_str() {
+                                        Ok(s) => {
+                                            if s.parse::<i32>().is_ok() {
+                                                move_cmds.push(Command::Raw(format!(r"scoreboard players set {target} {objective} {s}")));
+                                            } else {
+                                                let err = TranspileError::MismatchedTypes(
+                                                    MismatchedTypes {
+                                                        expression: span,
+                                                        expected_type: ExpectedType::Integer,
+                                                    },
+                                                );
+                                                handler.receive(Box::new(err.clone()));
+                                                return Err(err);
+                                            }
+                                        }
+                                        Err(parts) => {
+                                            move_cmds.push(Command::UsesMacro(MacroString::MacroString(
                                                         std::iter::once(MacroStringPart::String(format!("scoreboard players set {target} {objective} ")))
                                                         .chain(parts.iter().cloned()).collect()
                                                     ).into()));
-                                                }
+                                        }
+                                    },
+                                    Parameter::Storage {
+                                        prepare_cmds,
+                                        storage_name,
+                                        path,
+                                    } => {
+                                        setup_cmds.extend(prepare_cmds);
+                                        move_cmds.push(Command::Execute(Execute::Store(
+                                            format!("result score {target} {objective}").into(),
+                                            Box::new(Execute::Run(Box::new(Command::Raw(
+                                                format!("data get storage {storage_name} {path}"),
+                                            )))),
+                                        )));
+                                    }
+                                }
+                            }
+                            FunctionVariableType::Boolean(_) => {
+                                require_dyn_params = true;
+                                let target_storage_name = format!(
+                                    "shulkerscript:arguments_{}",
+                                    function_location.replace(['/', ':'], "_")
+                                );
+                                let param_str = param.identifier().span.str();
+                                let target_path =
+                                    crate::util::identifier_to_scoreboard_target(param_str);
+
+                                match data {
+                                    Parameter::Comptime => {}
+                                    Parameter::Static(s) => match s.as_str() {
+                                        Ok(s) => {
+                                            if let Ok(b) = s.parse::<bool>() {
+                                                move_cmds.push(Command::Raw(format!("data modify storage {target_storage_name} {target_path} set value {}", if b { "1b" } else { "0b" })));
+                                            } else {
+                                                let err = TranspileError::MismatchedTypes(
+                                                    MismatchedTypes {
+                                                        expression: span,
+                                                        expected_type: ExpectedType::Boolean,
+                                                    },
+                                                );
+                                                handler.receive(Box::new(err.clone()));
+                                                return Err(err);
                                             }
                                         }
-                                        Parameter::Storage { prepare_cmds, storage_name, path } => {
-                                            acc_setup.extend(prepare_cmds);
-                                            acc_move.push(Command::Execute(Execute::Store(
-                                                format!("result score {target} {objective}").into(), 
-                                                Box::new(Execute::Run(Box::new(Command::Raw(format!("data get storage {storage_name} {path}")))))
-                                            )));
-                                        }
-                                    }
-                                },
-                                FunctionVariableType::Boolean(_) => {
-                                    require_dyn_params = true;
-                                    let target_storage_name = format!("shulkerscript:arguments_{}", function_location.replace(['/', ':'], "_"));
-                                    let param_str = param.identifier().span.str();
-                                    let target_path = crate::util::identifier_to_scoreboard_target(param_str);
-
-                                    match data {
-                                        Parameter::Comptime => {}
-                                        Parameter::Static(s) => {
-                                            match s.as_str() {
-                                                Ok(s) => {
-                                                    if let Ok(b) = s.parse::<bool>() {
-                                                        acc_move.push(Command::Raw(format!("data modify storage {target_storage_name} {target_path} set value {}", if b { "1b" } else { "0b" })));
-                                                    } else {
-                                                        panic!("non-integer static argument")
-                                                    }
-                                                }
-                                                Err(parts) => {
-                                                    acc_move.push(Command::UsesMacro(MacroString::MacroString(
+                                        Err(parts) => {
+                                            move_cmds.push(Command::UsesMacro(MacroString::MacroString(
                                                         std::iter::once(MacroStringPart::String(format!("data modify storage {target_storage_name} {target_path} set value ")))
                                                         .chain(parts.iter().cloned()).collect()
                                                     ).into()));
-                                                }
-                                            }
                                         }
-                                        Parameter::Storage { prepare_cmds, storage_name, path } => {
-                                            acc_setup.extend(prepare_cmds);
-                                            acc_move.push(Command::Raw(format!("data modify storage {target_storage_name} {target_path} set from storage {storage_name} {path}")));
-                                        }
+                                    },
+                                    Parameter::Storage {
+                                        prepare_cmds,
+                                        storage_name,
+                                        path,
+                                    } => {
+                                        setup_cmds.extend(prepare_cmds);
+                                        move_cmds.push(Command::Raw(format!("data modify storage {target_storage_name} {target_path} set from storage {storage_name} {path}")));
                                     }
-                                },
-                                FunctionVariableType::Value(_) => {
-                                    // handled before in `transpile_comptime_function_arguments`
                                 }
                             }
-                        (require_dyn_params, acc_setup, acc_move, statics)},
-                    );
+                            FunctionVariableType::Value(_) => {
+                                // handled before in `transpile_comptime_function_arguments`
+                            }
+                        }
+                    }
+
+                    let require_dyn_params = require_dyn_params;
+                    let move_cmds = move_cmds;
+                    let static_params = statics;
+
                     if require_dyn_params {
                         let statics_len = static_params.len();
                         let joined_statics = super::util::join_macro_strings(
@@ -749,16 +804,15 @@ impl Transpiler {
                         ))
                     }
                 } else {
-                    let function_args = parameters
-                        .clone()
-                        .into_iter()
-                        .zip(
-                            compiled_args
-                                .into_iter()
-                                .map(|arg| arg.into_static().expect("checked in if condition")),
-                        )
-                        .map(|(k, v)| (k.identifier().span.str().to_string(), v))
-                        .collect();
+                    let function_args =
+                        parameters
+                            .clone()
+                            .into_iter()
+                            .zip(compiled_args.into_iter().map(|(arg, _)| {
+                                arg.into_static().expect("checked in if condition")
+                            }))
+                            .map(|(k, v)| (k.identifier().span.str().to_string(), v))
+                            .collect();
                     Ok(TranspiledFunctionArguments::Static(
                         function_args,
                         Vec::new(),

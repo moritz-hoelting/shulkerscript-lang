@@ -329,6 +329,13 @@ impl TemplateStringLiteral {
                                         Err(err)
                                     }
                                 }
+                                Expression::Primary(Primary::MemberAccess(member_access)) => {
+                                    let value = member_access.parent().comptime_member_access(member_access, scope, handler).inspect_err(|err| {
+                                        handler.receive(Box::new(TranspileError::NotComptime(err.clone())));
+                                    })?.to_macro_string();
+
+                                    value.as_str().map_or_else(|_| todo!("comptime value resulting in macro string with macros"), |s| Ok(MacroStringPart::String(s.into_owned())))
+                                }
                                 _ => todo!("other expressions in template strings"),
                             }
                         }

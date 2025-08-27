@@ -967,20 +967,10 @@ impl TemplateStringLiteral {
         for part in self.parts() {
             match part {
                 TemplateStringLiteralPart::Expression { expression, .. } => {
+                    expression.analyze_semantics(scope, handler)?;
                     match expression.as_ref() {
                         Expression::Primary(Primary::Identifier(identifier)) => {
-                            if let Some(variable_type) = scope.get_variable(identifier.span.str()) {
-                                // TODO: template string correct checks
-                                // if variable_type != VariableType::MacroParameter {
-                                //     let err = error::Error::UnexpectedExpression(UnexpectedExpression(
-                                //         Box::new(Expression::Primary(Primary::Identifier(
-                                //             identifier.clone(),
-                                //         ))),
-                                //     ));
-                                //     handler.receive(err.clone());
-                                //     errs.push(err);
-                                // }
-                            } else {
+                            if scope.get_variable(identifier.span.str()).is_none() {
                                 let err = error::Error::UnknownIdentifier(UnknownIdentifier {
                                     identifier: identifier.span.clone(),
                                 });
@@ -1025,6 +1015,9 @@ impl TemplateStringLiteral {
                             if let Err(err) = indexed.index().analyze_semantics(scope, handler) {
                                 errs.push(err);
                             }
+                        }
+                        Expression::Primary(Primary::MemberAccess(member_access)) => {
+                            member_access.parent().analyze_semantics(scope, handler)?;
                         }
                         _ => {
                             let err = error::Error::UnexpectedExpression(UnexpectedExpression(

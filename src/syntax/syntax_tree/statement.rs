@@ -1010,6 +1010,7 @@ impl Parser<'_> {
     ///
     /// # Errors
     /// - cannot parse variable declaration from current position
+    #[expect(clippy::too_many_lines)]
     #[tracing::instrument(level = "trace", skip_all)]
     pub fn parse_variable_declaration(
         &mut self,

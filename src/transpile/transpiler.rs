@@ -69,6 +69,7 @@ impl Transpiler {
     ///
     /// # Errors
     /// - [`TranspileError::MissingFunctionDeclaration`] If a called function is missing
+    #[expect(clippy::too_many_lines)]
     #[tracing::instrument(level = "trace", skip_all)]
     pub fn transpile(
         mut self,
