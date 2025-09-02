@@ -1,26 +1,37 @@
 //! Conversion functions for converting between tokens/ast-nodes and [`shulkerbox`] types
 
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 
-use shulkerbox::util::{MacroString as ExtMacroString, MacroStringPart as ExtMacroStringPart};
+use shulkerbox::{
+    prelude::Command,
+    util::{MacroString as ExtMacroString, MacroStringPart as ExtMacroStringPart},
+};
 
 use crate::{
-    base::{self, Handler},
+    base::{self, source_file::Span, Handler},
     semantic::error::UnexpectedExpression,
     syntax::syntax_tree::expression::{TemplateStringLiteral, TemplateStringLiteralPart},
-    transpile::{Scope, TranspileError, TranspileResult},
+    transpile::{expression::DataLocation, Scope, TranspileError, TranspileResult},
     util,
 };
 
 use super::util::{MacroString, MacroStringPart};
 
-impl From<MacroString> for ExtMacroString {
-    fn from(value: MacroString) -> Self {
-        match value {
-            MacroString::String(s) => Self::String(s),
-            MacroString::MacroString(parts) => {
-                Self::MacroString(parts.into_iter().map(ExtMacroStringPart::from).collect())
-            }
+type ShulkerboxMacroStringMap = BTreeMap<String, (DataLocation, Vec<Command>, Span)>;
+
+impl MacroString {
+    pub fn into_sb(self) -> (ExtMacroString, ShulkerboxMacroStringMap) {
+        match self {
+            Self::String(s) => (ExtMacroString::String(s), BTreeMap::new()),
+            Self::MacroString {
+                parts,
+                prepare_variables,
+            } => (
+                ExtMacroString::MacroString(
+                    parts.into_iter().map(ExtMacroStringPart::from).collect(),
+                ),
+                prepare_variables,
+            ),
         }
     }
 }

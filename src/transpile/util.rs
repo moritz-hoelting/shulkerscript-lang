@@ -1,34 +1,48 @@
 //! Utility methods for transpiling
 
-use std::{fmt::Display, str::FromStr};
+#[cfg(feature = "shulkerbox")]
+use std::{collections::BTreeMap, sync::Arc};
+
+#[cfg(feature = "shulkerbox")]
+use shulkerbox::prelude::Command;
 
 #[cfg(feature = "shulkerbox")]
 use crate::{
-    base::{self, source_file::SourceElement as _, Handler},
+    base::{
+        self,
+        source_file::{SourceElement as _, Span},
+        Handler,
+    },
     syntax::syntax_tree::{
         expression::{Expression, Primary, TemplateStringLiteral, TemplateStringLiteralPart},
         AnyStringLiteral,
     },
     transpile::{
         error::{TranspileError, UnknownIdentifier},
-        expression::ComptimeValue,
-        Scope, TranspileResult, VariableData,
+        expression::{ComptimeValue, DataLocation},
+        Scope, TranspileResult, Transpiler, VariableData,
     },
+    util::identifier_to_macro,
 };
-#[cfg(feature = "shulkerbox")]
-use std::sync::Arc;
 
 /// String that can contain macros
+#[cfg(feature = "shulkerbox")]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MacroString {
     /// A normal string
     String(String),
     /// A string containing expressions
-    MacroString(Vec<MacroStringPart>),
+    MacroString {
+        /// Parts that make up the macro string
+        parts: Vec<MacroStringPart>,
+        /// Variables that need special preparation before using the macro string
+        prepare_variables: BTreeMap<String, (DataLocation, Vec<Command>, Span)>,
+    },
 }
 
 /// Part of a [`MacroString`]
+#[cfg(feature = "shulkerbox")]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MacroStringPart {
@@ -38,11 +52,12 @@ pub enum MacroStringPart {
     MacroUsage(String),
 }
 
-impl Display for MacroString {
+#[cfg(feature = "shulkerbox")]
+impl std::fmt::Display for MacroString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::String(s) => s.fmt(f),
-            Self::MacroString(parts) => {
+            Self::MacroString { parts, .. } => {
                 for part in parts {
                     match part {
                         MacroStringPart::String(s) => s.fmt(f)?,
@@ -55,13 +70,14 @@ impl Display for MacroString {
     }
 }
 
+#[cfg(feature = "shulkerbox")]
 impl MacroString {
     /// Check if the macro string contains any macros
     #[must_use]
     pub fn contains_macros(&self) -> bool {
         match self {
             Self::String(_) => false,
-            Self::MacroString(parts) => parts
+            Self::MacroString { parts, .. } => parts
                 .iter()
                 .any(|p| matches!(p, MacroStringPart::MacroUsage(_))),
         }
@@ -71,11 +87,23 @@ impl MacroString {
     ///
     /// # Errors
     /// - If the macro string contains macros
-    pub fn as_str(&self) -> Result<std::borrow::Cow<'_, str>, &[MacroStringPart]> {
+    #[expect(clippy::type_complexity)]
+    pub fn as_str(
+        &self,
+    ) -> Result<
+        std::borrow::Cow<'_, str>,
+        (
+            &[MacroStringPart],
+            &BTreeMap<String, (DataLocation, Vec<Command>, Span)>,
+        ),
+    > {
         match self {
             Self::String(s) => Ok(std::borrow::Cow::Borrowed(s)),
-            Self::MacroString(parts) if self.contains_macros() => Err(parts),
-            Self::MacroString(parts) => Ok(std::borrow::Cow::Owned(
+            Self::MacroString {
+                parts,
+                prepare_variables,
+            } if self.contains_macros() => Err((parts, prepare_variables)),
+            Self::MacroString { parts, .. } => Ok(std::borrow::Cow::Owned(
                 parts
                     .iter()
                     .map(|p| match p {
@@ -126,6 +154,7 @@ where
 }
 
 /// Join multiple macro strings into one
+#[cfg(feature = "shulkerbox")]
 #[must_use]
 pub fn join_macro_strings<I>(strings: I) -> MacroString
 where
@@ -139,20 +168,39 @@ where
                     s.push_str(&cur);
                     MacroString::String(s)
                 }
-                MacroString::MacroString(cur) => {
+                MacroString::MacroString {
+                    parts: cur,
+                    prepare_variables: preparation_cmds,
+                } => {
                     let mut parts = vec![MacroStringPart::String(s)];
                     parts.extend(cur);
-                    MacroString::MacroString(parts)
+                    MacroString::MacroString {
+                        parts,
+                        prepare_variables: preparation_cmds,
+                    }
                 }
             },
-            MacroString::MacroString(mut parts) => match cur {
+            MacroString::MacroString {
+                mut parts,
+                prepare_variables: mut preparation_cmds,
+            } => match cur {
                 MacroString::String(cur) => {
                     parts.push(MacroStringPart::String(cur));
-                    MacroString::MacroString(parts)
+                    MacroString::MacroString {
+                        parts,
+                        prepare_variables: preparation_cmds,
+                    }
                 }
-                MacroString::MacroString(cur) => {
+                MacroString::MacroString {
+                    parts: cur,
+                    prepare_variables: cur_preparation_cmds,
+                } => {
                     parts.extend(cur);
-                    MacroString::MacroString(parts)
+                    preparation_cmds.extend(cur_preparation_cmds);
+                    MacroString::MacroString {
+                        parts,
+                        prepare_variables: preparation_cmds,
+                    }
                 }
             },
         })
@@ -173,7 +221,8 @@ pub fn add_to_entity_selector(selector: impl Into<String>, additional: &str) -> 
     }
 }
 
-impl FromStr for MacroString {
+#[cfg(feature = "shulkerbox")]
+impl std::str::FromStr for MacroString {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -239,7 +288,10 @@ impl FromStr for MacroString {
                 .iter()
                 .any(|p| matches!(p, MacroStringPart::MacroUsage(_)))
             {
-                Ok(Self::MacroString(parts))
+                Ok(Self::MacroString {
+                    parts,
+                    prepare_variables: BTreeMap::new(),
+                })
             } else {
                 Ok(Self::String(s.to_string()))
             }
@@ -249,6 +301,7 @@ impl FromStr for MacroString {
     }
 }
 
+#[cfg(feature = "shulkerbox")]
 impl<S> From<S> for MacroString
 where
     S: Into<String>,
@@ -266,12 +319,15 @@ impl AnyStringLiteral {
     /// - If an identifier in a template string is not found in the scope
     pub fn to_macro_string(
         &self,
+        transpiler: Option<&mut Transpiler>,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<MacroString> {
         match self {
             Self::StringLiteral(literal) => Ok(MacroString::from(literal.str_content().as_ref())),
-            Self::TemplateStringLiteral(literal) => literal.to_macro_string(scope, handler),
+            Self::TemplateStringLiteral(literal) => {
+                literal.to_macro_string(transpiler, scope, handler)
+            }
         }
     }
 }
@@ -282,70 +338,215 @@ impl TemplateStringLiteral {
     ///
     /// # Errors
     /// - If an identifier in a template string is not found in the scope
+    #[expect(clippy::too_many_lines)]
     pub fn to_macro_string(
         &self,
+        mut transpiler: Option<&mut Transpiler>,
         scope: &Arc<Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<MacroString> {
-        if self
-            .parts()
-            .iter()
-            .any(|p| matches!(p, TemplateStringLiteralPart::Expression { .. }))
-        {
-            let macro_string = MacroString::MacroString(
-                self.parts()
-                    .iter()
-                    .map(|part| match part {
-                        TemplateStringLiteralPart::Text(text) => Ok(MacroStringPart::String(
-                            crate::util::unescape_template_string(text.span.str()).into_owned(),
-                        )),
-                        TemplateStringLiteralPart::Expression { expression, .. } => {
-                            match expression.as_ref() {
-                                Expression::Primary(Primary::Identifier(identifier)) =>
-                                {
-                                    #[expect(clippy::option_if_let_else)]
-                                    if let Some(var_data) =
-                                        scope.get_variable(identifier.span.str())
-                                    {
-                                        match var_data.as_ref() {
-                                            VariableData::MacroParameter { macro_name, .. } => Ok(
-                                                MacroStringPart::MacroUsage(macro_name.to_owned()),
-                                            ),
-                                            VariableData::ComptimeValue { value, .. } => {
-                                                let value = value.read().unwrap().as_ref().map_or_else(
-                                                    || "null".into(),
-                                                    ComptimeValue::to_macro_string,
-                                                );
+        if self.contains_expression() {
+            let mut prepare_variables = BTreeMap::new();
 
-                                                match value.as_str() {
-                                                    Ok(s) => Ok(MacroStringPart::String(s.into_owned())),
-                                                    Err(_) => todo!("comptime value resulting in macro string with macros")
-                                                }
+            let parts = self
+                .parts()
+                .iter()
+                .map(|part| match part {
+                    TemplateStringLiteralPart::Text(text) => Ok(vec![MacroStringPart::String(
+                        crate::util::unescape_template_string(text.span.str()).into_owned(),
+                    )]),
+                    TemplateStringLiteralPart::Expression { expression, .. } => match expression
+                        .as_ref()
+                    {
+                        Expression::Primary(Primary::Identifier(identifier)) => {
+                            #[expect(clippy::option_if_let_else)]
+                            if let Some(var_data) = scope.get_variable(identifier.span.str()) {
+                                match var_data.as_ref() {
+                                    VariableData::MacroParameter { macro_name, .. } => {
+                                        Ok(vec![MacroStringPart::MacroUsage(macro_name.to_owned())])
+                                    }
+                                    VariableData::ComptimeValue { value, .. } => {
+                                        let value = value.read().unwrap().as_ref().map_or_else(
+                                            || "null".into(),
+                                            ComptimeValue::to_macro_string,
+                                        );
+
+                                        match value.as_str() {
+                                            Ok(s) => {
+                                                Ok(vec![MacroStringPart::String(s.into_owned())])
                                             }
-                                            _ => todo!("other identifiers in template strings"),
+                                            Err((inner_parts, inner_prepare_variables)) => {
+                                                prepare_variables
+                                                    .extend(inner_prepare_variables.to_owned());
+                                                Ok(inner_parts.to_vec())
+                                            }
                                         }
-                                    } else {
-                                        let err =
-                                            TranspileError::UnknownIdentifier(UnknownIdentifier::from_scope(identifier.span(), scope));
+                                    }
+                                    VariableData::BooleanStorage { storage_name, path } => {
+                                        use crate::transpile::expression::StorageType;
+
+                                        let macro_name = if let Some(transpiler) = &mut transpiler {
+                                            let temp_count = transpiler.get_temp_count(1);
+                                            format!(
+                                                "shu_temp_{hash}",
+                                                hash = chksum_md5::hash(temp_count.to_le_bytes())
+                                            )
+                                        } else {
+                                            identifier_to_macro(identifier.span.str()).into_owned()
+                                        };
+
+                                        let data_location = DataLocation::Storage {
+                                            storage_name: storage_name.to_owned(),
+                                            path: path.to_owned(),
+                                            r#type: StorageType::Boolean,
+                                        };
+                                        prepare_variables.insert(
+                                            macro_name.clone(),
+                                            (data_location, Vec::new(), expression.span()),
+                                        );
+
+                                        Ok(vec![MacroStringPart::MacroUsage(macro_name)])
+                                    }
+                                    VariableData::ScoreboardValue { objective, target } => {
+                                        let macro_name = if let Some(transpiler) = &mut transpiler {
+                                            let temp_count = transpiler.get_temp_count(1);
+                                            format!(
+                                                "shu_temp_{hash}",
+                                                hash = chksum_md5::hash(temp_count.to_le_bytes())
+                                            )
+                                        } else {
+                                            identifier_to_macro(identifier.span.str()).into_owned()
+                                        };
+                                        let data_location = DataLocation::ScoreboardValue {
+                                            objective: objective.to_owned(),
+                                            target: target.to_owned(),
+                                        };
+                                        prepare_variables.insert(
+                                            macro_name.clone(),
+                                            (data_location, Vec::new(), expression.span()),
+                                        );
+
+                                        Ok(vec![MacroStringPart::MacroUsage(macro_name)])
+                                    }
+                                    _ => {
+                                        use crate::semantic::error::UnexpectedExpression;
+
+                                        let err = TranspileError::UnexpectedExpression(
+                                            UnexpectedExpression(expression.to_owned()),
+                                        );
                                         handler.receive(Box::new(err.clone()));
+
                                         Err(err)
                                     }
                                 }
-                                Expression::Primary(Primary::MemberAccess(member_access)) => {
-                                    let value = member_access.parent().comptime_member_access(member_access, scope, handler).inspect_err(|err| {
-                                        handler.receive(Box::new(TranspileError::NotComptime(err.clone())));
-                                    })?.to_macro_string();
-
-                                    value.as_str().map_or_else(|_| todo!("comptime value resulting in macro string with macros"), |s| Ok(MacroStringPart::String(s.into_owned())))
-                                }
-                                _ => todo!("other expressions in template strings"),
+                            } else {
+                                let err = TranspileError::UnknownIdentifier(
+                                    UnknownIdentifier::from_scope(identifier.span(), scope),
+                                );
+                                handler.receive(Box::new(err.clone()));
+                                Err(err)
                             }
                         }
-                    })
-                    .collect::<TranspileResult<Vec<MacroStringPart>>>()?,
-            );
+                        Expression::Primary(Primary::MemberAccess(member_access)) => {
+                            let value = member_access
+                                .parent()
+                                .comptime_member_access(member_access, scope, handler)
+                                .inspect_err(|err| {
+                                    handler.receive(Box::new(TranspileError::NotComptime(
+                                        err.clone(),
+                                    )));
+                                })?
+                                .to_macro_string();
 
-            Ok(macro_string)
+                            match value.as_str() {
+                                Ok(s) => Ok(vec![MacroStringPart::String(s.into_owned())]),
+                                Err((inner_parts, inner_prepare_variables)) => {
+                                    prepare_variables.extend(inner_prepare_variables.to_owned());
+                                    Ok(inner_parts.to_vec())
+                                }
+                            }
+                        }
+                        _ => {
+                            if let Some(transpiler) = &mut transpiler {
+                                use crate::transpile::expression::{StorageType, ValueType};
+
+                                let temp_count = transpiler.get_temp_count(1);
+                                let macro_name = format!(
+                                    "shu_temp_{hash}",
+                                    hash = chksum_md5::hash(temp_count.to_le_bytes())
+                                );
+
+                                let data_location =
+                                    if expression.can_yield_type(ValueType::Integer, scope) {
+                                        let (scoreboard_name, [scoreboard_target]) =
+                                            transpiler.get_temp_scoreboard_locations_array();
+
+                                        DataLocation::ScoreboardValue {
+                                            objective: scoreboard_name,
+                                            target: scoreboard_target,
+                                        }
+                                    } else if expression.can_yield_type(ValueType::Boolean, scope) {
+                                        let (storage_name, [storage_path]) =
+                                            transpiler.get_temp_storage_locations_array();
+                                        DataLocation::Storage {
+                                            storage_name,
+                                            path: storage_path,
+                                            r#type: StorageType::Boolean,
+                                        }
+                                    } else if expression.can_yield_type(ValueType::String, scope) {
+                                        let (storage_name, [storage_path]) =
+                                            transpiler.get_temp_storage_locations_array();
+                                        DataLocation::Storage {
+                                            storage_name,
+                                            path: storage_path,
+                                            r#type: StorageType::String,
+                                        }
+                                    } else {
+                                        use crate::semantic::error::UnexpectedExpression;
+
+                                        let err = TranspileError::UnexpectedExpression(
+                                            UnexpectedExpression(expression.to_owned()),
+                                        );
+                                        handler.receive(Box::new(err.clone()));
+                                        return Err(err);
+                                    };
+
+                                let commands = transpiler.transpile_expression(
+                                    expression,
+                                    &data_location,
+                                    scope,
+                                    handler,
+                                )?;
+
+                                prepare_variables.insert(
+                                    macro_name.clone(),
+                                    (data_location, commands, expression.span()),
+                                );
+
+                                Ok(vec![MacroStringPart::MacroUsage(macro_name)])
+                            } else {
+                                use crate::semantic::error::UnexpectedExpression;
+
+                                let err = TranspileError::UnexpectedExpression(
+                                    UnexpectedExpression(expression.to_owned()),
+                                );
+                                handler.receive(Box::new(err.clone()));
+
+                                Err(err)
+                            }
+                        }
+                    },
+                })
+                .flat_map(|res| match res {
+                    Ok(parts) => parts.into_iter().map(Ok).collect(),
+                    Err(err) => vec![Err(err)],
+                })
+                .collect::<TranspileResult<Vec<MacroStringPart>>>()?;
+
+            Ok(MacroString::MacroString {
+                parts,
+                prepare_variables,
+            })
         } else {
             Ok(MacroString::String(
                 self.as_str(scope, handler)?.into_owned(),
@@ -354,46 +555,62 @@ impl TemplateStringLiteral {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "shulkerbox"))]
 mod tests {
+    use std::str::FromStr as _;
+
+    use assert_struct::assert_struct;
+
     use super::*;
 
     #[test]
     fn test_parse_macro_string() {
-        assert_eq!(
+        assert_struct!(
             MacroString::from_str("Hello, $(world)!").unwrap(),
-            MacroString::MacroString(vec![
-                MacroStringPart::String("Hello, ".to_string()),
-                MacroStringPart::MacroUsage("world".to_string()),
-                MacroStringPart::String("!".to_string())
-            ])
+            MacroString::MacroString {
+                parts: vec![
+                    MacroStringPart::String("Hello, ".to_string()),
+                    MacroStringPart::MacroUsage("world".to_string()),
+                    MacroStringPart::String("!".to_string())
+                ],
+                prepare_variables.is_empty(): true,
+            }
         );
-        assert_eq!(
+        assert_struct!(
             MacroString::from_str("Hello, $(world)! $(world").unwrap(),
-            MacroString::MacroString(vec![
-                MacroStringPart::String("Hello, ".to_string()),
-                MacroStringPart::MacroUsage("world".to_string()),
-                MacroStringPart::String("! $(world".to_string()),
-            ])
+            MacroString::MacroString {
+                parts: vec![
+                    MacroStringPart::String("Hello, ".to_string()),
+                    MacroStringPart::MacroUsage("world".to_string()),
+                    MacroStringPart::String("! $(world".to_string()),
+                ],
+                prepare_variables.is_empty(): true,
+            }
         );
-        assert_eq!(
+        assert_struct!(
             MacroString::from_str("Hello $(a) from $(b) and $(c)").unwrap(),
-            MacroString::MacroString(vec![
-                MacroStringPart::String("Hello ".to_string()),
-                MacroStringPart::MacroUsage("a".to_string()),
-                MacroStringPart::String(" from ".to_string()),
-                MacroStringPart::MacroUsage("b".to_string()),
-                MacroStringPart::String(" and ".to_string()),
-                MacroStringPart::MacroUsage("c".to_string()),
-            ])
+            MacroString::MacroString {
+                parts: vec![
+                    MacroStringPart::String("Hello ".to_string()),
+                    MacroStringPart::MacroUsage("a".to_string()),
+                    MacroStringPart::String(" from ".to_string()),
+                    MacroStringPart::MacroUsage("b".to_string()),
+                    MacroStringPart::String(" and ".to_string()),
+                    MacroStringPart::MacroUsage("c".to_string()),
+                ],
+                prepare_variables.is_empty(): true,
+            }
         );
-        assert_eq!(
+        assert_struct!(
             MacroString::from_str("Hello, $(world! $(world)!").unwrap(),
-            MacroString::MacroString(vec![
-                MacroStringPart::String("Hello, $(world! ".to_string()),
-                MacroStringPart::MacroUsage("world".to_string()),
-                MacroStringPart::String("!".to_string()),
-            ])
+            MacroString::MacroString {
+                parts: vec![
+                    MacroStringPart::String("Hello, $(world! ".to_string()),
+                    MacroStringPart::MacroUsage("world".to_string()),
+                    MacroStringPart::String("!".to_string()),
+                ],
+                prepare_variables.is_empty(): true,
+            }
         );
     }
 }

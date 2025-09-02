@@ -35,13 +35,14 @@ pathdiff = "0.2.3"
 serde = { version = "1.0.217", features = ["derive"], optional = true }
 serde_json = { version = "1.0.138", optional = true }
 # shulkerbox = { version = "0.1.0", default-features = false, optional = true }
-shulkerbox = { git = "https://github.com/moritz-hoelting/shulkerbox", rev = "6ff544131b2518b8c92bc4d2de7682efd7141ec4", default-features = false, optional = true }
+shulkerbox = { git = "https://github.com/moritz-hoelting/shulkerbox", rev = "89709834da6f39840caa9c6a2eadbdececdc7d44", default-features = false, optional = true }
 strsim = "0.11.1"
 strum = { version = "0.27.0", features = ["derive"] }
 thiserror = "2.0.11"
 tracing = "0.1.41"
 
 [dev-dependencies]
+assert-struct = "0.2.0"
 serde_json = "1.0.138"
 
 [[example]]

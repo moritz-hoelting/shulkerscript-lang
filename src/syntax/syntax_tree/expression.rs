@@ -415,6 +415,14 @@ impl TemplateStringLiteral {
     pub fn parts(&self) -> &[TemplateStringLiteralPart] {
         &self.parts
     }
+
+    /// Returns whether the template string literal contains any expressions.
+    #[must_use]
+    pub fn contains_expression(&self) -> bool {
+        self.parts
+            .iter()
+            .any(|part| matches!(part, TemplateStringLiteralPart::Expression { .. }))
+    }
 }
 
 impl SourceElement for TemplateStringLiteral {

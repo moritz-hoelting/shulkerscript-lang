@@ -7,10 +7,14 @@ use std::{
 };
 
 use itertools::Itertools;
-use shulkerbox::datapack::{self, Command, Datapack, Execute};
+use shulkerbox::datapack::{self, Command, Datapack, Execute, Group};
 
 use crate::{
-    base::{self, source_file::SourceElement, Handler},
+    base::{
+        self,
+        source_file::{SourceElement, Span},
+        Handler,
+    },
     semantic::error::UnexpectedExpression,
     syntax::syntax_tree::{
         declaration::{Declaration, FunctionVariableType, ImportItems},
@@ -24,6 +28,7 @@ use crate::{
     },
     transpile::{
         error::IllegalAnnotationContent,
+        expression::DataLocation,
         util::{MacroString, MacroStringPart},
         variables::FunctionVariableDataType,
     },
@@ -411,7 +416,7 @@ impl Transpiler {
                 if commands.is_empty() {
                     Ok(Vec::new())
                 } else {
-                    Ok(vec![Command::Group(commands)])
+                    Ok(vec![Command::Group(Group::new(commands))])
                 }
             }
             Statement::Semicolon(semi) => match semi.statement() {
@@ -467,7 +472,8 @@ impl Transpiler {
             .map(|val| val.to_macro_string());
 
         let (prepare_cmds, ret_cmd) = if let Ok(val) = comptime_val {
-            (Vec::new(), datapack::ReturnCommand::Value(val.into()))
+            let (macro_string, prepare_variables) = val.into_sb();
+            (Vec::new(), datapack::ReturnCommand::Value(macro_string))
         } else {
             match ret.expression() {
                 Expression::Primary(Primary::Prefix(prefix))
@@ -478,7 +484,7 @@ impl Transpiler {
                     let cmd = if ret_cmds.len() == 1 {
                         ret_cmds.into_iter().next().unwrap()
                     } else {
-                        Command::Group(ret_cmds)
+                        Command::Group(Group::new(ret_cmds))
                     };
                     (Vec::new(), datapack::ReturnCommand::Command(Box::new(cmd)))
                 }
@@ -487,7 +493,7 @@ impl Transpiler {
                     let cmd = if ret_cmds.len() == 1 {
                         ret_cmds.into_iter().next().unwrap()
                     } else {
-                        Command::Group(ret_cmds)
+                        Command::Group(Group::new(ret_cmds))
                     };
                     (Vec::new(), datapack::ReturnCommand::Command(Box::new(cmd)))
                 }
@@ -513,7 +519,11 @@ impl Transpiler {
                                 },
                                 |val| {
                                     let cmd = val.to_string_no_macro().map_or_else(
-                                        || Command::UsesMacro(val.to_macro_string().into()),
+                                        || {
+                                            let (macro_string, prepare_variables) =
+                                                val.to_macro_string().into_sb();
+                                            Command::UsesMacro(macro_string)
+                                        },
                                         Command::Raw,
                                     );
                                     Ok((
@@ -588,6 +598,7 @@ impl Transpiler {
         Ok(cmds)
     }
 
+    #[expect(clippy::too_many_lines)]
     pub(super) fn transpile_run_expression(
         &mut self,
         expression: &Primary,
@@ -600,22 +611,29 @@ impl Transpiler {
                 Some(VariableData::ComptimeValue {
                     value,
                     read_only: _,
-                }) => value.read().unwrap().as_ref().map_or_else(
-                    || {
+                }) => {
+                    if let Some(val) = value.read().unwrap().as_ref() {
+                        let cmds = val.to_string_no_macro().map_or_else(
+                            || {
+                                let (macro_string, prepare_variables) =
+                                    val.to_macro_string().into_sb();
+                                self.transpile_commands_with_variable_macros(
+                                    vec![Command::UsesMacro(macro_string)],
+                                    prepare_variables,
+                                    handler,
+                                )
+                            },
+                            |s| Ok(vec![Command::Raw(s)]),
+                        )?;
+                        Ok(cmds)
+                    } else {
                         let err = TranspileError::MissingValue(MissingValue {
                             expression: ident.span.clone(),
                         });
                         handler.receive(Box::new(err.clone()));
                         Err(err)
-                    },
-                    |val| {
-                        let cmd = val.to_string_no_macro().map_or_else(
-                            || Command::UsesMacro(val.to_macro_string().into()),
-                            Command::Raw,
-                        );
-                        Ok(vec![cmd])
-                    },
-                ),
+                    }
+                }
                 Some(_) => {
                     let err = TranspileError::UnexpectedExpression(UnexpectedExpression(Box::new(
                         Expression::Primary(expression.clone()),
@@ -647,12 +665,26 @@ impl Transpiler {
             Primary::StringLiteral(string) => {
                 Ok(vec![Command::Raw(string.str_content().to_string())])
             }
-            Primary::TemplateStringLiteral(string) => Ok(vec![Command::UsesMacro(
-                string.to_macro_string(scope, handler)?.into(),
-            )]),
+            Primary::TemplateStringLiteral(string) => {
+                let (macro_string, prepare_variables) = string
+                    .to_macro_string(Some(self), scope, handler)?
+                    .into_sb();
+                self.transpile_commands_with_variable_macros(
+                    vec![Command::UsesMacro(macro_string)],
+                    prepare_variables,
+                    handler,
+                )
+            }
             Primary::Lua(code) => match code.eval_comptime(scope, handler)? {
                 Ok(ComptimeValue::String(cmd)) => Ok(vec![Command::Raw(cmd)]),
-                Ok(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd.into())]),
+                Ok(ComptimeValue::MacroString(cmd)) => {
+                    let (macro_string, prepare_variables) = cmd.into_sb();
+                    self.transpile_commands_with_variable_macros(
+                        vec![Command::UsesMacro(macro_string)],
+                        prepare_variables,
+                        handler,
+                    )
+                }
                 Ok(ComptimeValue::Boolean(_) | ComptimeValue::Integer(_)) => {
                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
                         expected_type: ExpectedType::String,
@@ -676,7 +708,14 @@ impl Transpiler {
                 }
                 Expression::Binary(bin) => match bin.comptime_eval(scope, handler) {
                     Ok(ComptimeValue::String(cmd)) => Ok(vec![Command::Raw(cmd)]),
-                    Ok(ComptimeValue::MacroString(cmd)) => Ok(vec![Command::UsesMacro(cmd.into())]),
+                    Ok(ComptimeValue::MacroString(cmd)) => {
+                        let (macro_string, prepare_variables) = cmd.into_sb();
+                        self.transpile_commands_with_variable_macros(
+                            vec![Command::UsesMacro(macro_string)],
+                            prepare_variables,
+                            handler,
+                        )
+                    }
                     Ok(_) => {
                         let err = TranspileError::MismatchedTypes(MismatchedTypes {
                             expression: bin.span(),
@@ -723,47 +762,67 @@ impl Transpiler {
                 TranspiledFunctionArguments::Static(arguments, mut setup_cmds) => {
                     use std::fmt::Write;
 
-                    let cmd = if arguments.is_empty() {
-                        Command::Raw(function_call)
+                    let cmds = if arguments.is_empty() {
+                        vec![Command::Raw(function_call)]
                     } else {
-                        let arguments_iter = arguments.iter().map(|(ident, v)| match v {
-                            MacroString::String(s) => MacroString::String(format!(
-                                r#"{macro_name}:"{escaped}""#,
-                                macro_name = crate::util::identifier_to_macro(ident),
-                                escaped = crate::util::escape_str(s)
-                            )),
-                            MacroString::MacroString(parts) => MacroString::MacroString(
-                                std::iter::once(MacroStringPart::String(format!(
-                                    r#"{macro_name}:""#,
-                                    macro_name = crate::util::identifier_to_macro(ident)
-                                )))
-                                .chain(parts.clone().into_iter().map(|part| match part {
-                                    MacroStringPart::String(s) => MacroStringPart::String(
-                                        crate::util::escape_str(&s).to_string(),
-                                    ),
-                                    macro_usage @ MacroStringPart::MacroUsage(_) => macro_usage,
-                                }))
-                                .chain(std::iter::once(MacroStringPart::String('"'.to_string())))
-                                .collect(),
-                            ),
-                        });
+                        let arguments_iter =
+                            arguments
+                                .into_iter()
+                                .map(|(macro_name, value)| match value {
+                                    MacroString::String(s) => MacroString::String(format!(
+                                        r#"{macro_name}:"{escaped}""#,
+                                        escaped = crate::util::escape_str(&s)
+                                    )),
+                                    MacroString::MacroString {
+                                        parts,
+                                        prepare_variables: preparation_cmds,
+                                    } => MacroString::MacroString {
+                                        parts: std::iter::once(MacroStringPart::String(format!(
+                                            r#"{macro_name}:""#,
+                                        )))
+                                        .chain(parts.into_iter().map(|part| match part {
+                                            MacroStringPart::String(s) => MacroStringPart::String(
+                                                crate::util::escape_str(&s).to_string(),
+                                            ),
+                                            MacroStringPart::MacroUsage(_) => part,
+                                        }))
+                                        .chain(std::iter::once(MacroStringPart::String(
+                                            '"'.to_string(),
+                                        )))
+                                        .collect(),
+                                        prepare_variables: preparation_cmds,
+                                    },
+                                });
                         let arguments = super::util::join_macro_strings(arguments_iter);
 
                         match arguments {
                             MacroString::String(arguments) => {
                                 write!(function_call, " {{{arguments}}}").unwrap();
-                                Command::Raw(function_call)
+                                vec![Command::Raw(function_call)]
                             }
-                            MacroString::MacroString(mut parts) => {
+                            MacroString::MacroString {
+                                mut parts,
+                                prepare_variables,
+                            } => {
                                 function_call.push_str(" {");
                                 parts.insert(0, MacroStringPart::String(function_call));
                                 parts.push(MacroStringPart::String('}'.to_string()));
-                                Command::UsesMacro(MacroString::MacroString(parts).into())
+
+                                let (macro_string, prepare_variables) = MacroString::MacroString {
+                                    parts,
+                                    prepare_variables,
+                                }
+                                .into_sb();
+                                self.transpile_commands_with_variable_macros(
+                                    vec![Command::UsesMacro(macro_string)],
+                                    prepare_variables,
+                                    handler,
+                                )?
                             }
                         }
                     };
 
-                    setup_cmds.push(cmd);
+                    setup_cmds.extend(cmds);
 
                     Ok(setup_cmds)
                 }
@@ -963,6 +1022,7 @@ impl Transpiler {
         }
     }
 
+    #[expect(clippy::too_many_lines)]
     fn combine_execute_head_tail(
         &mut self,
         head: &ExecuteBlockHead,
@@ -991,84 +1051,158 @@ impl Transpiler {
                 }
             }
             ExecuteBlockHead::As(r#as) => {
-                let selector = r#as.as_selector().to_macro_string(scope, handler)?;
-                tail.map(|(pre_cmds, tail)| {
-                    (pre_cmds, Execute::As(selector.into(), Box::new(tail)))
-                })
+                let selector = r#as
+                    .as_selector()
+                    .to_macro_string(Some(self), scope, handler)?;
+                let (macro_string, prepare_variables) = selector.into_sb();
+                tail.map(|(pre_cmds, tail)| (pre_cmds, Execute::As(macro_string, Box::new(tail))))
             }
             ExecuteBlockHead::At(at) => {
-                let selector = at.at_selector().to_macro_string(scope, handler)?;
-                tail.map(|(pre_cmds, tail)| {
-                    (pre_cmds, Execute::At(selector.into(), Box::new(tail)))
-                })
+                let selector = at
+                    .at_selector()
+                    .to_macro_string(Some(self), scope, handler)?;
+                let (macro_string, prepare_variables) = selector.into_sb();
+                tail.map(|(pre_cmds, tail)| (pre_cmds, Execute::At(macro_string, Box::new(tail))))
             }
             ExecuteBlockHead::Align(align) => {
-                let align = align.align_selector().to_macro_string(scope, handler)?;
+                let align = align
+                    .align_selector()
+                    .to_macro_string(Some(self), scope, handler)?;
+                let (macro_string, prepare_variables) = align.into_sb();
                 tail.map(|(pre_cmds, tail)| {
-                    (pre_cmds, Execute::Align(align.into(), Box::new(tail)))
+                    (pre_cmds, Execute::Align(macro_string, Box::new(tail)))
                 })
             }
             ExecuteBlockHead::Anchored(anchored) => {
-                let anchor = anchored
-                    .anchored_selector()
-                    .to_macro_string(scope, handler)?;
+                let anchor =
+                    anchored
+                        .anchored_selector()
+                        .to_macro_string(Some(self), scope, handler)?;
+                let (macro_string, prepare_variables) = anchor.into_sb();
                 tail.map(|(pre_cmds, tail)| {
-                    (pre_cmds, Execute::Anchored(anchor.into(), Box::new(tail)))
+                    (pre_cmds, Execute::Anchored(macro_string, Box::new(tail)))
                 })
             }
             ExecuteBlockHead::In(r#in) => {
-                let dimension = r#in.in_selector().to_macro_string(scope, handler)?;
-                tail.map(|(pre_cmds, tail)| {
-                    (pre_cmds, Execute::In(dimension.into(), Box::new(tail)))
-                })
+                let dimension = r#in
+                    .in_selector()
+                    .to_macro_string(Some(self), scope, handler)?;
+                let (macro_string, prepare_variables) = dimension.into_sb();
+                tail.map(|(pre_cmds, tail)| (pre_cmds, Execute::In(macro_string, Box::new(tail))))
             }
             ExecuteBlockHead::Positioned(positioned) => {
-                let position = positioned
-                    .positioned_selector()
-                    .to_macro_string(scope, handler)?;
+                let position =
+                    positioned
+                        .positioned_selector()
+                        .to_macro_string(Some(self), scope, handler)?;
+                let (macro_string, prepare_variables) = position.into_sb();
                 tail.map(|(pre_cmds, tail)| {
-                    (
-                        pre_cmds,
-                        Execute::Positioned(position.into(), Box::new(tail)),
-                    )
+                    (pre_cmds, Execute::Positioned(macro_string, Box::new(tail)))
                 })
             }
             ExecuteBlockHead::Rotated(rotated) => {
-                let rotation = rotated.rotated_selector().to_macro_string(scope, handler)?;
+                let rotation =
+                    rotated
+                        .rotated_selector()
+                        .to_macro_string(Some(self), scope, handler)?;
+                let (macro_string, prepare_variables) = rotation.into_sb();
                 tail.map(|(pre_cmds, tail)| {
-                    (pre_cmds, Execute::Rotated(rotation.into(), Box::new(tail)))
+                    (pre_cmds, Execute::Rotated(macro_string, Box::new(tail)))
                 })
             }
             ExecuteBlockHead::Facing(facing) => {
-                let facing = facing.facing_selector().to_macro_string(scope, handler)?;
+                let facing =
+                    facing
+                        .facing_selector()
+                        .to_macro_string(Some(self), scope, handler)?;
+                let (macro_string, prepare_variables) = facing.into_sb();
                 tail.map(|(pre_cmds, tail)| {
-                    (pre_cmds, Execute::Facing(facing.into(), Box::new(tail)))
+                    (pre_cmds, Execute::Facing(macro_string, Box::new(tail)))
                 })
             }
             ExecuteBlockHead::AsAt(as_at) => {
-                let selector = as_at.asat_selector().to_macro_string(scope, handler)?;
-                tail.map(|(pre_cmds, tail)| {
-                    (pre_cmds, Execute::AsAt(selector.into(), Box::new(tail)))
-                })
+                let selector = as_at
+                    .asat_selector()
+                    .to_macro_string(Some(self), scope, handler)?;
+                let (macro_string, prepare_variables) = selector.into_sb();
+                tail.map(|(pre_cmds, tail)| (pre_cmds, Execute::AsAt(macro_string, Box::new(tail))))
             }
             ExecuteBlockHead::On(on) => {
-                let dimension = on.on_selector().to_macro_string(scope, handler)?;
-                tail.map(|(pre_cmds, tail)| {
-                    (pre_cmds, Execute::On(dimension.into(), Box::new(tail)))
-                })
+                let dimension = on
+                    .on_selector()
+                    .to_macro_string(Some(self), scope, handler)?;
+                let (macro_string, prepare_variables) = dimension.into_sb();
+                tail.map(|(pre_cmds, tail)| (pre_cmds, Execute::On(macro_string, Box::new(tail))))
             }
             ExecuteBlockHead::Store(store) => {
-                let store = store.store_selector().to_macro_string(scope, handler)?;
+                let store = store
+                    .store_selector()
+                    .to_macro_string(Some(self), scope, handler)?;
+                let (macro_string, prepare_variables) = store.into_sb();
                 tail.map(|(pre_cmds, tail)| {
-                    (pre_cmds, Execute::Store(store.into(), Box::new(tail)))
+                    (pre_cmds, Execute::Store(macro_string, Box::new(tail)))
                 })
             }
             ExecuteBlockHead::Summon(summon) => {
-                let entity = summon.summon_selector().to_macro_string(scope, handler)?;
+                let entity =
+                    summon
+                        .summon_selector()
+                        .to_macro_string(Some(self), scope, handler)?;
+                let (macro_string, prepare_variables) = entity.into_sb();
                 tail.map(|(pre_cmds, tail)| {
-                    (pre_cmds, Execute::Summon(entity.into(), Box::new(tail)))
+                    (pre_cmds, Execute::Summon(macro_string, Box::new(tail)))
                 })
             }
         })
+    }
+
+    pub(crate) fn transpile_commands_with_variable_macros(
+        &mut self,
+        cmds: Vec<Command>,
+        prepare_variables: BTreeMap<String, (DataLocation, Vec<Command>, Span)>,
+        handler: &impl Handler<base::Error>,
+    ) -> TranspileResult<Vec<Command>> {
+        let storage_name = {
+            let temp = self.get_temp_count(1);
+            let hash = chksum_md5::hash(temp.to_le_bytes());
+            format!("shulkerscript:arguments_{hash}")
+        };
+
+        let (macro_names, mut prepare_cmds, move_cmds) = prepare_variables.into_iter().try_fold(
+            (HashSet::new(), Vec::new(), Vec::new()),
+            |(mut vars, mut prepare_cmds, mut move_cmds),
+             (macro_name, (data_location, var_cmds, span))| {
+                vars.insert(macro_name.clone());
+                prepare_cmds.extend(var_cmds);
+                let cur_move_cmds = self.move_data(
+                    &data_location,
+                    &DataLocation::Storage {
+                        storage_name: storage_name.clone(),
+                        path: macro_name,
+                        r#type: data_location.storage_type(),
+                    },
+                    &span,
+                    handler,
+                )?;
+                move_cmds.extend(cur_move_cmds);
+
+                TranspileResult::Ok((vars, prepare_cmds, move_cmds))
+            },
+        )?;
+
+        prepare_cmds.extend(move_cmds);
+
+        if prepare_cmds.is_empty() && macro_names.is_empty() {
+            Ok(cmds)
+        } else {
+            prepare_cmds.push(Command::Group(
+                Group::new(cmds)
+                    .always_create_function(true)
+                    .block_pass_macros(macro_names)
+                    .data_storage_name(storage_name),
+            ));
+
+            Ok(prepare_cmds)
+        }
     }
 }

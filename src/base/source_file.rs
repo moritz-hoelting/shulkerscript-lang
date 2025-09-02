@@ -219,6 +219,12 @@ impl std::hash::Hash for Span {
     }
 }
 
+impl SourceElement for Span {
+    fn span(&self) -> Span {
+        self.clone()
+    }
+}
+
 impl Span {
     /// Create a span from the given start and end byte indices in the source file.
     ///

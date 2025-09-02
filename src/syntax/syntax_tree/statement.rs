@@ -828,13 +828,15 @@ impl Parser<'_> {
                     parser.parse_statement(handler).map_or_else(
                         |_| {
                             // error recovery
-                            parser.stop_at(|reading| matches!(
-                                reading,
-                                Reading::Atomic(Token::Punctuation(punc)) if punc.punctuation == ';'
-                            ) || matches!(
-                                reading,
-                                Reading::IntoDelimited(punc) if punc.punctuation == '{'
-                            ));
+                            parser.stop_at(|reading| {
+                                matches!(
+                                    reading,
+                                    Reading::Atomic(Token::Punctuation(punc)) if punc.punctuation == ';'
+                                ) || matches!(
+                                    reading,
+                                    Reading::IntoDelimited(punc) if punc.punctuation == '{'
+                                )
+                            });
 
                             // goes after the semicolon or the open brace
                             parser.forward();

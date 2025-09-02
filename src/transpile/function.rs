@@ -449,21 +449,29 @@ impl Transpiler {
                                 Ok(Parameter::Static(string.str_content().to_string().into()))
                             }
                             Expression::Primary(Primary::TemplateStringLiteral(literal)) => {
-                                Ok(Parameter::Static(literal.to_macro_string(scope, handler)?))
+                                Ok(Parameter::Static(literal.to_macro_string(
+                                    Some(self),
+                                    scope,
+                                    handler,
+                                )?))
                             }
                             Expression::Primary(primary @ Primary::Identifier(ident)) => {
                                 let var =
                                     scope.get_variable(ident.span.str()).ok_or_else(|| {
-                                        let err =
-                                            TranspileError::UnknownIdentifier(UnknownIdentifier::from_scope(ident.span(), scope));
+                                        let err = TranspileError::UnknownIdentifier(
+                                            UnknownIdentifier::from_scope(ident.span(), scope),
+                                        );
                                         handler.receive(Box::new(err.clone()));
                                         err
                                     })?;
                                 match var.as_ref() {
                                     VariableData::MacroParameter { macro_name, .. } => {
-                                        Ok(Parameter::Static(MacroString::MacroString(vec![
-                                            MacroStringPart::MacroUsage(macro_name.clone()),
-                                        ])))
+                                        Ok(Parameter::Static(MacroString::MacroString {
+                                            parts: vec![MacroStringPart::MacroUsage(
+                                                macro_name.clone(),
+                                            )],
+                                            prepare_variables: BTreeMap::new(),
+                                        }))
                                     }
 
                                     VariableData::BooleanStorage { .. }
@@ -605,7 +613,10 @@ impl Transpiler {
                                                     crate::util::escape_str(&value).to_string(),
                                                 ),
                                             ),
-                                            MacroString::MacroString(parts) => {
+                                            MacroString::MacroString {
+                                                parts,
+                                                prepare_variables: preparation_cmds,
+                                            } => {
                                                 let parts = parts
                                                     .into_iter()
                                                     .map(|part| match part {
@@ -622,7 +633,10 @@ impl Transpiler {
                                                     .collect();
                                                 statics.insert(
                                                     arg_name.to_string(),
-                                                    MacroString::MacroString(parts),
+                                                    MacroString::MacroString {
+                                                        parts,
+                                                        prepare_variables: preparation_cmds,
+                                                    },
                                                 )
                                             }
                                         };
@@ -634,9 +648,9 @@ impl Transpiler {
                                     } => {
                                         require_dyn_params = true;
                                         setup_cmds.extend(prepare_cmds);
-                                        move_cmds.push(Command::Raw(
-                                                format!(r"data modify storage shulkerscript:function_arguments {arg_name} set from storage {storage_name} {path}")
-                                            ));
+                                        move_cmds.push(Command::Raw(format!(
+                                            r"data modify storage shulkerscript:function_arguments {arg_name} set from storage {storage_name} {path}"
+                                        )));
                                     }
                                 }
                             }
@@ -654,7 +668,9 @@ impl Transpiler {
                                     Parameter::Static(s) => match s.as_str() {
                                         Ok(s) => {
                                             if s.parse::<i32>().is_ok() {
-                                                move_cmds.push(Command::Raw(format!(r"scoreboard players set {target} {objective} {s}")));
+                                                move_cmds.push(Command::Raw(format!(
+                                                    r"scoreboard players set {target} {objective} {s}"
+                                                )));
                                             } else {
                                                 let err = TranspileError::MismatchedTypes(
                                                     MismatchedTypes {
@@ -666,11 +682,19 @@ impl Transpiler {
                                                 return Err(err);
                                             }
                                         }
-                                        Err(parts) => {
-                                            move_cmds.push(Command::UsesMacro(MacroString::MacroString(
-                                                        std::iter::once(MacroStringPart::String(format!("scoreboard players set {target} {objective} ")))
-                                                        .chain(parts.iter().cloned()).collect()
-                                                    ).into()));
+                                        Err((parts, preparation_variables)) => {
+                                            let (macro_string, preparation_variables) = MacroString::MacroString {
+                                                parts: std::iter::once(MacroStringPart::String(
+                                                    format!(
+                                                        "scoreboard players set {target} {objective} "
+                                                    ),
+                                                ))
+                                                .chain(parts.iter().cloned())
+                                                .collect(),
+                                                prepare_variables: preparation_variables.to_owned(),
+                                            }
+                                            .into_sb();
+                                            move_cmds.push(Command::UsesMacro(macro_string));
                                         }
                                     },
                                     Parameter::Storage {
@@ -703,7 +727,10 @@ impl Transpiler {
                                     Parameter::Static(s) => match s.as_str() {
                                         Ok(s) => {
                                             if let Ok(b) = s.parse::<bool>() {
-                                                move_cmds.push(Command::Raw(format!("data modify storage {target_storage_name} {target_path} set value {}", if b { "1b" } else { "0b" })));
+                                                move_cmds.push(Command::Raw(format!(
+                                                    "data modify storage {target_storage_name} {target_path} set value {}",
+                                                    if b { "1b" } else { "0b" }
+                                                )));
                                             } else {
                                                 let err = TranspileError::MismatchedTypes(
                                                     MismatchedTypes {
@@ -715,11 +742,15 @@ impl Transpiler {
                                                 return Err(err);
                                             }
                                         }
-                                        Err(parts) => {
-                                            move_cmds.push(Command::UsesMacro(MacroString::MacroString(
-                                                        std::iter::once(MacroStringPart::String(format!("data modify storage {target_storage_name} {target_path} set value ")))
-                                                        .chain(parts.iter().cloned()).collect()
-                                                    ).into()));
+                                        Err((parts, preparation_cmds)) => {
+                                            let (macro_string, preparation_variables) = MacroString::MacroString {
+                                                parts: std::iter::once(MacroStringPart::String(format!("data modify storage {target_storage_name} {target_path} set value ")))
+                                                    .chain(parts.iter().cloned())
+                                                    .collect(),
+                                                prepare_variables: preparation_cmds.to_owned(),
+                                            }
+                                            .into_sb();
+                                            move_cmds.push(Command::UsesMacro(macro_string));
                                         }
                                     },
                                     Parameter::Storage {
@@ -756,7 +787,10 @@ impl Transpiler {
                                         }
                                         MacroString::String(s)
                                     }
-                                    MacroString::MacroString(mut parts) => {
+                                    MacroString::MacroString {
+                                        mut parts,
+                                        prepare_variables: preparation_cmds,
+                                    } => {
                                         parts.insert(
                                             0,
                                             MacroStringPart::String(format!(r#"{k}:""#)),
@@ -766,7 +800,10 @@ impl Transpiler {
                                             ending.push(',');
                                         }
                                         parts.push(MacroStringPart::String(ending));
-                                        MacroString::MacroString(parts)
+                                        MacroString::MacroString {
+                                            parts,
+                                            prepare_variables: preparation_cmds,
+                                        }
                                     }
                                 }),
                         );
@@ -775,18 +812,18 @@ impl Transpiler {
                             MacroString::String(s) => Command::Raw(format!(
                                 r"data merge storage shulkerscript:function_arguments_{storage_suffix} {{{s}}}"
                             )),
-                            MacroString::MacroString(_) => {
-                                let prefix = MacroString::String(
-                                    format!("data merge storage shulkerscript:function_arguments_{storage_suffix} {{"),
-                                );
-                                Command::UsesMacro(
+                            MacroString::MacroString { .. } => {
+                                let prefix = MacroString::String(format!(
+                                    "data merge storage shulkerscript:function_arguments_{storage_suffix} {{"
+                                ));
+                                let (macro_string, prepare_variables) =
                                     super::util::join_macro_strings([
                                         prefix,
                                         joined_statics,
                                         MacroString::String("}".to_string()),
                                     ])
-                                    .into(),
-                                )
+                                    .into_sb();
+                                Command::UsesMacro(macro_string)
                             }
                         };
                         setup_cmds.push(statics_cmd);
@@ -832,7 +869,7 @@ fn comptime_args_hash(args: &[Option<ComptimeValue>]) -> String {
             ComptimeValue::String(s) => Cow::Borrowed(s.as_str()),
             ComptimeValue::MacroString(s) => match s.as_str() {
                 Ok(s) => s,
-                Err(parts) => {
+                Err((parts, _)) => {
                     let s = parts
                         .iter()
                         .map(|p| match p {

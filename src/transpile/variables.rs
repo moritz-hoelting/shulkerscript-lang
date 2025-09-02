@@ -32,12 +32,12 @@ use super::{
         AssignmentError, IllegalAnnotationContent, IllegalIndexing, IllegalIndexingReason,
         MismatchedTypes, NotComptime,
     },
-    expression::{ComptimeValue, DataLocation, ExpectedType, StorageType},
+    expression::{DataLocation, ExpectedType, StorageType},
     FunctionData, TranspileAnnotationValue, TranspileError, TranspileResult,
 };
 
 #[cfg(feature = "shulkerbox")]
-use super::{internal_functions::InternalFunction, Transpiler};
+use super::{expression::ComptimeValue, internal_functions::InternalFunction, Transpiler};
 
 /// Stores the data required to access a variable.
 #[cfg(feature = "shulkerbox")]
@@ -409,6 +409,8 @@ impl Transpiler {
                 handler,
             )?;
             if is_global {
+                use shulkerbox::datapack::Group;
+
                 let (temp_objective, [temp_target]) = self.get_temp_scoreboard_locations_array();
                 let test_cmd = match declaration.variable_type().keyword {
                     KeywordKind::Int => {
@@ -425,7 +427,7 @@ impl Transpiler {
                     Condition::Atom(
                         format!("score {temp_target} {temp_objective} matches 0").into(),
                     ),
-                    Box::new(Execute::Run(Box::new(Command::Group(cmds)))),
+                    Box::new(Execute::Run(Box::new(Command::Group(Group::new(cmds))))),
                     None,
                 ));
                 Ok(vec![test_exists_cmd, cond_cmd])
@@ -634,9 +636,11 @@ impl Transpiler {
                             } else {
                                 let index_span = match destination {
                                     TranspileAssignmentTarget::Indexed(_, expr) => expr.span(),
-                                    TranspileAssignmentTarget::Identifier(_) => unreachable!(
-                                        "indexing value must be present (checked before)"
-                                    ),
+                                    TranspileAssignmentTarget::Identifier(_) => {
+                                        unreachable!(
+                                            "indexing value must be present (checked before)"
+                                        )
+                                    }
                                 };
                                 let err = TranspileError::IllegalIndexing(IllegalIndexing {
                                     expression: index_span,
@@ -688,9 +692,11 @@ impl Transpiler {
                             } else {
                                 let index_span = match destination {
                                     TranspileAssignmentTarget::Indexed(_, expr) => expr.span(),
-                                    TranspileAssignmentTarget::Identifier(_) => unreachable!(
-                                        "indexing value must be present (checked before)"
-                                    ),
+                                    TranspileAssignmentTarget::Identifier(_) => {
+                                        unreachable!(
+                                            "indexing value must be present (checked before)"
+                                        )
+                                    }
                                 };
                                 let err = TranspileError::IllegalIndexing(IllegalIndexing {
                                     expression: index_span,
@@ -847,18 +853,20 @@ impl Transpiler {
                         // TODO: change invalid criteria if boolean
                         if !crate::util::is_valid_scoreboard_objective_name(&name_eval) {
                             let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                                                    annotation: deobfuscate_annotation.span(),
-                                                    message: "Deobfuscate annotation must be a valid scoreboard objective name.".to_string()
-                                                });
+                                annotation: deobfuscate_annotation.span(),
+                                message: "Deobfuscate annotation must be a valid scoreboard objective name."
+                                    .to_string(),
+                            });
                             handler.receive(Box::new(err.clone()));
                             return Err(err);
                         }
                         Ok(name_eval)
                     } else {
                         let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                                                annotation: deobfuscate_annotation.span(),
-                                                message: "Deobfuscate annotation could not have been evaluated at compile time.".to_string()
-                                            });
+                            annotation: deobfuscate_annotation.span(),
+                            message: "Deobfuscate annotation could not have been evaluated at compile time."
+                                .to_string(),
+                        });
                         handler.receive(Box::new(err.clone()));
                         Err(err)
                     }
@@ -950,34 +958,36 @@ impl Transpiler {
                             // TODO: change invalid criteria if boolean
                             if !crate::util::is_valid_scoreboard_objective_name(&name_eval) {
                                 let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                                            annotation: deobfuscate_annotation.span(),
-                                            message: "Deobfuscate annotation 'name' must be a valid scoreboard objective name.".to_string()
-                                        });
+                                    annotation: deobfuscate_annotation.span(),
+                                    message: "Deobfuscate annotation 'name' must be a valid scoreboard objective name.".to_string(),
+                                });
                                 handler.receive(Box::new(err.clone()));
                                 return Err(err);
                             }
                             if !crate::util::is_valid_scoreboard_target(&target_eval) {
                                 let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                                            annotation: deobfuscate_annotation.span(),
-                                            message: "Deobfuscate annotation 'target' must be a valid scoreboard player name.".to_string()
-                                        });
+                                    annotation: deobfuscate_annotation.span(),
+                                    message: "Deobfuscate annotation 'target' must be a valid scoreboard player name.".to_string(),
+                                });
                                 handler.receive(Box::new(err.clone()));
                                 return Err(err);
                             }
                             Ok((name_eval, target_eval))
                         } else {
                             let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                                        annotation: deobfuscate_annotation.span(),
-                                        message: "Deobfuscate annotation 'name' or 'target' could not have been evaluated at compile time.".to_string()
-                                    });
+                                annotation: deobfuscate_annotation.span(),
+                                message: "Deobfuscate annotation 'name' or 'target' could not have been evaluated at compile time.".to_string(),
+                            });
                             handler.receive(Box::new(err.clone()));
                             Err(err)
                         }
                     } else {
                         let err = TranspileError::IllegalAnnotationContent(IllegalAnnotationContent {
-                                    annotation: deobfuscate_annotation.span(),
-                                    message: "Deobfuscate annotation 'name' and 'target' must be compile time expressions.".to_string()
-                                });
+                            annotation: deobfuscate_annotation.span(),
+                            message:
+                                "Deobfuscate annotation 'name' and 'target' must be compile time expressions."
+                                    .to_string(),
+                        });
                         handler.receive(Box::new(err.clone()));
                         Err(err)
                     }
@@ -1180,10 +1190,39 @@ impl Transpiler {
                         {
                             Ok(Vec::new())
                         } else if matches!(target_type, StorageType::Boolean) {
-                            let cmd = Command::Raw(format!(
-                                        "data modify storage {target_storage_name} {target_path} set from storage {storage_name} {path}"
-                                    ));
+                            let cmd = Command::Raw(format!("data modify storage {target_storage_name} {target_path} set from storage {storage_name} {path}"));
                             Ok(vec![cmd])
+                        } else {
+                            let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                                expression: expression.span(),
+                                expected_type: to.value_type().into(),
+                            });
+                            handler.receive(Box::new(err.clone()));
+                            Err(err)
+                        }
+                    }
+                },
+                StorageType::String => match to {
+                    DataLocation::ScoreboardValue { .. } | DataLocation::Tag { .. } => {
+                        let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                            expression: expression.span(),
+                            expected_type: to.value_type().into(),
+                        });
+                        handler.receive(Box::new(err.clone()));
+                        Err(err)
+                    }
+                    DataLocation::Storage {
+                        storage_name: to_storage_name,
+                        path: to_path,
+                        r#type,
+                    } => {
+                        if r#type == &StorageType::String {
+                            if storage_name == to_storage_name && path == to_path {
+                                Ok(Vec::new())
+                            } else {
+                                let cmd = Command::Raw(format!("data modify storage {to_storage_name} {to_path} set from storage {storage_name} {path}"));
+                                Ok(vec![cmd])
+                            }
                         } else {
                             let err = TranspileError::MismatchedTypes(MismatchedTypes {
                                 expression: expression.span(),
@@ -1206,9 +1245,7 @@ impl Transpiler {
                     if objective == target_objective && score_target == target_target {
                         Ok(Vec::new())
                     } else {
-                        let cmd = Command::Raw(format!(
-                            "scoreboard players operation {target_target} {target_objective} = {score_target} {objective}"
-                        ));
+                        let cmd = Command::Raw(format!("scoreboard players operation {target_target} {target_objective} = {score_target} {objective}"));
                         Ok(vec![cmd])
                     }
                 }

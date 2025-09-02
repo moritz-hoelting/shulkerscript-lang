@@ -173,13 +173,12 @@ impl Function {
             if let Some(incompatible) = self.annotations().iter().find(|a| {
                 ["tick", "load", "uninstall"].contains(&a.assignment().identifier.span.str())
             }) {
-                let err =
-                    error::Error::IncompatibleFunctionAnnotation(IncompatibleFunctionAnnotation {
-                        span: incompatible.assignment().identifier.span.clone(),
-                        reason:
-                            "functions with the `tick`, `load` or `uninstall` annotation cannot have parameters"
-                                .to_string(),
-                    });
+                let err = error::Error::IncompatibleFunctionAnnotation(IncompatibleFunctionAnnotation {
+                    span: incompatible.assignment().identifier.span.clone(),
+                    reason:
+                        "functions with the `tick`, `load` or `uninstall` annotation cannot have parameters"
+                            .to_string(),
+                });
                 handler.receive(err.clone());
                 return Err(err);
             } else if parameters
@@ -191,13 +190,12 @@ impl Function {
                     .iter()
                     .find(|a| a.assignment().identifier.span.str() == "deobfuscate")
                 {
-                    let err =
-                            error::Error::IncompatibleFunctionAnnotation(IncompatibleFunctionAnnotation {
-                                span: incompatible.assignment().identifier.span.clone(),
-                                reason:
-                                    "functions with the `deobfuscate` annotation cannot have compile-time parameters"
-                                        .to_string(),
-                            });
+                    let err = error::Error::IncompatibleFunctionAnnotation(IncompatibleFunctionAnnotation {
+                        span: incompatible.assignment().identifier.span.clone(),
+                        reason:
+                            "functions with the `deobfuscate` annotation cannot have compile-time parameters"
+                                .to_string(),
+                    });
                     handler.receive(err.clone());
                     return Err(err);
                 }

@@ -1,8 +1,6 @@
 //! The expression transpiler.
 
-use std::{fmt::Display, string::ToString};
-
-use super::util::MacroString;
+use std::fmt::Display;
 
 #[cfg(feature = "shulkerbox")]
 use enum_as_inner::EnumAsInner;
@@ -15,6 +13,7 @@ use super::{
     error::{
         IllegalIndexing, IllegalIndexingReason, MismatchedTypes, NotComptime, UnknownIdentifier,
     },
+    util::MacroString,
     Scope, TranspileResult, Transpiler, VariableData,
 };
 #[cfg(feature = "shulkerbox")]
@@ -35,6 +34,7 @@ use crate::{
 use std::sync::Arc;
 
 /// Compile-time evaluated value
+#[cfg(feature = "shulkerbox")]
 #[allow(missing_docs)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComptimeValue {
@@ -44,6 +44,7 @@ pub enum ComptimeValue {
     MacroString(MacroString),
 }
 
+#[cfg(feature = "shulkerbox")]
 impl ComptimeValue {
     /// Returns the value as a string not containing a macro.
     #[must_use]
@@ -152,7 +153,8 @@ impl From<ValueType> for ExpectedType {
 
 /// Location of data
 #[allow(missing_docs)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DataLocation {
     ScoreboardValue {
         objective: String,
@@ -179,21 +181,34 @@ impl DataLocation {
             Self::Storage { r#type, .. } => match r#type {
                 StorageType::Boolean => ValueType::Boolean,
                 StorageType::Byte | StorageType::Int | StorageType::Long => ValueType::Integer,
+                StorageType::String => ValueType::String,
                 StorageType::Double => todo!("Double storage type"),
             },
+        }
+    }
+
+    /// Returns the storage type of the data location.
+    #[must_use]
+    pub fn storage_type(&self) -> StorageType {
+        match self {
+            Self::ScoreboardValue { .. } => StorageType::Int,
+            Self::Tag { .. } => StorageType::Boolean,
+            Self::Storage { r#type, .. } => *r#type,
         }
     }
 }
 
 /// The type of a storage.
 #[allow(missing_docs)]
-#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StorageType {
     Boolean,
     Byte,
     Int,
     Long,
     Double,
+    String,
 }
 
 impl StorageType {
@@ -205,6 +220,7 @@ impl StorageType {
             Self::Int => "",
             Self::Long => "l",
             Self::Double => "d",
+            Self::String => "",
         }
     }
 
@@ -216,6 +232,7 @@ impl StorageType {
             Self::Int => "int",
             Self::Long => "long",
             Self::Double => "double",
+            Self::String => "string",
         }
     }
 }
@@ -413,15 +430,9 @@ impl Primary {
                 })
                 .and_then(|val| val),
             Self::TemplateStringLiteral(template_string_literal) => {
-                use crate::syntax::syntax_tree::expression::TemplateStringLiteralPart;
-
-                if template_string_literal
-                    .parts()
-                    .iter()
-                    .any(|part| matches!(part, TemplateStringLiteralPart::Expression { .. }))
-                {
+                if template_string_literal.contains_expression() {
                     template_string_literal
-                        .to_macro_string(scope, handler)
+                        .to_macro_string(None, scope, handler)
                         .map(ComptimeValue::MacroString)
                         .map_err(|_| NotComptime {
                             expression: template_string_literal.span(),
@@ -1310,7 +1321,9 @@ impl Transpiler {
                             handler,
                         )?;
                         self.initialize_constant_score(-1);
-                        let negate_cmd = Command::Raw(format!("scoreboard players operation {score_target} {objective} *= -1 shu_constants"));
+                        let negate_cmd = Command::Raw(format!(
+                            "scoreboard players operation {score_target} {objective} *= -1 shu_constants"
+                        ));
                         expr_cmds.push(negate_cmd);
 
                         Ok(expr_cmds)
@@ -1377,7 +1390,9 @@ impl Transpiler {
                     let run_cmd = if run_cmds.len() == 1 {
                         run_cmds.into_iter().next().expect("length is 1")
                     } else {
-                        Command::Group(run_cmds)
+                        use shulkerbox::datapack::Group;
+
+                        Command::Group(Group::new(run_cmds))
                     };
                     match target {
                         DataLocation::ScoreboardValue { objective, target } => {
@@ -1416,12 +1431,18 @@ impl Transpiler {
                                 self.get_temp_storage_locations_array();
 
                             let store_cmd = Command::Execute(Execute::Store(
-                                format!("success storage {temp_storage_name} {temp_storage_path} boolean 1.0").into(), 
-                                Box::new(Execute::Run(Box::new(run_cmd)))
+                                format!(
+                                    "success storage {temp_storage_name} {temp_storage_path} boolean 1.0"
+                                )
+                                .into(),
+                                Box::new(Execute::Run(Box::new(run_cmd))),
                             ));
 
                             let if_cmd = Command::Execute(Execute::If(
-                                Condition::Atom(format!("data storage {temp_storage_name} {{{temp_storage_name}:1b}}").into()),
+                                Condition::Atom(
+                                    format!("data storage {temp_storage_name} {{{temp_storage_name}:1b}}")
+                                        .into(),
+                                ),
                                 Box::new(Execute::Run(Box::new(success_cmd))),
                                 None,
                             ));
@@ -1676,12 +1697,15 @@ impl Transpiler {
                 Vec::new(),
                 ExtendedCondition::Runtime(Condition::Atom(s.str_content().to_string().into())),
             )),
-            Primary::TemplateStringLiteral(template_string) => Ok((
-                Vec::new(),
-                ExtendedCondition::Runtime(Condition::Atom(
-                    template_string.to_macro_string(scope, handler)?.into(),
-                )),
-            )),
+            Primary::TemplateStringLiteral(template_string) => {
+                let (macro_string, prepare_variables) = template_string
+                    .to_macro_string(Some(self), scope, handler)?
+                    .into_sb();
+                Ok((
+                    Vec::new(),
+                    ExtendedCondition::Runtime(Condition::Atom(macro_string)),
+                ))
+            }
             Primary::FunctionCall(func) => {
                 if func
                     .arguments()
@@ -1858,13 +1882,16 @@ impl Transpiler {
                         ComptimeValue::String(s) => Ok((
                             Vec::new(),
                             ExtendedCondition::Runtime(Condition::Atom(
-                                MacroString::String(s).into(),
+                                shulkerbox::util::MacroString::String(s),
                             )),
                         )),
-                        ComptimeValue::MacroString(s) => Ok((
-                            Vec::new(),
-                            ExtendedCondition::Runtime(Condition::Atom(s.into())),
-                        )),
+                        ComptimeValue::MacroString(s) => {
+                            let (macro_string, prepare_variables) = s.into_sb();
+                            Ok((
+                                Vec::new(),
+                                ExtendedCondition::Runtime(Condition::Atom(macro_string)),
+                            ))
+                        }
                     },
                 ),
             Primary::Prefix(prefix) => match prefix.operator() {
@@ -1917,10 +1944,13 @@ impl Transpiler {
                     Vec::new(),
                     ExtendedCondition::Runtime(Condition::Atom(value.into())),
                 )),
-                Ok(ComptimeValue::MacroString(value)) => Ok((
-                    Vec::new(),
-                    ExtendedCondition::Runtime(Condition::Atom(value.into())),
-                )),
+                Ok(ComptimeValue::MacroString(value)) => {
+                    let (macro_string, prepare_variables) = value.into_sb();
+                    Ok((
+                        Vec::new(),
+                        ExtendedCondition::Runtime(Condition::Atom(macro_string)),
+                    ))
+                }
                 Ok(ComptimeValue::Boolean(boolean)) => {
                     Ok((Vec::new(), ExtendedCondition::Comptime(boolean)))
                 }
@@ -2078,6 +2108,14 @@ impl Transpiler {
                     handler.receive(Box::new(err.clone()));
                     return Err(err);
                 }
+                StorageType::String => {
+                    let err = TranspileError::MismatchedTypes(MismatchedTypes {
+                        expected_type: ExpectedType::String,
+                        expression: binary.span(),
+                    });
+                    handler.receive(Box::new(err.clone()));
+                    return Err(err);
+                }
             },
         };
 
@@ -2204,6 +2242,7 @@ impl Transpiler {
         }
     }
 
+    #[expect(clippy::too_many_lines)]
     fn store_comptime_value(
         &mut self,
         value: &ComptimeValue,
@@ -2294,12 +2333,15 @@ impl Transpiler {
                         r#type: StorageType::Boolean,
                         ..
                     }
-                    | DataLocation::Tag { .. } => self.store_condition_success(
-                        ExtendedCondition::Runtime(Condition::Atom(value.clone().into())),
-                        target,
-                        source,
-                        handler,
-                    ),
+                    | DataLocation::Tag { .. } => {
+                        let (macro_string, prepare_variables) = value.clone().into_sb();
+                        self.store_condition_success(
+                            ExtendedCondition::Runtime(Condition::Atom(macro_string)),
+                            target,
+                            source,
+                            handler,
+                        )
+                    }
                     // DataLocation::Storage { storage_name, path, r#type: StorageType::String } => todo!("implement storage string")
                     _ => {
                         let err = TranspileError::MismatchedTypes(MismatchedTypes {
@@ -2370,6 +2412,12 @@ impl Transpiler {
         Ok(vec![cmd])
     }
 
+    pub(super) fn get_temp_count(&mut self, amount: usize) -> usize {
+        let current = self.temp_counter;
+        self.temp_counter = self.temp_counter.wrapping_add(amount);
+        current
+    }
+
     /// Get temporary scoreboard locations.
     pub(super) fn get_temp_scoreboard_locations(&mut self, amount: usize) -> (String, Vec<String>) {
         let objective = "shu_temp_".to_string()
@@ -2378,19 +2426,19 @@ impl Transpiler {
         self.datapack
             .register_scoreboard(&objective, None::<&str>, None::<&str>);
 
+        let temp_count = self.get_temp_count(amount);
+
         let targets = (0..amount)
             .map(|i| {
                 chksum_md5::hash(format!(
                     "{namespace}\0{j}",
                     namespace = self.main_namespace_name,
-                    j = i + self.temp_counter
+                    j = i + temp_count
                 ))
                 .to_hex_lowercase()
                 .split_off(16)
             })
             .collect();
-
-        self.temp_counter = self.temp_counter.wrapping_add(amount);
 
         (objective, targets)
     }
@@ -2411,19 +2459,19 @@ impl Transpiler {
         let storage_name = "shulkerscript:temp_".to_string()
             + &chksum_md5::hash(&self.main_namespace_name).to_hex_lowercase();
 
+        let temp_count = self.get_temp_count(amount);
+
         let paths = (0..amount)
             .map(|i| {
                 chksum_md5::hash(format!(
                     "{namespace}\0{j}",
                     namespace = self.main_namespace_name,
-                    j = i + self.temp_counter
+                    j = i + temp_count
                 ))
                 .to_hex_lowercase()
                 .split_off(16)
             })
             .collect::<Vec<_>>();
-
-        self.temp_counter = self.temp_counter.wrapping_add(amount);
 
         self.temp_data_storage_locations.extend(
             paths

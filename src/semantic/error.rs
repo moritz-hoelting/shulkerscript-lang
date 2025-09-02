@@ -81,7 +81,10 @@ impl Display for ConflictingFunctionNames {
             "{}",
             Message::new(
                 Severity::Error,
-                format!("the following function declaration conflicts with an existing function with name `{}`", self.name)
+                format!(
+                    "the following function declaration conflicts with an existing function with name `{}`",
+                    self.name
+                )
             )
         )?;
 

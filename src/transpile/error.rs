@@ -465,10 +465,7 @@ impl Display for IllegalIndexingReason {
                 write!(f, "The expression cannot be indexed.")
             }
             Self::InvalidComptimeType { expected } => {
-                write!(
-                    f,
-                    "The expression can only be indexed with type {expected} that can be evaluated at compile time."
-                )
+                write!(f, "The expression can only be indexed with type {expected} that can be evaluated at compile time.")
             }
             Self::IndexOutOfBounds { index, length } => {
                 write!(
