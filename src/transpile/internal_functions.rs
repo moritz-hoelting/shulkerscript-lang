@@ -589,8 +589,7 @@ fn print_function(
     let cmd = format!("tellraw {target} {print_args}");
 
     let cmd = if contains_macro {
-        let (macro_string, prepare_variables) =
-            cmd.parse::<MacroString>().expect("cannot fail").into_sb();
+        let (macro_string, _) = cmd.parse::<MacroString>().expect("cannot fail").into_sb();
         Command::UsesMacro(macro_string)
     } else {
         Command::Raw(cmd)

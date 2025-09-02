@@ -682,8 +682,8 @@ impl Transpiler {
                                                 return Err(err);
                                             }
                                         }
-                                        Err((parts, preparation_variables)) => {
-                                            let (macro_string, preparation_variables) = MacroString::MacroString {
+                                        Err((parts, prepare_variables)) => {
+                                            let (macro_string, prepare_variables) = MacroString::MacroString {
                                                 parts: std::iter::once(MacroStringPart::String(
                                                     format!(
                                                         "scoreboard players set {target} {objective} "
@@ -691,10 +691,16 @@ impl Transpiler {
                                                 ))
                                                 .chain(parts.iter().cloned())
                                                 .collect(),
-                                                prepare_variables: preparation_variables.to_owned(),
+                                                prepare_variables: prepare_variables.to_owned(),
                                             }
                                             .into_sb();
-                                            move_cmds.push(Command::UsesMacro(macro_string));
+                                            let cmds = self
+                                                .transpile_commands_with_variable_macros(
+                                                    vec![Command::UsesMacro(macro_string)],
+                                                    prepare_variables,
+                                                    handler,
+                                                )?;
+                                            move_cmds.extend(cmds);
                                         }
                                     },
                                     Parameter::Storage {
@@ -742,15 +748,21 @@ impl Transpiler {
                                                 return Err(err);
                                             }
                                         }
-                                        Err((parts, preparation_cmds)) => {
-                                            let (macro_string, preparation_variables) = MacroString::MacroString {
+                                        Err((parts, prepare_cmds)) => {
+                                            let (macro_string, prepare_variables) = MacroString::MacroString {
                                                 parts: std::iter::once(MacroStringPart::String(format!("data modify storage {target_storage_name} {target_path} set value ")))
                                                     .chain(parts.iter().cloned())
                                                     .collect(),
-                                                prepare_variables: preparation_cmds.to_owned(),
+                                                prepare_variables: prepare_cmds.to_owned(),
                                             }
                                             .into_sb();
-                                            move_cmds.push(Command::UsesMacro(macro_string));
+                                            let cmds = self
+                                                .transpile_commands_with_variable_macros(
+                                                    vec![Command::UsesMacro(macro_string)],
+                                                    prepare_variables,
+                                                    handler,
+                                                )?;
+                                            move_cmds.extend(cmds);
                                         }
                                     },
                                     Parameter::Storage {
@@ -808,10 +820,10 @@ impl Transpiler {
                                 }),
                         );
                         let storage_suffix = function_location.replace(['/', ':'], "_");
-                        let statics_cmd = match joined_statics {
-                            MacroString::String(s) => Command::Raw(format!(
+                        let statics_cmds = match joined_statics {
+                            MacroString::String(s) => vec![Command::Raw(format!(
                                 r"data merge storage shulkerscript:function_arguments_{storage_suffix} {{{s}}}"
-                            )),
+                            ))],
                             MacroString::MacroString { .. } => {
                                 let prefix = MacroString::String(format!(
                                     "data merge storage shulkerscript:function_arguments_{storage_suffix} {{"
@@ -823,10 +835,14 @@ impl Transpiler {
                                         MacroString::String("}".to_string()),
                                     ])
                                     .into_sb();
-                                Command::UsesMacro(macro_string)
+                                self.transpile_commands_with_variable_macros(
+                                    vec![Command::UsesMacro(macro_string)],
+                                    prepare_variables,
+                                    handler,
+                                )?
                             }
                         };
-                        setup_cmds.push(statics_cmd);
+                        setup_cmds.extend(statics_cmds);
                         setup_cmds.extend(move_cmds);
 
                         Ok(TranspiledFunctionArguments::Dynamic(setup_cmds))

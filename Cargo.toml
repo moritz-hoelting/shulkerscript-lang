@@ -30,12 +30,12 @@ derive_more = { version = "2.0.1", default-features = false, features = [ "deref
 enum-as-inner = "0.6.0"
 getset = "0.1.2"
 itertools = "0.14.0"
-mlua = { version = "0.10.2", features = ["lua54", "vendored"], optional = true }
+mlua = { version = "0.11.3", features = ["lua54", "vendored"], optional = true }
 pathdiff = "0.2.3"
 serde = { version = "1.0.217", features = ["derive"], optional = true }
 serde_json = { version = "1.0.138", optional = true }
 # shulkerbox = { version = "0.1.0", default-features = false, optional = true }
-shulkerbox = { git = "https://github.com/moritz-hoelting/shulkerbox", rev = "89709834da6f39840caa9c6a2eadbdececdc7d44", default-features = false, optional = true }
+shulkerbox = { git = "https://github.com/moritz-hoelting/shulkerbox", rev = "d4689c696a35328c041bcbbfd203abd5818c46d3", default-features = false, optional = true }
 strsim = "0.11.1"
 strum = { version = "0.27.0", features = ["derive"] }
 thiserror = "2.0.11"

@@ -17,7 +17,7 @@ use crate::{
 
 use super::util::{MacroString, MacroStringPart};
 
-type ShulkerboxMacroStringMap = BTreeMap<String, (DataLocation, Vec<Command>, Span)>;
+pub(crate) type ShulkerboxMacroStringMap = BTreeMap<String, (DataLocation, Vec<Command>, Span)>;
 
 impl MacroString {
     pub fn into_sb(self) -> (ExtMacroString, ShulkerboxMacroStringMap) {

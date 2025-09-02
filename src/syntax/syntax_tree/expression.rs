@@ -984,8 +984,11 @@ impl Parser<'_> {
         &mut self,
         handler: &impl Handler<base::Error>,
     ) -> ParseResult<AnyStringLiteral> {
-        match self.next_significant_token() {
-            Reading::Atomic(Token::StringLiteral(literal)) => Ok(literal.into()),
+        match self.stop_at_significant() {
+            Reading::Atomic(Token::StringLiteral(literal)) => {
+                self.forward();
+                Ok(literal.into())
+            }
             Reading::Atomic(Token::Punctuation(punc)) if punc.punctuation == '`' => self
                 .parse_template_string_literal(handler)
                 .map(AnyStringLiteral::TemplateStringLiteral),

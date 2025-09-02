@@ -812,7 +812,7 @@ impl Parser<'_> {
             }
 
             Reading::Atomic(Token::Keyword(keyword)) if keyword.keyword.starts_execute_block() => {
-                // eat the as keyword
+                // eat the keyword
                 self.forward();
 
                 let argument = match self.stop_at_significant() {

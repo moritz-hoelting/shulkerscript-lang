@@ -3,6 +3,9 @@
 use std::fmt::Display;
 
 #[cfg(feature = "shulkerbox")]
+use std::collections::BTreeMap;
+
+#[cfg(feature = "shulkerbox")]
 use enum_as_inner::EnumAsInner;
 
 #[cfg(feature = "shulkerbox")]
@@ -25,6 +28,7 @@ use crate::{
         Primary,
     },
     transpile::{
+        conversions::ShulkerboxMacroStringMap,
         error::{FunctionArgumentsNotAllowed, MissingValue},
         variables::FunctionVariableDataType,
         TranspileError,
@@ -217,10 +221,9 @@ impl StorageType {
     pub fn suffix(&self) -> &'static str {
         match self {
             Self::Boolean | Self::Byte => "b",
-            Self::Int => "",
+            Self::Int | Self::String => "",
             Self::Long => "l",
             Self::Double => "d",
-            Self::String => "",
         }
     }
 
@@ -1291,14 +1294,14 @@ impl Transpiler {
                         ..
                     } | DataLocation::Tag { .. }
                 ) {
-                    let (mut cmds, cond) =
+                    let (mut cmds, prepare_variables, cond) =
                         self.transpile_primary_expression_as_condition(primary, scope, handler)?;
 
                     let store_cmds =
                         self.store_condition_success(cond, target, primary, handler)?;
                     cmds.extend(store_cmds);
 
-                    Ok(cmds)
+                    self.transpile_commands_with_variable_macros(cmds, prepare_variables, handler)
                 } else {
                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
                         expected_type: target.value_type().into(),
@@ -1375,14 +1378,14 @@ impl Transpiler {
                     }
                 },
                 PrefixOperator::LogicalNot(_) => {
-                    let (mut cmds, cond) =
+                    let (mut cmds, prepare_variables, cond) =
                         self.transpile_primary_expression_as_condition(primary, scope, handler)?;
 
                     let store_cmds =
                         self.store_condition_success(cond, target, primary, handler)?;
                     cmds.extend(store_cmds);
 
-                    Ok(cmds)
+                    self.transpile_commands_with_variable_macros(cmds, prepare_variables, handler)
                 }
                 PrefixOperator::Run(_) => {
                     let run_cmds =
@@ -1646,13 +1649,13 @@ impl Transpiler {
                 | BinaryOperator::NotEqual(..)
                 | BinaryOperator::LogicalAnd(..)
                 | BinaryOperator::LogicalOr(..) => {
-                    let (mut cmds, cond) =
+                    let (mut cmds, prepare_variables, cond) =
                         self.transpile_binary_expression_as_condition(binary, scope, handler)?;
 
                     let store_cmds = self.store_condition_success(cond, target, binary, handler)?;
                     cmds.extend(store_cmds);
 
-                    Ok(cmds)
+                    self.transpile_commands_with_variable_macros(cmds, prepare_variables, handler)
                 }
             }
         }
@@ -1663,7 +1666,7 @@ impl Transpiler {
         expression: &Expression,
         scope: &Arc<super::Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<(Vec<Command>, ExtendedCondition)> {
+    ) -> TranspileResult<(Vec<Command>, ShulkerboxMacroStringMap, ExtendedCondition)> {
         match expression {
             Expression::Primary(primary) => {
                 self.transpile_primary_expression_as_condition(primary, scope, handler)
@@ -1680,11 +1683,15 @@ impl Transpiler {
         primary: &Primary,
         scope: &Arc<super::Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<(Vec<Command>, ExtendedCondition)> {
+    ) -> TranspileResult<(Vec<Command>, ShulkerboxMacroStringMap, ExtendedCondition)> {
+        use std::collections::BTreeMap;
+
         match primary {
-            Primary::Boolean(boolean) => {
-                Ok((Vec::new(), ExtendedCondition::Comptime(boolean.value())))
-            }
+            Primary::Boolean(boolean) => Ok((
+                Vec::new(),
+                BTreeMap::new(),
+                ExtendedCondition::Comptime(boolean.value()),
+            )),
             Primary::Integer(_) => {
                 let err = TranspileError::MismatchedTypes(MismatchedTypes {
                     expected_type: ExpectedType::Boolean,
@@ -1695,6 +1702,7 @@ impl Transpiler {
             }
             Primary::StringLiteral(s) => Ok((
                 Vec::new(),
+                BTreeMap::new(),
                 ExtendedCondition::Runtime(Condition::Atom(s.str_content().to_string().into())),
             )),
             Primary::TemplateStringLiteral(template_string) => {
@@ -1703,6 +1711,7 @@ impl Transpiler {
                     .into_sb();
                 Ok((
                     Vec::new(),
+                    prepare_variables,
                     ExtendedCondition::Runtime(Condition::Atom(macro_string)),
                 ))
             }
@@ -1730,6 +1739,7 @@ impl Transpiler {
 
                     Ok((
                         Vec::new(),
+                        BTreeMap::new(),
                         ExtendedCondition::Runtime(Condition::Atom(
                             format!("function {func_location}").into(),
                         )),
@@ -1742,12 +1752,14 @@ impl Transpiler {
                     match variable {
                         VariableData::BooleanStorage { storage_name, path } => Ok((
                             Vec::new(),
+                            BTreeMap::new(),
                             ExtendedCondition::Runtime(Condition::Atom(
                                 format!("data storage {storage_name} {{{path}: 1b}}").into(),
                             )),
                         )),
                         VariableData::MacroParameter { macro_name, .. } => Ok((
                             Vec::new(),
+                            BTreeMap::new(),
                             ExtendedCondition::Runtime(Condition::Atom(
                                 shulkerbox::util::MacroString::MacroString(vec![
                                     shulkerbox::util::MacroStringPart::MacroUsage(
@@ -1806,6 +1818,7 @@ impl Transpiler {
                                 {
                                     Ok((
                                         Vec::new(),
+                                        BTreeMap::new(),
                                         ExtendedCondition::Runtime(Condition::Atom(
                                             format!("data storage {storage_name} {{{path}: 1b}}")
                                                 .into(),
@@ -1869,7 +1882,7 @@ impl Transpiler {
                     },
                     |value| match value {
                         ComptimeValue::Boolean(b) => {
-                            Ok((Vec::new(), ExtendedCondition::Comptime(b)))
+                            Ok((Vec::new(), BTreeMap::new(), ExtendedCondition::Comptime(b)))
                         }
                         ComptimeValue::Integer(_) => {
                             let err = TranspileError::MismatchedTypes(MismatchedTypes {
@@ -1881,6 +1894,7 @@ impl Transpiler {
                         }
                         ComptimeValue::String(s) => Ok((
                             Vec::new(),
+                            BTreeMap::new(),
                             ExtendedCondition::Runtime(Condition::Atom(
                                 shulkerbox::util::MacroString::String(s),
                             )),
@@ -1889,6 +1903,7 @@ impl Transpiler {
                             let (macro_string, prepare_variables) = s.into_sb();
                             Ok((
                                 Vec::new(),
+                                prepare_variables,
                                 ExtendedCondition::Runtime(Condition::Atom(macro_string)),
                             ))
                         }
@@ -1896,13 +1911,15 @@ impl Transpiler {
                 ),
             Primary::Prefix(prefix) => match prefix.operator() {
                 PrefixOperator::LogicalNot(_) => {
-                    let (cmds, cond) = self.transpile_primary_expression_as_condition(
-                        prefix.operand(),
-                        scope,
-                        handler,
-                    )?;
+                    let (cmds, prepare_variables, cond) = self
+                        .transpile_primary_expression_as_condition(
+                            prefix.operand(),
+                            scope,
+                            handler,
+                        )?;
                     Ok((
                         cmds,
+                        prepare_variables,
                         match cond {
                             ExtendedCondition::Runtime(cond) => {
                                 ExtendedCondition::Runtime(Condition::Not(Box::new(cond)))
@@ -1928,7 +1945,7 @@ impl Transpiler {
                         scope,
                         handler,
                     )?;
-                    Ok((store_cmds, cond))
+                    Ok((store_cmds, BTreeMap::new(), cond))
                 }
                 PrefixOperator::Negate(_) => {
                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
@@ -1942,18 +1959,22 @@ impl Transpiler {
             Primary::Lua(lua) => match lua.eval_comptime(scope, handler)? {
                 Ok(ComptimeValue::String(value)) => Ok((
                     Vec::new(),
+                    BTreeMap::new(),
                     ExtendedCondition::Runtime(Condition::Atom(value.into())),
                 )),
                 Ok(ComptimeValue::MacroString(value)) => {
                     let (macro_string, prepare_variables) = value.into_sb();
                     Ok((
                         Vec::new(),
+                        prepare_variables,
                         ExtendedCondition::Runtime(Condition::Atom(macro_string)),
                     ))
                 }
-                Ok(ComptimeValue::Boolean(boolean)) => {
-                    Ok((Vec::new(), ExtendedCondition::Comptime(boolean)))
-                }
+                Ok(ComptimeValue::Boolean(boolean)) => Ok((
+                    Vec::new(),
+                    BTreeMap::new(),
+                    ExtendedCondition::Comptime(boolean),
+                )),
                 _ => {
                     let err = TranspileError::MismatchedTypes(MismatchedTypes {
                         expected_type: ExpectedType::Boolean,
@@ -1971,7 +1992,7 @@ impl Transpiler {
         binary: &Binary,
         scope: &Arc<super::Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<(Vec<Command>, ExtendedCondition)> {
+    ) -> TranspileResult<(Vec<Command>, ShulkerboxMacroStringMap, ExtendedCondition)> {
         match binary.operator() {
             BinaryOperator::Equal(..)
             | BinaryOperator::NotEqual(..)
@@ -1980,7 +2001,9 @@ impl Transpiler {
             | BinaryOperator::LessThan(_)
             | BinaryOperator::LessThanOrEqual(..) => self
                 .transpile_comparison_operator(binary, scope, handler)
-                .map(|(cmds, cond)| (cmds, ExtendedCondition::Runtime(cond))),
+                .map(|(cmds, prepare_variables, cond)| {
+                    (cmds, prepare_variables, ExtendedCondition::Runtime(cond))
+                }),
             BinaryOperator::LogicalAnd(..) | BinaryOperator::LogicalOr(..) => {
                 self.transpile_logic_operator(binary, scope, handler)
             }
@@ -2132,7 +2155,7 @@ impl Transpiler {
         binary: &Binary,
         scope: &Arc<super::Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<(Vec<Command>, Condition)> {
+    ) -> TranspileResult<(Vec<Command>, ShulkerboxMacroStringMap, Condition)> {
         let invert = matches!(binary.operator(), BinaryOperator::NotEqual(..));
 
         // TODO: evaluate comptime values and compare using `matches` and integer ranges
@@ -2177,6 +2200,7 @@ impl Transpiler {
 
         Ok((
             left_cmds.into_iter().chain(right_cmds).collect(),
+            BTreeMap::new(),
             if invert {
                 Condition::Not(Box::new(condition))
             } else {
@@ -2190,38 +2214,45 @@ impl Transpiler {
         binary: &Binary,
         scope: &Arc<super::Scope>,
         handler: &impl Handler<base::Error>,
-    ) -> TranspileResult<(Vec<Command>, ExtendedCondition)> {
+    ) -> TranspileResult<(Vec<Command>, ShulkerboxMacroStringMap, ExtendedCondition)> {
         let left = binary.left_operand().as_ref();
         let right = binary.right_operand().as_ref();
 
-        let (left_cmds, left_cond) =
+        let (left_cmds, mut left_prep_variables, left_cond) =
             self.transpile_expression_as_condition(left, scope, handler)?;
-        let (right_cmds, right_cond) =
+        let (right_cmds, right_prep_variables, right_cond) =
             self.transpile_expression_as_condition(right, scope, handler)?;
+        left_prep_variables.extend(right_prep_variables);
+        let prep_variables = left_prep_variables;
 
         match (binary.operator(), left_cond, right_cond) {
             (BinaryOperator::LogicalAnd(..), ExtendedCondition::Comptime(true), other)
             | (BinaryOperator::LogicalOr(..), ExtendedCondition::Comptime(false), other) => {
-                Ok((right_cmds, other))
+                Ok((right_cmds, prep_variables, other))
             }
             (BinaryOperator::LogicalAnd(..), other, ExtendedCondition::Comptime(true))
             | (BinaryOperator::LogicalOr(..), other, ExtendedCondition::Comptime(false)) => {
-                Ok((left_cmds, other))
+                Ok((left_cmds, prep_variables, other))
             }
             (BinaryOperator::LogicalAnd(..), ExtendedCondition::Comptime(false), _)
-            | (BinaryOperator::LogicalAnd(..), _, ExtendedCondition::Comptime(false)) => {
-                Ok((Vec::new(), ExtendedCondition::Comptime(false)))
-            }
+            | (BinaryOperator::LogicalAnd(..), _, ExtendedCondition::Comptime(false)) => Ok((
+                Vec::new(),
+                BTreeMap::new(),
+                ExtendedCondition::Comptime(false),
+            )),
             (BinaryOperator::LogicalOr(..), ExtendedCondition::Comptime(true), _)
-            | (BinaryOperator::LogicalOr(..), _, ExtendedCondition::Comptime(true)) => {
-                Ok((Vec::new(), ExtendedCondition::Comptime(true)))
-            }
+            | (BinaryOperator::LogicalOr(..), _, ExtendedCondition::Comptime(true)) => Ok((
+                Vec::new(),
+                BTreeMap::new(),
+                ExtendedCondition::Comptime(true),
+            )),
             (
                 BinaryOperator::LogicalAnd(..),
                 ExtendedCondition::Runtime(left_cond),
                 ExtendedCondition::Runtime(right_cond),
             ) => Ok((
                 left_cmds.into_iter().chain(right_cmds).collect(),
+                prep_variables,
                 ExtendedCondition::Runtime(Condition::And(
                     Box::new(left_cond),
                     Box::new(right_cond),
@@ -2233,6 +2264,7 @@ impl Transpiler {
                 ExtendedCondition::Runtime(right_cond),
             ) => Ok((
                 left_cmds.into_iter().chain(right_cmds).collect(),
+                prep_variables,
                 ExtendedCondition::Runtime(Condition::Or(
                     Box::new(left_cond),
                     Box::new(right_cond),
@@ -2335,10 +2367,16 @@ impl Transpiler {
                     }
                     | DataLocation::Tag { .. } => {
                         let (macro_string, prepare_variables) = value.clone().into_sb();
-                        self.store_condition_success(
+                        let cmds = self.store_condition_success(
                             ExtendedCondition::Runtime(Condition::Atom(macro_string)),
                             target,
                             source,
+                            handler,
+                        )?;
+
+                        self.transpile_commands_with_variable_macros(
+                            cmds,
+                            prepare_variables,
                             handler,
                         )
                     }
