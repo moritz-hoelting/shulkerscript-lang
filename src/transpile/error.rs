@@ -3,6 +3,7 @@
 use std::fmt::Display;
 
 use getset::Getters;
+use oxford_join::OxfordJoin as _;
 
 use crate::{
     base::{
@@ -12,14 +13,12 @@ use crate::{
     semantic::error::{ConflictingFunctionNames, InvalidFunctionArguments, UnexpectedExpression},
 };
 
-use super::{expression::ExpectedType, FunctionData};
+use super::expression::ExpectedType;
 
 /// Errors that can occur during transpilation.
 #[allow(clippy::module_name_repetitions, missing_docs)]
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum TranspileError {
-    #[error(transparent)]
-    MissingFunctionDeclaration(#[from] MissingFunctionDeclaration),
     #[error(transparent)]
     UnexpectedExpression(#[from] UnexpectedExpression),
     #[error("Lua code evaluation is disabled.")]
@@ -52,101 +51,6 @@ pub enum TranspileError {
 
 /// The result of a transpilation operation.
 pub type TranspileResult<T> = Result<T, TranspileError>;
-
-/// An error that occurs when a function declaration is missing.
-#[derive(Debug, Clone, PartialEq, Eq, Getters)]
-pub struct MissingFunctionDeclaration {
-    /// The span of the identifier that is missing.
-    #[get = "pub"]
-    span: Span,
-    /// Possible alternatives for the missing function declaration.
-    #[get = "pub"]
-    alternatives: Vec<FunctionData>,
-}
-
-impl MissingFunctionDeclaration {
-    #[cfg(feature = "shulkerbox")]
-    pub(super) fn from_scope(
-        identifier_span: Span,
-        scope: &std::sync::Arc<super::variables::Scope>,
-    ) -> Self {
-        use itertools::Itertools as _;
-
-        let own_name = identifier_span.str();
-        let alternatives = scope
-            .get_all_variables()
-            .iter()
-            .filter_map(|(name, value)| {
-                let super::variables::VariableData::Function {
-                    function_data: data,
-                    ..
-                } = value.as_ref()
-                else {
-                    return None;
-                };
-
-                let normalized_distance = strsim::normalized_damerau_levenshtein(own_name, name);
-                (normalized_distance > 0.8 || strsim::damerau_levenshtein(own_name, name) < 3)
-                    .then_some((normalized_distance, data))
-            })
-            .sorted_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
-            .map(|(_, data)| data)
-            .take(8)
-            .cloned()
-            .collect::<Vec<_>>();
-
-        Self {
-            alternatives,
-            span: identifier_span,
-        }
-    }
-}
-
-impl Display for MissingFunctionDeclaration {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use std::fmt::Write as _;
-
-        let message = format!(
-            "no matching function declaration found for invocation of function `{}`",
-            self.span.str()
-        );
-        write!(f, "{}", Message::new(Severity::Error, message))?;
-
-        let help_message = if self.alternatives.is_empty() {
-            None
-        } else {
-            let mut message = String::from("did you mean ");
-            for (i, alternative) in self.alternatives.iter().enumerate() {
-                if i > 0 {
-                    message.push_str(", ");
-                }
-                let _ = write!(message, "`{}`", alternative.identifier_span.str());
-            }
-            Some(message + "?")
-        };
-
-        write!(
-            f,
-            "\n{}",
-            SourceCodeDisplay::new(&self.span, help_message.as_ref())
-        )
-    }
-}
-
-impl std::error::Error for MissingFunctionDeclaration {}
-
-impl std::hash::Hash for MissingFunctionDeclaration {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.span.hash(state);
-        for alternative in &self.alternatives {
-            alternative.identifier_span.hash(state);
-            alternative.namespace.hash(state);
-            alternative.parameters.hash(state);
-            alternative.public.hash(state);
-            alternative.statements.hash(state);
-        }
-    }
-}
 
 /// An error that occurs when a function declaration is missing.
 #[allow(clippy::module_name_repetitions)]
@@ -341,8 +245,6 @@ impl UnknownIdentifier {
 
 impl Display for UnknownIdentifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use std::fmt::Write as _;
-
         write!(
             f,
             "{}",
@@ -355,14 +257,15 @@ impl Display for UnknownIdentifier {
         let help_message = if self.alternatives.is_empty() {
             None
         } else {
-            let mut message = String::from("did you mean ");
-            for (i, alternative) in self.alternatives.iter().enumerate() {
-                if i > 0 {
-                    message.push_str(", ");
-                }
-                let _ = write!(message, "`{alternative}`");
-            }
-            Some(message + "?")
+            let message = String::from("did you mean ");
+            let inner = self
+                .alternatives
+                .iter()
+                .map(|s| format!("`{s}`"))
+                .collect::<Vec<_>>();
+            let inner = inner.oxford_or();
+
+            Some(message + &inner + "?")
         };
 
         write!(

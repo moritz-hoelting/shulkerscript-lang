@@ -22,7 +22,7 @@ use crate::{
         statement::Statement,
     },
     transpile::{
-        error::{IllegalAnnotationContent, MissingFunctionDeclaration},
+        error::IllegalAnnotationContent,
         util::{MacroString, MacroStringPart},
         variables::FunctionVariableDataType,
     },
@@ -57,9 +57,10 @@ impl Transpiler {
         let function = scope.get_variable(identifier_span.str());
 
         let function_data = function.ok_or_else(|| {
-            let err = TranspileError::MissingFunctionDeclaration(
-                MissingFunctionDeclaration::from_scope(identifier_span.clone(), scope),
-            );
+            let err = TranspileError::UnknownIdentifier(UnknownIdentifier::from_scope(
+                identifier_span.clone(),
+                scope,
+            ));
             handler.receive(Box::new(err.clone()));
             err
         })?;
@@ -91,14 +92,8 @@ impl Transpiler {
 
                 let function_location = function_path
                     .get()
-                    .ok_or_else(|| {
-                        let err = TranspileError::MissingFunctionDeclaration(
-                            MissingFunctionDeclaration::from_scope(identifier_span.clone(), scope),
-                        );
-                        handler.receive(Box::new(err.clone()));
-                        err
-                    })
-                    .map(String::to_owned)?;
+                    .expect("set in prepare_transpile_function if not previously set")
+                    .to_string();
 
                 let args = self.transpile_function_arguments(
                     function_data,

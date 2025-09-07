@@ -11,17 +11,12 @@ use crate::{
     },
     lexical::token::StringLiteral,
     syntax::syntax_tree::expression::Expression,
-    transpile::error::{
-        AssignmentError, IllegalIndexing, MismatchedTypes, MissingFunctionDeclaration,
-        UnknownIdentifier,
-    },
+    transpile::error::{AssignmentError, IllegalIndexing, MismatchedTypes, UnknownIdentifier},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 #[allow(missing_docs)]
 pub enum Error {
-    #[error(transparent)]
-    MissingFunctionDeclaration(#[from] MissingFunctionDeclaration),
     #[error(transparent)]
     UnexpectedExpression(#[from] UnexpectedExpression),
     #[error(transparent)]
