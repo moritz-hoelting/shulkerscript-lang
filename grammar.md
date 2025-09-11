@@ -148,6 +148,7 @@ Statement:
     | Grouping
     | DocComment
     | ExecuteBlock
+    | WhileLoop
     | Semicolon
     ;
 ```
@@ -212,6 +213,14 @@ Grouping:
 ```ebnf
 Semicolon:
   SemicolonStatement ';'
+  ;
+```
+
+## WhileLoop
+
+```ebnf
+WhileLoop:
+  'while' '(' Expression ')' Block
   ;
 ```
 

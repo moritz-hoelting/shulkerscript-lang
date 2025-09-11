@@ -7,7 +7,7 @@ use std::{
 };
 
 use itertools::Itertools;
-use shulkerbox::datapack::{self, Command, Datapack, Execute, Group};
+use shulkerbox::datapack::{self, Command, Datapack, Execute, Group, While as WhileCmd};
 
 use crate::{
     base::{
@@ -22,13 +22,13 @@ use crate::{
         program::{Namespace, ProgramFile},
         statement::{
             execute_block::{Conditional, Else, ExecuteBlock, ExecuteBlockHead, ExecuteBlockTail},
-            ReturnStatement, SemicolonStatement, Statement,
+            Block, ReturnStatement, SemicolonStatement, Statement,
         },
         AnnotationAssignment,
     },
     transpile::{
         conversions::ShulkerboxMacroStringMap,
-        error::IllegalAnnotationContent,
+        error::{IllegalAnnotationContent, InfiniteLoop},
         expression::DataLocation,
         util::{MacroString, MacroStringPart},
         variables::FunctionVariableDataType,
@@ -365,6 +365,33 @@ impl Transpiler {
         Ok(())
     }
 
+    pub(super) fn transpile_block(
+        &mut self,
+        block: &Block,
+        program_identifier: &str,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> TranspileResult<Vec<Command>> {
+        let child_scope = Scope::with_parent(scope.clone());
+        let statements = block.statements();
+        let mut errors = Vec::new();
+        let commands = statements
+            .iter()
+            .flat_map(|statement| {
+                self.transpile_statement(statement, program_identifier, &child_scope, handler)
+                    .unwrap_or_else(|err| {
+                        errors.push(err);
+                        Vec::new()
+                    })
+            })
+            .collect::<Vec<_>>();
+        if !errors.is_empty() {
+            return Err(errors.remove(0));
+        }
+
+        Ok(commands)
+    }
+
     pub(super) fn transpile_statement(
         &mut self,
         statement: &Statement,
@@ -393,31 +420,44 @@ impl Transpiler {
                 Ok(vec![Command::Comment(content.to_string())])
             }
             Statement::Grouping(group) => {
-                let child_scope = Scope::with_parent(scope.clone());
-                let statements = group.block().statements();
-                let mut errors = Vec::new();
-                let commands = statements
-                    .iter()
-                    .flat_map(|statement| {
-                        self.transpile_statement(
-                            statement,
-                            program_identifier,
-                            &child_scope,
-                            handler,
-                        )
-                        .unwrap_or_else(|err| {
-                            errors.push(err);
-                            Vec::new()
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                if !errors.is_empty() {
-                    return Err(errors.remove(0));
-                }
+                let commands =
+                    self.transpile_block(group.block(), program_identifier, scope, handler)?;
                 if commands.is_empty() {
                     Ok(Vec::new())
                 } else {
                     Ok(vec![Command::Group(Group::new(commands))])
+                }
+            }
+            Statement::WhileLoop(while_loop) => {
+                let (mut condition_commands, prepare_variables, condition) =
+                    self.transpile_expression_as_condition(while_loop.condition(), scope, handler)?;
+
+                match condition {
+                    ExtendedCondition::Comptime(false) => Ok(Vec::new()),
+                    ExtendedCondition::Comptime(true) => {
+                        let err = TranspileError::InfiniteLoop(InfiniteLoop {
+                            span: while_loop.condition().span(),
+                        });
+                        handler.receive(Box::new(err.clone()));
+                        Err(err)
+                    }
+                    ExtendedCondition::Runtime(condition) => {
+                        let loop_commands = self.transpile_block(
+                            while_loop.block(),
+                            program_identifier,
+                            scope,
+                            handler,
+                        )?;
+
+                        condition_commands
+                            .push(Command::While(WhileCmd::new(condition, loop_commands)));
+
+                        self.transpile_commands_with_variable_macros(
+                            condition_commands,
+                            prepare_variables,
+                            handler,
+                        )
+                    }
                 }
             }
             Statement::Semicolon(semi) => match semi.statement() {

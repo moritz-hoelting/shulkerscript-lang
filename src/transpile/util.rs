@@ -1,7 +1,10 @@
 //! Utility methods for transpiling
 
 #[cfg(feature = "shulkerbox")]
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 #[cfg(feature = "shulkerbox")]
 use shulkerbox::prelude::Command;
@@ -347,6 +350,7 @@ impl TemplateStringLiteral {
     ) -> TranspileResult<MacroString> {
         if self.contains_expression() {
             let mut prepare_variables = BTreeMap::new();
+            let mut prepare_variables_reverse = HashMap::<DataLocation, String>::new();
 
             let parts = self
                 .parts()
@@ -400,10 +404,25 @@ impl TemplateStringLiteral {
                                             path: path.to_owned(),
                                             r#type: StorageType::Boolean,
                                         };
-                                        prepare_variables.insert(
-                                            macro_name.clone(),
-                                            (data_location, Vec::new(), expression.span()),
-                                        );
+
+                                        let macro_name = if let Some(prev_macro_name) =
+                                            prepare_variables_reverse.get(&data_location)
+                                        {
+                                            prev_macro_name.to_string()
+                                        } else {
+                                            prepare_variables.insert(
+                                                macro_name.clone(),
+                                                (
+                                                    data_location.clone(),
+                                                    Vec::new(),
+                                                    expression.span(),
+                                                ),
+                                            );
+                                            prepare_variables_reverse
+                                                .insert(data_location, macro_name.clone());
+
+                                            macro_name
+                                        };
 
                                         Ok(vec![MacroStringPart::MacroUsage(macro_name)])
                                     }
@@ -421,10 +440,24 @@ impl TemplateStringLiteral {
                                             objective: objective.to_owned(),
                                             target: target.to_owned(),
                                         };
-                                        prepare_variables.insert(
-                                            macro_name.clone(),
-                                            (data_location, Vec::new(), expression.span()),
-                                        );
+                                        let macro_name = if let Some(prev_macro_name) =
+                                            prepare_variables_reverse.get(&data_location)
+                                        {
+                                            prev_macro_name.to_string()
+                                        } else {
+                                            prepare_variables.insert(
+                                                macro_name.clone(),
+                                                (
+                                                    data_location.clone(),
+                                                    Vec::new(),
+                                                    expression.span(),
+                                                ),
+                                            );
+                                            prepare_variables_reverse
+                                                .insert(data_location, macro_name.clone());
+
+                                            macro_name
+                                        };
 
                                         Ok(vec![MacroStringPart::MacroUsage(macro_name)])
                                     }

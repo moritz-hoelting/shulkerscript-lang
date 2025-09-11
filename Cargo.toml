@@ -19,7 +19,7 @@ default = ["fs_access", "lua", "shulkerbox", "zip"]
 fs_access = ["shulkerbox?/fs_access"]
 lua = ["dep:mlua"]
 serde = ["dep:serde", "dep:serde_json", "shulkerbox?/serde"]
-shulkerbox = ["dep:shulkerbox", "dep:chksum-md5", "dep:serde_json"]
+shulkerbox = ["dep:shulkerbox", "dep:chksum-md5", "dep:serde_json", "dep:oxford_join"]
 zip = ["shulkerbox?/zip"]
 
 [dependencies]
@@ -36,7 +36,7 @@ pathdiff = "0.2.3"
 serde = { version = "1.0.217", features = ["derive"], optional = true }
 serde_json = { version = "1.0.138", optional = true }
 # shulkerbox = { version = "0.1.0", default-features = false, optional = true }
-shulkerbox = { git = "https://github.com/moritz-hoelting/shulkerbox", rev = "d4689c696a35328c041bcbbfd203abd5818c46d3", default-features = false, optional = true }
+shulkerbox = { git = "https://github.com/moritz-hoelting/shulkerbox", rev = "e1bc953b7a1692c65f1ed2c43fa3b0c607df8090", default-features = false, optional = true }
 strsim = "0.11.1"
 strum = { version = "0.27.0", features = ["derive"] }
 thiserror = "2.0.11"
@@ -57,3 +57,6 @@ required-features = ["shulkerbox"]
 [[test]]
 name = "transpiling"
 required-features = ["shulkerbox"]
+
+[package.metadata.cargo-feature-combinations]
+exclude_features = [ "default" ]

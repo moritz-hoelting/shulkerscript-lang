@@ -3,8 +3,13 @@
 #![allow(clippy::missing_errors_doc)]
 
 use crate::{
-    base::{self, source_file::SourceElement as _, Handler},
+    base::{
+        self,
+        source_file::{SourceElement as _, Span},
+        Handler,
+    },
     lexical::token::KeywordKind,
+    semantic::error::NeverLoops,
     syntax::syntax_tree::{
         declaration::{Declaration, Function, FunctionVariableType, ImportItems},
         expression::{
@@ -18,7 +23,7 @@ use crate::{
                 ExecuteBlockTail,
             },
             Assignment, AssignmentDestination, Block, Grouping, Semicolon, SemicolonStatement,
-            Statement, VariableDeclaration,
+            Statement, VariableDeclaration, WhileLoop,
         },
         AnyStringLiteral,
     },
@@ -254,6 +259,7 @@ impl Statement {
                 let child_scope = SemanticScope::with_parent(scope);
                 group.analyze_semantics(&child_scope, handler)
             }
+            Self::WhileLoop(while_loop) => while_loop.analyze_semantics(scope, handler),
             Self::Semicolon(sem) => sem.analyze_semantics(scope, handler),
         }
     }
@@ -363,6 +369,63 @@ impl Grouping {
         scope: &SemanticScope,
         handler: &impl Handler<base::Error>,
     ) -> Result<(), error::Error> {
+        self.block().analyze_semantics(scope, handler)
+    }
+}
+
+fn block_contains_unconditional_return(block: &Block) -> Option<Span> {
+    block
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::Semicolon(semicolon) => {
+                let s = semicolon.statement();
+                if s.is_return() {
+                    Some(s.span())
+                } else {
+                    None
+                }
+            }
+            Statement::Grouping(group) => block_contains_unconditional_return(group.block()),
+            Statement::ExecuteBlock(ex) => execute_block_contains_unconditional_return(ex),
+            _ => None,
+        })
+}
+
+fn execute_block_contains_unconditional_return(ex: &ExecuteBlock) -> Option<Span> {
+    match ex {
+        ExecuteBlock::HeadTail(head, tail) => {
+            if head.is_conditional() {
+                None
+            } else {
+                match tail {
+                    ExecuteBlockTail::Block(inner_block) => {
+                        block_contains_unconditional_return(inner_block)
+                    }
+                    ExecuteBlockTail::ExecuteBlock(_, inner_ex) => {
+                        execute_block_contains_unconditional_return(inner_ex)
+                    }
+                }
+            }
+        }
+        ExecuteBlock::IfElse(..) => None,
+    }
+}
+
+impl WhileLoop {
+    fn analyze_semantics(
+        &self,
+        scope: &SemanticScope,
+        handler: &impl Handler<base::Error>,
+    ) -> Result<(), error::Error> {
+        self.condition().analyze_semantics(scope, handler)?;
+
+        if let Some(reason) = block_contains_unconditional_return(self.block()) {
+            let err = error::Error::NeverLoops(NeverLoops { reason });
+            handler.receive(err.clone());
+            return Err(err);
+        }
+
         self.block().analyze_semantics(scope, handler)
     }
 }

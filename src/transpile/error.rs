@@ -3,6 +3,8 @@
 use std::fmt::Display;
 
 use getset::Getters;
+
+#[cfg(feature = "shulkerbox")]
 use oxford_join::OxfordJoin as _;
 
 use crate::{
@@ -47,6 +49,8 @@ pub enum TranspileError {
     InvalidArgument(#[from] InvalidArgument),
     #[error(transparent)]
     NotComptime(#[from] NotComptime),
+    #[error(transparent)]
+    InfiniteLoop(#[from] InfiniteLoop),
 }
 
 /// The result of a transpilation operation.
@@ -263,7 +267,11 @@ impl Display for UnknownIdentifier {
                 .iter()
                 .map(|s| format!("`{s}`"))
                 .collect::<Vec<_>>();
+
+            #[cfg(feature = "shulkerbox")]
             let inner = inner.oxford_or();
+            #[cfg(not(feature = "shulkerbox"))]
+            let inner = std::borrow::Cow::<str>::Owned(inner.join(", "));
 
             Some(message + &inner + "?")
         };
@@ -436,3 +444,29 @@ impl Display for NotComptime {
 }
 
 impl std::error::Error for NotComptime {}
+
+/// An error that occurs when a loop never terminates.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
+pub struct InfiniteLoop {
+    /// The condition making it not terminate.
+    pub span: Span,
+}
+
+impl Display for InfiniteLoop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            Message::new(Severity::Error, "Loop never terminates.")
+        )?;
+
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(
+                &self.span,
+                Some("You may want to use a separate function with the `#[tick]` annotation.")
+            )
+        )
+    }
+}

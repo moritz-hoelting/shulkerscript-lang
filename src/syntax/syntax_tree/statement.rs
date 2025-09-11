@@ -23,7 +23,7 @@ use crate::{
     },
     syntax::{
         error::{Error, InvalidAnnotation, ParseResult, SyntaxKind, UnexpectedSyntax},
-        parser::{Parser, Reading},
+        parser::{DelimitedTree, Parser, Reading},
     },
 };
 
@@ -43,6 +43,7 @@ use super::{expression::Expression, Annotation, AnyStringLiteral};
 ///     | Grouping
 ///     | DocComment
 ///     | ExecuteBlock
+///     | WhileLoop
 ///     | Semicolon
 ///     ;
 /// ```
@@ -55,6 +56,7 @@ pub enum Statement {
     ExecuteBlock(ExecuteBlock),
     Grouping(Grouping),
     DocComment(DocComment),
+    WhileLoop(WhileLoop),
     Semicolon(Semicolon),
 }
 
@@ -66,6 +68,7 @@ impl SourceElement for Statement {
             Self::ExecuteBlock(execute_block) => execute_block.span(),
             Self::Grouping(grouping) => grouping.span(),
             Self::DocComment(doc_comment) => doc_comment.span(),
+            Self::WhileLoop(while_loop) => while_loop.span(),
             Self::Semicolon(semi) => semi.span(),
         }
     }
@@ -183,7 +186,7 @@ pub struct Grouping {
     /// The `group` keyword.
     #[get = "pub"]
     group_keyword: Keyword,
-    /// The block of the conditional.
+    /// The block of the grouping.
     #[get = "pub"]
     block: Block,
 }
@@ -202,6 +205,58 @@ impl SourceElement for Grouping {
             .span()
             .join(&self.block.span())
             .expect("The span of the grouping is invalid.")
+    }
+}
+
+/// Represents a while loop in the syntax tree.
+///
+/// Syntax Synopsis:
+///
+/// ```ebnf
+/// WhileLoop:
+///   'while' '(' Expression ')' Block
+///   ;
+/// ```
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+pub struct WhileLoop {
+    /// The `while` keyword.
+    #[get = "pub"]
+    while_keyword: Keyword,
+    /// The opening parenthesis
+    #[get = "pub"]
+    open_paren: Punctuation,
+    /// The condition expression
+    #[get = "pub"]
+    condition: Expression,
+    /// The closing parenthesis
+    #[get = "pub"]
+    close_paren: Punctuation,
+    /// The block of the loop.
+    #[get = "pub"]
+    block: Block,
+}
+
+impl SourceElement for WhileLoop {
+    fn span(&self) -> Span {
+        self.while_keyword
+            .span
+            .join(&self.block.span())
+            .expect("spans in same file")
+    }
+}
+
+impl WhileLoop {
+    /// Dissolves the [`WhileLoop`] into its components.
+    #[must_use]
+    pub fn dissolve(self) -> (Keyword, Punctuation, Expression, Punctuation, Block) {
+        (
+            self.while_keyword,
+            self.open_paren,
+            self.condition,
+            self.close_paren,
+            self.block,
+        )
     }
 }
 
@@ -920,9 +975,52 @@ impl Parser<'_> {
                 }))
             }
 
+            // while loop
+            Reading::Atomic(Token::Keyword(while_keyword))
+                if while_keyword.keyword == KeywordKind::While =>
+            {
+                self.parse_while_loop(handler).map(Statement::WhileLoop)
+            }
+
             // semicolon statement
             _ => self.parse_semicolon(handler).map(Statement::Semicolon),
         }
+    }
+
+    /// Parses a [`WhileLoop`].
+    ///
+    /// # Errors
+    /// - if the parser is not at a while loop
+    #[tracing::instrument(level = "trace", skip_all)]
+    pub fn parse_while_loop(
+        &mut self,
+        handler: &impl Handler<base::Error>,
+    ) -> ParseResult<WhileLoop> {
+        let while_keyword = self.parse_keyword(KeywordKind::While, handler)?;
+
+        self.stop_at_significant();
+
+        let DelimitedTree {
+            open: open_paren,
+            tree,
+            close: close_paren,
+        } = self.step_into(
+            Delimiter::Parenthesis,
+            |p| p.parse_expression(handler),
+            handler,
+        )?;
+
+        let condition = tree?;
+
+        let block = self.parse_block(handler)?;
+
+        Ok(WhileLoop {
+            while_keyword,
+            open_paren,
+            condition,
+            close_paren,
+            block,
+        })
     }
 
     /// Parses a [`Semicolon`].

@@ -35,6 +35,8 @@ pub enum Error {
     UnknownIdentifier(#[from] UnknownIdentifier),
     #[error(transparent)]
     AssignmentError(#[from] AssignmentError),
+    #[error(transparent)]
+    NeverLoops(#[from] NeverLoops),
     #[error("Lua is disabled, but a Lua function was used.")]
     LuaDisabled,
     #[error("Other: {0}")]
@@ -228,3 +230,27 @@ impl Display for InvalidFunctionArguments {
 }
 
 impl std::error::Error for InvalidFunctionArguments {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
+pub struct NeverLoops {
+    pub reason: Span,
+}
+
+impl Display for NeverLoops {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            Message::new(Severity::Error, "Loop never actually loops.")
+        )?;
+
+        write!(
+            f,
+            "\n{}",
+            SourceCodeDisplay::new(
+                &self.reason,
+                Some("This statement causes the loop to always terminate.")
+            )
+        )
+    }
+}
