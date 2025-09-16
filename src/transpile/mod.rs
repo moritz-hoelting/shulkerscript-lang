@@ -49,6 +49,9 @@ pub use variables::{Scope, VariableData};
 
 pub mod util;
 
+#[cfg(feature = "shulkerbox")]
+mod checks;
+
 /// Data of a function.
 #[derive(Clone, PartialEq, Eq)]
 pub struct FunctionData {

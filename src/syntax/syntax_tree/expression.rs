@@ -473,7 +473,7 @@ impl SourceElement for TemplateStringLiteralPart {
 ///     'lua' '(' (Expression (',' Expression)*)? ')' '{' (.*?)* '}'
 /// ```
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Getters)]
+#[derive(Debug, Clone, Getters)]
 pub struct LuaCode {
     /// The `lua` keyword.
     #[get = "pub"]
@@ -496,6 +496,12 @@ pub struct LuaCode {
     /// The right brace of the lua code.
     #[get = "pub"]
     right_brace: Punctuation,
+    /// Result of the evaluation
+    #[cfg(all(feature = "lua", feature = "shulkerbox"))]
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub(crate) eval_result: std::sync::OnceLock<
+        Result<crate::transpile::expression::ComptimeValue, crate::transpile::error::NotComptime>,
+    >,
 }
 
 impl SourceElement for LuaCode {
@@ -517,6 +523,69 @@ impl LuaCode {
             self.code,
             self.right_brace,
         )
+    }
+}
+
+// PartialEq, Eq, PartialOrd, Ord, Hash
+
+impl PartialEq for LuaCode {
+    fn eq(&self, other: &Self) -> bool {
+        self.lua_keyword == other.lua_keyword
+            && self.left_parenthesis == other.left_parenthesis
+            && self.inputs == other.inputs
+            && self.right_parenthesis == other.right_parenthesis
+            && self.left_brace == other.left_brace
+            && self.code == other.code
+            && self.right_brace == other.right_brace
+    }
+}
+impl Eq for LuaCode {}
+
+impl Ord for LuaCode {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let cmp_lua = self.lua_keyword.cmp(&other.lua_keyword);
+        if cmp_lua != Ordering::Equal {
+            return cmp_lua;
+        }
+        let cmp_left_paren = self.left_parenthesis.cmp(&other.left_parenthesis);
+        if cmp_left_paren != Ordering::Equal {
+            return cmp_left_paren;
+        }
+        let cmp_inputs = self.inputs.cmp(&other.inputs);
+        if cmp_inputs != Ordering::Equal {
+            return cmp_inputs;
+        }
+        let cmp_right_paren = self.right_parenthesis.cmp(&other.right_parenthesis);
+        if cmp_right_paren != Ordering::Equal {
+            return cmp_right_paren;
+        }
+        let cmp_left_brace = self.left_brace.cmp(&other.left_brace);
+        if cmp_left_brace != Ordering::Equal {
+            return cmp_left_brace;
+        }
+        let cmp_code = self.code.cmp(&other.code);
+        if cmp_code != Ordering::Equal {
+            return cmp_code;
+        }
+        self.right_brace.cmp(&other.right_brace)
+    }
+}
+
+impl PartialOrd for LuaCode {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl std::hash::Hash for LuaCode {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.lua_keyword.hash(state);
+        self.left_parenthesis.hash(state);
+        self.inputs.hash(state);
+        self.right_parenthesis.hash(state);
+        self.left_brace.hash(state);
+        self.code.hash(state);
+        self.right_brace.hash(state);
     }
 }
 
@@ -802,6 +871,8 @@ impl Parser<'_> {
                     left_brace: tree.open,
                     code: tree.tree?,
                     right_brace: tree.close,
+                    #[cfg(all(feature = "lua", feature = "shulkerbox"))]
+                    eval_result: std::sync::OnceLock::new(),
                 })))
             }
 

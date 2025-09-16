@@ -42,8 +42,6 @@ mod scope;
 use error::{IncompatibleFunctionAnnotation, InvalidNamespaceName, UnexpectedExpression};
 pub use scope::{SemanticScope, VariableType};
 
-use super::syntax::syntax_tree::ConnectedList;
-
 impl ProgramFile {
     /// Analyzes the semantics of the program.
     pub fn analyze_semantics(
@@ -172,8 +170,7 @@ impl Function {
         if let Some(parameters) = self
             .parameters()
             .as_ref()
-            .map(ConnectedList::elements)
-            .map(Iterator::collect::<Vec<_>>)
+            .map(|l| l.elements().collect::<Vec<_>>())
         {
             if let Some(incompatible) = self.annotations().iter().find(|a| {
                 ["tick", "load", "uninstall"].contains(&a.assignment().identifier.span.str())

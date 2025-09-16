@@ -87,14 +87,22 @@ mod enabled {
             scope: &Arc<Scope>,
             handler: &impl Handler<base::Error>,
         ) -> TranspileResult<Result<ComptimeValue, NotComptime>> {
+            if let Some(res) = self.eval_result.get().cloned() {
+                return Ok(res);
+            }
+
             // required to keep the lua instance alive
             let (lua_result, _lua) = self.eval(scope, handler)?;
 
-            self.handle_lua_result(lua_result, handler).map(|res| {
+            let res = self.handle_lua_result(lua_result, handler).map(|res| {
                 res.ok_or_else(|| NotComptime {
                     expression: self.span(),
                 })
-            })
+            })?;
+
+            self.eval_result.set(res.clone()).ok();
+
+            Ok(res)
         }
 
         fn add_globals(&self, lua: &Lua, scope: &Arc<Scope>) -> TranspileResult<()> {
