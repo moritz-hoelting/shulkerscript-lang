@@ -1457,21 +1457,140 @@ impl Transpiler {
             },
             Primary::Identifier(ident) => {
                 let variable = scope.get_variable(ident.span.str());
-                if let Some(variable) = variable.as_deref() {
-                    let from = match variable {
-                        VariableData::BooleanStorage { storage_name, path } => {
-                            Ok(DataLocation::Storage {
+                variable.as_deref().map_or_else(
+                    || {
+                        let err = TranspileError::UnknownIdentifier(UnknownIdentifier::from_scope(
+                            ident.span.clone(),
+                            scope,
+                        ));
+                        handler.receive(Box::new(err.clone()));
+                        Err(err)
+                    },
+                    |variable| match variable {
+                        VariableData::BooleanStorage { storage_name, path } => self.move_data(
+                            &DataLocation::Storage {
                                 storage_name: storage_name.to_string(),
                                 path: path.to_string(),
                                 r#type: StorageType::Boolean,
-                            })
-                        }
-                        VariableData::ScoreboardValue { objective, target } => {
-                            Ok(DataLocation::ScoreboardValue {
+                            },
+                            target,
+                            primary,
+                            handler,
+                        ),
+                        VariableData::ScoreboardValue {
+                            objective,
+                            target: scoreboard_target,
+                        } => self.move_data(
+                            &DataLocation::ScoreboardValue {
                                 objective: objective.to_string(),
-                                target: target.to_string(),
-                            })
-                        }
+                                target: scoreboard_target.to_string(),
+                            },
+                            target,
+                            primary,
+                            handler,
+                        ),
+                        VariableData::ComptimeValue { value, .. } => match target {
+                            DataLocation::ScoreboardValue { objective, target } => {
+                                let value = value
+                                    .read()
+                                    .unwrap()
+                                    .as_ref()
+                                    .map(ComptimeValue::to_macro_string);
+                                match value {
+                                    Some(MacroString::String(s)) => Ok(vec![Command::Raw(
+                                        format!("scoreboard players set {target} {objective} {s}"),
+                                    )]),
+                                    Some(macro_string @ MacroString::MacroString { .. }) => {
+                                        use crate::transpile::util::join_macro_strings;
+
+                                        let (macro_string, prepare_variables) =
+                                            join_macro_strings([
+                                                format!(
+                                                    "scoreboard players set {target} {objective} "
+                                                )
+                                                .into(),
+                                                macro_string,
+                                            ])
+                                            .into_sb();
+
+                                        self.transpile_commands_with_variable_macros(
+                                            vec![Command::UsesMacro(macro_string)],
+                                            prepare_variables,
+                                            handler,
+                                        )
+                                    }
+                                    None => Ok(Vec::new()),
+                                }
+                            }
+                            DataLocation::Storage {
+                                storage_name,
+                                path,
+                                r#type,
+                            } => {
+                                let value = value
+                                    .read()
+                                    .unwrap()
+                                    .as_ref()
+                                    .map(ComptimeValue::to_macro_string);
+                                match value {
+                                    Some(MacroString::String(s)) => {
+                                        Ok(vec![Command::Raw(format!(
+                                            "data modify storage {storage_name} {path} set {s}{suffix}",
+                                            suffix = r#type.suffix()
+                                        ))])
+                                    }
+                                    Some(macro_string @ MacroString::MacroString { .. }) => {
+                                        use crate::transpile::util::join_macro_strings;
+
+                                        let (macro_string, prepare_variables) =
+                                            join_macro_strings([
+                                                format!(
+                                                    "data modify storage {storage_name} {path} set "
+                                                )
+                                                .into(),
+                                                macro_string,
+                                                r#type.suffix().into(),
+                                            ])
+                                            .into_sb();
+
+                                        self.transpile_commands_with_variable_macros(
+                                            vec![Command::UsesMacro(macro_string)],
+                                            prepare_variables,
+                                            handler,
+                                        )
+                                    }
+                                    None => Ok(Vec::new()),
+                                }
+                            }
+                            DataLocation::Tag { tag_name, entity } => {
+                                let value = value
+                                    .read()
+                                    .unwrap()
+                                    .as_ref()
+                                    .cloned();
+                                if let Some(value) = value {
+                                    let (prepare_variables, condition) =
+                                        self.transpile_comptime_value_as_condition(&value);
+
+                                    match condition {
+                                        ExtendedCondition::Comptime(b) => if b {
+                                            Ok(vec![Command::Raw(format!("tag {entity} add {tag_name}"))])
+                                        } else {
+                                            Ok(vec![Command::Raw(format!("tag {entity} remove {tag_name}"))])
+                                        }
+                                        ExtendedCondition::Runtime(_) => {
+                                            let cmds = self.store_condition_success(condition, target, ident, handler)?;
+
+                                            self.transpile_commands_with_variable_macros(cmds, prepare_variables, handler)
+                                        }
+                                    }
+                                } else {
+                                    let err = TranspileError::MissingValue(MissingValue { expression: ident.span() });
+                                    handler.receive(Box::new(err.clone()));
+                                    Err(err)
+                                }
+                            }
+                        },
                         _ => {
                             let err = TranspileError::MismatchedTypes(MismatchedTypes {
                                 expected_type: target.value_type().into(),
@@ -1480,17 +1599,8 @@ impl Transpiler {
                             handler.receive(Box::new(err.clone()));
                             Err(err)
                         }
-                    }?;
-
-                    self.move_data(&from, target, primary, handler)
-                } else {
-                    let err = TranspileError::UnknownIdentifier(UnknownIdentifier::from_scope(
-                        ident.span.clone(),
-                        scope,
-                    ));
-                    handler.receive(Box::new(err.clone()));
-                    Err(err)
-                }
+                    },
+                )
             }
             Primary::Indexed(indexed) => {
                 let ident = if let Primary::Identifier(ident) = indexed.object().as_ref() {
@@ -1768,6 +1878,23 @@ impl Transpiler {
                                 ]),
                             )),
                         )),
+                        VariableData::ComptimeValue { value, .. } => {
+                            let value = value.read().unwrap();
+
+                            match value.as_ref().cloned() {
+                                Some(value) => {
+                                    let (prepare_variables, cond) =
+                                        self.transpile_comptime_value_as_condition(&value);
+
+                                    Ok((Vec::new(), prepare_variables, cond))
+                                }
+                                None => Ok((
+                                    Vec::new(),
+                                    BTreeMap::new(),
+                                    ExtendedCondition::Comptime(false),
+                                )),
+                            }
+                        }
                         _ => {
                             let err = TranspileError::MismatchedTypes(MismatchedTypes {
                                 expected_type: ExpectedType::Boolean,
@@ -1984,6 +2111,25 @@ impl Transpiler {
                     Err(err)
                 }
             },
+        }
+    }
+
+    #[expect(clippy::unused_self, clippy::needless_pass_by_ref_mut)]
+    fn transpile_comptime_value_as_condition(
+        &mut self,
+        comptime_value: &ComptimeValue,
+    ) -> (ShulkerboxMacroStringMap, ExtendedCondition) {
+        match comptime_value {
+            ComptimeValue::Boolean(b) => (BTreeMap::new(), ExtendedCondition::Comptime(*b)),
+            ComptimeValue::Integer(i) => (BTreeMap::new(), ExtendedCondition::Comptime(*i != 0)),
+            ComptimeValue::String(_) | ComptimeValue::MacroString(_) => {
+                let (macro_string, prepare_variables) = comptime_value.to_macro_string().into_sb();
+
+                (
+                    prepare_variables,
+                    ExtendedCondition::Runtime(Condition::Atom(macro_string)),
+                )
+            }
         }
     }
 
