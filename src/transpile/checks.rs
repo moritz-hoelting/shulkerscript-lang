@@ -25,7 +25,7 @@ impl Block {
                             {
                                 let err = TranspileError::AssignmentError(AssignmentError {
                                     identifier: ident.span.clone(),
-                                    message: "cannot assign to a compile-time variable in a conditional execute block"
+                                    message: "cannot assign to a compile-time variable declared before a runtime conditional block"
                                         .to_string(),
                                 });
                                 handler.receive(Box::new(err.clone()));

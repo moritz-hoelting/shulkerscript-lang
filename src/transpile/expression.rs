@@ -2139,6 +2139,14 @@ impl Transpiler {
         scope: &Arc<super::Scope>,
         handler: &impl Handler<base::Error>,
     ) -> TranspileResult<(Vec<Command>, ShulkerboxMacroStringMap, ExtendedCondition)> {
+        if let Ok(ComptimeValue::Boolean(val)) = binary.comptime_eval(scope, handler) {
+            return Ok((
+                Vec::new(),
+                BTreeMap::new(),
+                ExtendedCondition::Comptime(val),
+            ));
+        }
+
         match binary.operator() {
             BinaryOperator::Equal(..)
             | BinaryOperator::NotEqual(..)

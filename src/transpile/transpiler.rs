@@ -22,13 +22,13 @@ use crate::{
         program::{Namespace, ProgramFile},
         statement::{
             execute_block::{Conditional, Else, ExecuteBlock, ExecuteBlockHead, ExecuteBlockTail},
-            Block, ReturnStatement, SemicolonStatement, Statement,
+            Block, ReturnStatement, SemicolonStatement, Statement, WhileLoop,
         },
         AnnotationAssignment,
     },
     transpile::{
         conversions::ShulkerboxMacroStringMap,
-        error::{IllegalAnnotationContent, InfiniteLoop},
+        error::IllegalAnnotationContent,
         expression::DataLocation,
         util::{MacroString, MacroStringPart},
         variables::FunctionVariableDataType,
@@ -41,6 +41,8 @@ use super::{
     variables::{Scope, TranspileAssignmentTarget, VariableData},
     FunctionData, TranspileAnnotationValue, TranspiledFunctionArguments,
 };
+
+const LOOP_LIMIT: usize = 4_096;
 
 /// A transpiler for `Shulkerscript`.
 #[derive(Debug)]
@@ -429,37 +431,9 @@ impl Transpiler {
                 }
             }
             Statement::WhileLoop(while_loop) => {
-                let (mut condition_commands, prepare_variables, condition) =
-                    self.transpile_expression_as_condition(while_loop.condition(), scope, handler)?;
-
-                match condition {
-                    ExtendedCondition::Comptime(false) => Ok(Vec::new()),
-                    ExtendedCondition::Comptime(true) => {
-                        let err = TranspileError::InfiniteLoop(InfiniteLoop {
-                            span: while_loop.condition().span(),
-                        });
-                        handler.receive(Box::new(err.clone()));
-                        Err(err)
-                    }
-                    ExtendedCondition::Runtime(condition) => {
-                        let loop_commands = self.transpile_block(
-                            while_loop.block(),
-                            program_identifier,
-                            scope,
-                            handler,
-                        )?;
-
-                        condition_commands
-                            .push(Command::While(WhileCmd::new(condition, loop_commands)));
-
-                        self.transpile_commands_with_variable_macros(
-                            condition_commands,
-                            prepare_variables,
-                            handler,
-                        )
-                    }
-                }
+                self.transpile_while_loop(while_loop, program_identifier, scope, handler)
             }
+
             Statement::Semicolon(semi) => match semi.statement() {
                 SemicolonStatement::Expression(expr) => match expr {
                     Expression::Primary(Primary::FunctionCall(func)) => {
@@ -1420,6 +1394,60 @@ impl Transpiler {
                 )
             }
         })
+    }
+
+    fn transpile_while_loop(
+        &mut self,
+        while_loop: &WhileLoop,
+        program_identifier: &str,
+        scope: &Arc<Scope>,
+        handler: &impl Handler<base::Error>,
+    ) -> TranspileResult<Vec<Command>> {
+        let mut cmds = Vec::new();
+
+        for _ in 0..LOOP_LIMIT {
+            let (mut condition_commands, prepare_variables, condition) =
+                self.transpile_expression_as_condition(while_loop.condition(), scope, handler)?;
+
+            match condition {
+                ExtendedCondition::Comptime(false) => {
+                    break;
+                }
+                ExtendedCondition::Comptime(true) => {
+                    let loop_commands = self.transpile_block(
+                        while_loop.block(),
+                        program_identifier,
+                        scope,
+                        handler,
+                    )?;
+                    cmds.extend(condition_commands.into_iter().chain(loop_commands));
+                }
+                ExtendedCondition::Runtime(condition) => {
+                    // TODO: allow comptime assignments when wrapped in comptime checks
+                    while_loop
+                        .block()
+                        .check_no_comptime_assignments(scope, handler)?;
+                    let loop_commands = self.transpile_block(
+                        while_loop.block(),
+                        program_identifier,
+                        scope,
+                        handler,
+                    )?;
+
+                    condition_commands
+                        .push(Command::While(WhileCmd::new(condition, loop_commands)));
+
+                    cmds.extend(self.transpile_commands_with_variable_macros(
+                        condition_commands,
+                        prepare_variables,
+                        handler,
+                    )?);
+                    break;
+                }
+            }
+        }
+
+        Ok(cmds)
     }
 
     pub(crate) fn transpile_commands_with_variable_macros(
