@@ -1087,6 +1087,16 @@ impl TemplateStringLiteral {
                         Expression::Primary(Primary::MemberAccess(member_access)) => {
                             member_access.parent().analyze_semantics(scope, handler)?;
                         }
+                        Expression::Primary(Primary::FunctionCall(func)) => {
+                            if let Some(args) = func.arguments() {
+                                for arg in args.elements() {
+                                    if let Err(err) = arg.analyze_semantics(scope, handler) {
+                                        handler.receive(err.clone());
+                                        errs.push(err);
+                                    }
+                                }
+                            }
+                        }
                         _ => {
                             let err = error::Error::UnexpectedExpression(UnexpectedExpression(
                                 expression.clone(),
